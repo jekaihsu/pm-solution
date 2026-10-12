@@ -15,6 +15,7 @@ export interface SourceDef {
 
 const MAIN_BASE = "Sdw1bG1djaHsVGsRPvmjyVWipgg";
 const SALES_BASE = "JoOqbggsVar0ATsVgbcjh6IIp1g";
+const WR_BASE = "HnAzbA4m1aoGQfsxaxPjXMCBpob"; // WR1.1 trial tables
 const LARK_WEB = "https://yong-xiang-survey.jp.larksuite.com";
 
 export const SOURCES: SourceDef[] = [
@@ -69,10 +70,43 @@ export const SOURCES: SourceDef[] = [
     url: `${LARK_WEB}/base/${SALES_BASE}?table=tbl4fmZN6cBB7u1d&view=vewiP0FJer`,
     note: "通訊錄，不是聯繫紀錄，不能算聯繫次數。",
   },
-  { key: "internal-work", name: "內業工作單", note: "目前只有單筆記錄連結，所在 Base / 資料表待定位。" },
-  { key: "report-qc", name: "報告品管 / 期程（N+123）", note: "Meego／Meegle 期程來源尚未接通。" },
-  { key: "hr", name: "招聘 / 出勤 / 出差", note: "來源待人事定位。" },
-  { key: "contact-log", name: "業主聯繫紀錄", note: "尚未找到可用的活動明細。" },
+  {
+    key: "internal-work",
+    name: "內業工作單",
+    baseToken: MAIN_BASE,
+    tableId: "tblTP5Naz52FBpFg",
+    viewId: "vewWGbfbdB",
+    url: `${LARK_WEB}/base/${MAIN_BASE}?table=tblTP5Naz52FBpFg&view=vewWGbfbdB`,
+    note: "R02 與 R09 共用；「最終營業額點數」欄名含「最終」不代表已核定。",
+  },
+  {
+    key: "internal-cost",
+    name: "內業成本單",
+    baseToken: MAIN_BASE,
+    tableId: "tbl8JdWLLwlPFuoF",
+    viewId: "vewsBdznYd",
+    url: `${LARK_WEB}/base/${MAIN_BASE}?table=tbl8JdWLLwlPFuoF&view=vewsBdznYd`,
+  },
+  {
+    key: "report-delivery",
+    name: "週報交付版本（WR1.1 試用）",
+    baseToken: WR_BASE,
+    tableId: "tbl7PHyUKEgRynag",
+    viewId: "vewKiCq852",
+    url: `${LARK_WEB}/base/${WR_BASE}?table=tbl7PHyUKEgRynag&view=vewKiCq852`,
+    note: "試用表；正式使用中的成果送出／業主回饋紀錄尚未找到。Meego／Meegle 期程來源未接通。",
+  },
+  {
+    key: "hr",
+    name: "招聘 / 出勤 / 出差",
+    url: `${LARK_WEB}/wiki/S9DnwFRi5iEplKkUJvpj2hv3pQc`,
+    note: "招聘候選人池含個人資料，可見範圍（D-09）核定前不接入；出勤／出差在 Lark 差勤與審批，不是多維表格。",
+  },
+  {
+    key: "contact-log",
+    name: "業主聯繫紀錄",
+    note: "尚未找到正式使用中的資料表。候選：CRM 雛型「跟進與拜訪紀錄」（測試資料）、舊版 v2「⑬業主聯繫紀錄表」（目前 0 筆），皆未接入。",
+  },
 ];
 
 export const sourceByKey = (key: string) => SOURCES.find((s) => s.key === key);
@@ -103,7 +137,7 @@ export const REPORTS: ReportDef[] = [
     slug: "r02",
     name: "內業檢查",
     purpose: "檢查內業實際數量、工項及產值差異，另向業主呈現進度。",
-    sources: ["internal-work"],
+    sources: ["internal-work", "internal-cost"],
     mustHave: ["每組營業額", "失誤率", "異常", "工作項目／編號／數量", "預排差異", "SOP", "業主進度（百分比／天數）"],
     pending: ["內業工項換算（D-02）", "失誤率分母（D-04）", "業主進度百分比分母與剩餘天數算法"],
   },
@@ -112,7 +146,7 @@ export const REPORTS: ReportDef[] = [
     slug: "r03",
     name: "報告檢查",
     purpose: "追蹤內業成果的品管、期程、送出與業主回饋，找出已完成未送出、已送出未登記等斷點。",
-    sources: ["report-qc"],
+    sources: ["report-delivery"],
     mustHave: ["期程 N+123", "內業品管檢核後數據", "完成／品管通過／送出／業主核定分開"],
     pending: ["N 起點、+1／+2／+3 節點、日曆日或工作日、重送規則（D-05）"],
   },
@@ -166,7 +200,7 @@ export const REPORTS: ReportDef[] = [
     slug: "r09",
     name: "內業報告",
     purpose: "內業部門看預排與實際執行對照，以及所有進行中工作的剩餘營業額。",
-    sources: ["schedule", "internal-work"],
+    sources: ["schedule", "internal-work", "internal-cost"],
     mustHave: ["預排達成率（以工程編號為主）", "進行中工作營業額剩餘"],
     pending: ["達成率粒度、基準版本、改排及例外（D-03）", "剩餘點數與內外業分攤（D-06）"],
   },

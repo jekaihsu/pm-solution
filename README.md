@@ -29,13 +29,17 @@
 | 儀器費率 | `Sdw1bG…` / `tblfgeEtMuBTg72O` | R07 |
 | 報價總表 | `JoOqbg…` / `tblENZvYAya93Twa` | R05 |
 | 業主連絡資訊表 | `JoOqbg…` / `tbl4fmZN6cBB7u1d` | R08（通訊錄，非聯繫紀錄） |
-| 內業工作單、報告品管、人事、聯繫紀錄 | 尚未定位 | R02、R03、R04、R08、R09 |
+| 內業工作單 | `Sdw1bG…` / `tblTP5Naz52FBpFg` | R02、R09 |
+| 內業成本單 | `Sdw1bG…` / `tbl8JdWLLwlPFuoF` | R02、R09 |
+| 週報交付版本（WR1.1 試用） | `HnAzbA…` / `tbl7PHyUKEgRynag` | R03 |
+| 招聘／出勤／出差 | 暫不接入（個資範圍待定；差勤非 Base） | R04 |
+| 業主聯繫紀錄 | 尚未找到正式資料表 | R08 |
 
 ## Lark 應用設定
 
 1. [Lark 開發者後台](https://open.larksuite.com/app) → 建立企業自建應用
 2. 權限管理開通 `bitable:app:readonly`，發布版本並經管理員審核
-3. 在**兩個 Base** 各自「…」→「新增文件應用」，加入此應用
+3. 在**三個 Base**（`Sdw1bG…`、`JoOqbg…`、`HnAzbA…`）各自「…」→「新增文件應用」，加入此應用
 4. **登入設定**：「安全設定」→「重新導向 URL」加入 `https://<你的網域>/api/auth/callback`
 5. 「可用範圍」設定哪些同事可以登入（企業自建應用只有組織內成員能授權）
 6. 檢查是否讀得到：
