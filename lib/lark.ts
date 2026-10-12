@@ -112,7 +112,9 @@ function fieldKind(type: number, uiType?: string): FieldKind {
       return "person";
     case 20: // formula
     case 19: // lookup
-      return uiType === "Number" || uiType === "Currency" || uiType === "Progress" ? "number" : "text";
+      if (uiType === "Number" || uiType === "Currency" || uiType === "Progress") return "number";
+      if (uiType === "DateTime" || uiType === "CreatedTime" || uiType === "ModifiedTime") return "date";
+      return "text";
     default:
       return "text";
   }
@@ -197,12 +199,13 @@ export async function getSourceData(src: SourceDef, force = false): Promise<Tabl
       const fields = await listFields(baseToken, tableId);
       const records: TableData["records"] = [];
       let total: number | undefined;
+      let excluded = 0;
       let pageToken: string | undefined;
       do {
         const qs = new URLSearchParams({ page_size: "500" });
         if (pageToken) qs.set("page_token", pageToken);
         const data = await larkFetch<{
-          items?: { record_id: string; fields: Record<string, unknown> }[];
+          items?: { record_id: string; fields: Record<string, unknown>; created_time?: number }[];
           has_more: boolean;
           page_token?: string;
           total?: number;
@@ -212,6 +215,10 @@ export async function getSourceData(src: SourceDef, force = false): Promise<Tabl
         });
         total = data.total ?? total;
         for (const item of data.items ?? []) {
+          if (src.createdAfter !== undefined && !(typeof item.created_time === "number" && item.created_time >= src.createdAfter)) {
+            excluded++;
+            continue;
+          }
           const row: Record<string, CellValue> = {};
           for (const f of fields) row[f.name] = normalizeValue(item.fields[f.name], f.kind);
           records.push({ id: item.record_id, fields: row });
@@ -226,7 +233,9 @@ export async function getSourceData(src: SourceDef, force = false): Promise<Tabl
         fetchedAt: Date.now(),
         source: "lark",
         complete: !pageToken,
-        total: total ?? records.length,
+        total: records.length,
+        sourceTotal: total ?? records.length + excluded,
+        excluded,
       };
     },
     force,

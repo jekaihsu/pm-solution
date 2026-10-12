@@ -21,7 +21,9 @@ export interface TableData {
   fetchedAt: number;
   source: "lark" | "demo";
   complete: boolean; // false when paging stopped early
-  total: number;
+  total: number; // records served (after any inclusion rule)
+  sourceTotal?: number; // records in the Lark table/view before the inclusion rule
+  excluded?: number; // records dropped by the inclusion rule
   stale?: boolean; // served from the last good snapshot after a failed refresh
   error?: string;
 }

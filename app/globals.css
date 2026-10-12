@@ -260,3 +260,12 @@ th button:focus-visible, .btn:focus-visible, a:focus-visible, summary:focus-visi
 .user { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); padding-left: 10px; border-left: 1px solid var(--border); }
 .user a { color: var(--accent); text-decoration: none; }
 @media (max-width: 600px) { .user { border-left: none; padding-left: 0; } }
+
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { background: var(--surface); border: none; padding: 4px 10px; font-size: 13px; cursor: pointer; color: var(--text-2); }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button.on { background: var(--accent); color: var(--accent-ink); }
+.ver { font-size: 11px; font-weight: 700; margin-left: 8px; padding: 1px 6px; border-radius: 5px; vertical-align: 2px; border: 1px solid currentColor; }
+.ver-v3 { color: var(--text-2); }
+.ver-v4 { color: var(--accent); }
+.info-box { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }

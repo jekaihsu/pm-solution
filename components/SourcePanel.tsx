@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { aggregate, applyFilters, defaultWidgets, formatNumber, groupKeys, type Filters, type Widget } from "@/lib/aggregate";
 import { downloadCsv, toCsv } from "@/lib/csv";
-import type { SourceDef } from "@/lib/reports";
+import { sourceLabel, type SourceDef } from "@/lib/reports";
 import type { CellValue, FieldMeta, TableData } from "@/lib/types";
 import { formatDate, weekName } from "@/lib/week";
 import { useShell } from "./AppShell";
@@ -37,7 +37,10 @@ export default function SourcePanel({ reportId, source }: { reportId: string; so
     <section className="panel">
       <header className="panel-head">
         <div>
-          <h2>{source.name}</h2>
+          <h2>
+            {source.name}
+            {source.version && <span className={`ver ver-${source.version}`}>{source.version.toUpperCase()}</span>}
+          </h2>
           {source.note && <p className="note">{source.note}</p>}
         </div>
         <div className="panel-meta">
@@ -135,20 +138,26 @@ function SourceBody({
 
   const exportCsv = () => {
     const meta = [
-      `報告 ${reportId}｜來源 ${source.name}`,
+      `報告 ${reportId}｜來源 ${sourceLabel(source)}`,
+      ...(source.createdAfterLabel ? [`納入規則：只含原生建立時間在 ${source.createdAfterLabel} 之後的記錄（排除 ${data.excluded ?? 0} 筆）`] : []),
       `資料模式：${data.source === "demo" ? "示範（虛構）" : data.stale ? "過期快照" : "Lark 即時讀取"}`,
       `擷取時間：${new Date(data.fetchedAt).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}（Asia/Taipei）`,
       byWeek ? `統計週：${weekText}，依「${dateField}」` : "統計週：不依週篩選",
       `篩選：${activeFilters.length ? activeFilters.map(([k, v]) => `${k}=${v.join("/")}`).join("；") : "無"}`,
       `筆數：${records.length}${data.complete ? "" : "（來源分頁未讀完，資料不完整）"}`,
     ];
-    downloadCsv(`${reportId}_${source.name}_${byWeek ? weekText.replace(/[\s/–]/g, "_") : "全部"}.csv`, toCsv(data.fields, records, meta));
+    downloadCsv(`${reportId}_${sourceLabel(source)}_${byWeek ? weekText.replace(/[\s/–]/g, "_") : "全部"}.csv`, toCsv(data.fields, records, meta));
   };
 
   return (
     <>
       {data.stale && <div className="warn-box">最近一次讀取失敗，顯示的是 {new Date(data.fetchedAt).toLocaleString("zh-TW")} 的快照。錯誤：{data.error}</div>}
       {!data.complete && <div className="warn-box">來源分頁未讀完（上限 20,000 筆），以下為部分資料。</div>}
+      {source.createdAfterLabel && (
+        <div className="info-box">
+          V4 納入規則：只含原生建立時間在 {source.createdAfterLabel} 之後的記錄；之前的舊測試資料不納入（本表排除 {formatNumber(data.excluded ?? 0)} 筆）。
+        </div>
+      )}
 
       <div className="panel-controls">
         <label className="inline">
@@ -174,7 +183,11 @@ function SourceBody({
 
       <div className="kpis">
         <Kpi label={byWeek ? `${weekText} 筆數` : "筆數"} value={records.length} sub={activeFilters.length ? `篩選前 ${formatNumber(inWeek.length)}` : undefined} />
-        <Kpi label="來源總筆數" value={data.total} sub={`擷取 ${new Date(data.fetchedAt).toLocaleTimeString("zh-TW")}`} />
+        <Kpi
+          label={source.createdAfterLabel ? "納入筆數" : "來源總筆數"}
+          value={data.total}
+          sub={source.createdAfterLabel ? `排除 ${formatNumber(data.excluded ?? 0)} 筆（建立於基準前或時間不明）` : `擷取 ${new Date(data.fetchedAt).toLocaleTimeString("zh-TW")}`}
+        />
         {byWeek && <Kpi label={`「${dateField}」空白`} value={undated} sub="不計入任何週" />}
       </div>
 
@@ -210,7 +223,7 @@ function SourceBody({
 
       {records.length === 0 ? (
         <div className="state-box">
-          {data.records.length === 0 ? "來源目前沒有記錄（不代表數值為零）" : byWeek ? `${weekText} 依「${dateField}」沒有符合的記錄` : "此篩選條件沒有記錄"}
+          {data.records.length === 0 ? (data.excluded ? "套用 V4 納入規則後沒有記錄（不代表數值為零）" : "來源目前沒有記錄（不代表數值為零）") : byWeek ? `${weekText} 依「${dateField}」沒有符合的記錄` : "此篩選條件沒有記錄"}
         </div>
       ) : tab === "table" ? (
         <DataTable fields={data.fields} records={records} />

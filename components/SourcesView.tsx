@@ -1,5 +1,5 @@
 "use client";
-import { SOURCES, REPORTS, isLocated, type SourceDef } from "@/lib/reports";
+import { SOURCES, REPORTS, isLocated, sourceLabel, type SourceDef } from "@/lib/reports";
 import { useSource, STATUS_TEXT } from "./useSource";
 
 const KIND_TEXT: Record<string, string> = {
@@ -19,7 +19,7 @@ function SourceRow({ src }: { src: SourceDef }) {
     <section className="panel">
       <header className="panel-head">
         <div>
-          <h2>{src.name}</h2>
+          <h2>{sourceLabel(src)}</h2>
           <p className="note">
             用於 {usedBy.join("、")}
             {src.note ? `｜${src.note}` : ""}
@@ -35,7 +35,19 @@ function SourceRow({ src }: { src: SourceDef }) {
       </header>
       <dl className="facts">
         <dt>Base / 資料表 / 視圖</dt>
-        <dd>{isLocated(src) ? `${src.baseToken} / ${src.tableId}${src.viewId ? ` / ${src.viewId}` : ""}` : "尚未定位"}</dd>
+        <dd>{isLocated(src) ? `${src.baseToken} / ${src.tableId}${src.viewId ? ` / ${src.viewId}` : "（全表）"}` : "尚未定位"}</dd>
+        {src.createdAfterLabel && (
+          <>
+            <dt>納入規則</dt>
+            <dd>原生建立時間在 {src.createdAfterLabel} 之後{s.data ? `｜排除 ${s.data.excluded ?? 0} 筆，來源共 ${s.data.sourceTotal ?? "?"} 筆` : ""}</dd>
+          </>
+        )}
+        {src.dateField && (
+          <>
+            <dt>預設週篩選欄位</dt>
+            <dd>{src.dateField}</dd>
+          </>
+        )}
         <dt>狀態</dt>
         <dd>
           {s.status === "ok" && s.data

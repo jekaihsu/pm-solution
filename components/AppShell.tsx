@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useContext, useEffect, useState } from "react";
-import { REPORTS } from "@/lib/reports";
+import { REPORTS, type DataVersion, type SourceDef } from "@/lib/reports";
 import { weekName, weekRange, type WeekRange } from "@/lib/week";
 
 interface Ctx {
@@ -12,7 +12,11 @@ interface Ctx {
   setDemo: (b: boolean) => void;
   tick: number; // bumps on manual refresh
   refresh: () => void;
+  version: VersionFilter;
 }
+
+export type VersionFilter = "all" | DataVersion;
+export const showSource = (s: SourceDef, v: VersionFilter) => v === "all" || !s.version || s.version === v;
 
 const ShellContext = createContext<Ctx | null>(null);
 export const useShell = () => useContext(ShellContext)!;
@@ -22,6 +26,7 @@ const AUTO_REFRESH_MS = 5 * 60 * 1000;
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [offset, setWeekOffset] = useState(-1); // reports default to last week
   const [demo, setDemo] = useState(false);
+  const [version, setVersion] = useState<VersionFilter>("all");
   const [tick, setTick] = useState(0);
   const [navOpen, setNavOpen] = useState(false);
   const pathname = usePathname();
@@ -41,7 +46,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   const week = weekRange(offset);
-  const ctx: Ctx = { week, setWeekOffset, demo, setDemo, tick, refresh: () => setTick((n) => n + 1) };
+  const ctx: Ctx = { week, setWeekOffset, demo, setDemo, tick, refresh: () => setTick((n) => n + 1), version };
 
   return (
     <ShellContext.Provider value={ctx}>
@@ -81,6 +86,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <button className="btn small" onClick={() => setWeekOffset(offset + 1)} disabled={offset >= 0} aria-label="下一週">
                 ›
               </button>
+            </div>
+            <div className="seg" role="group" aria-label="資料版本">
+              {(["all", "v3", "v4"] as const).map((v) => (
+                <button key={v} className={version === v ? "on" : ""} onClick={() => setVersion(v)} aria-pressed={version === v}>
+                  {v === "all" ? "V3＋V4" : v.toUpperCase()}
+                </button>
+              ))}
             </div>
             <div className="topbar-right">
               <label className="toggle">

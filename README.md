@@ -21,17 +21,26 @@
 
 設定在 `lib/reports.ts`：
 
-| 來源 | Base / 資料表 | 用於 |
+V3 與 V4 是不同系統的原始資料，分開顯示、不相加也不去重；頂端「資料版本」可切換 V3＋V4／V3／V4。工作單、成本單、預排讀全表（不套 Lark 檢視）。
+
+**V4 納入規則**：只納入原生建立時間在 2026-10-07 20:10:44.122（台北）之後的記錄，之前的舊測試資料與建立時間不明者排除，排除筆數會顯示在頁面與 CSV。主檔（儀器費率、車輛）不套用。
+
+| 來源 | V3（`Sdw1bG…`） | V4（`H7W6b0…`） | 用於 |
+|---|---|---|---|
+| 外業工作單 | `tbl97f1uXqi7Qz0k` | `tbl5zPLS0ExWNEty` | R01、R10 |
+| 外業成本單 | — | `tbl8wRYCUCvbSoJG` | R01 |
+| 內業工作單 | `tblTP5Naz52FBpFg` | `tblrCo8KeZiuJUNh` | R02、R03（V4 品管欄位）、R09 |
+| 內業成本單 | `tbl8JdWLLwlPFuoF` | `tblKwSDRg6WaGHYr` | R02、R09 |
+| 工作預排 | `tblN8c3WN44233aG` | `tblZz6Mkhv9gHrB2` | R09、R10 |
+| 儀器費率 | `tblfgeEtMuBTg72O` | `tblg3Fo23T6Gos6S` | R07 |
+| 車輛 | — | `tblTQv8l5ntnbwyp` | R07 |
+| 案件應收未收（檢視 `vewUGIqzfl`） | `tblWsSaOcy4nKuGI` | — | R06 |
+
+| 其他來源 | 位置 | 用於 |
 |---|---|---|
-| 外業工作單 | `Sdw1bG…` / `tbl97f1uXqi7Qz0k` | R01、R10 |
-| 工作預排 | `Sdw1bG…` / `tblN8c3WN44233aG` | R09、R10 |
-| 案件應收未收 | `Sdw1bG…` / `tblWsSaOcy4nKuGI` | R06 |
-| 儀器費率 | `Sdw1bG…` / `tblfgeEtMuBTg72O` | R07 |
 | 報價總表 | `JoOqbg…` / `tblENZvYAya93Twa` | R05 |
 | 業主連絡資訊表 | `JoOqbg…` / `tbl4fmZN6cBB7u1d` | R08（通訊錄，非聯繫紀錄） |
-| 內業工作單 | `Sdw1bG…` / `tblTP5Naz52FBpFg` | R02、R09 |
-| 內業成本單 | `Sdw1bG…` / `tbl8JdWLLwlPFuoF` | R02、R09 |
-| 報告品管／送出／回覆 | 待從 v3／v4 原始資料定位 | R03 |
+| 成果送出／業主回覆 | V3、V4 皆未找到 | R03 |
 | 招聘／出勤／出差 | 暫不接入（個資範圍待定；差勤非 Base） | R04 |
 | 業主聯繫紀錄 | 尚未找到正式資料表 | R08 |
 
@@ -39,7 +48,7 @@
 
 1. [Lark 開發者後台](https://open.larksuite.com/app) → 建立企業自建應用
 2. 權限管理開通 `bitable:app:readonly`，發布版本並經管理員審核
-3. 在**兩個 Base**（`Sdw1bG…`、`JoOqbg…`）各自「…」→「新增文件應用」，加入此應用
+3. 在**三個 Base**（V3 `Sdw1bG…`、V4 `H7W6b0…`、報價 `JoOqbg…`）各自「…」→「新增文件應用」，加入此應用
 4. **登入設定**：「安全設定」→「重新導向 URL」加入 `https://<你的網域>/api/auth/callback`
 5. 「可用範圍」設定哪些同事可以登入（企業自建應用只有組織內成員能授權）
 6. 檢查是否讀得到：

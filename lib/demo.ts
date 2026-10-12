@@ -83,12 +83,14 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
   },
 };
 
+const specKey = (key: string) => key.replace(/^v[34]-/, "");
+
 export function hasDemo(key: string) {
-  return key in SPECS;
+  return specKey(key) in SPECS;
 }
 
 export function demoSourceData(src: SourceDef): TableData {
-  const def = SPECS[src.key];
+  const def = SPECS[specKey(src.key)];
   let seed = [...src.key].reduce((a, c) => a + c.charCodeAt(0), 0);
   const r = () => {
     seed = (seed * 1664525 + 1013904223) % 4294967296;

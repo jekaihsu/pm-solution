@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
-import { REPORTS, SOURCES, type SourceDef } from "@/lib/reports";
+import { REPORTS, SOURCES, sourceLabel, sourceByKey, type SourceDef } from "@/lib/reports";
 import { weekName } from "@/lib/week";
-import { useShell } from "./AppShell";
+import { showSource, useShell } from "./AppShell";
 import { useSource, type SourceState } from "./useSource";
 
 function weekCount(src: SourceDef, s: SourceState, start: number, end: number): { n: number; field: string } | null {
@@ -18,7 +18,7 @@ function weekCount(src: SourceDef, s: SourceState, start: number, end: number): 
 }
 
 export default function Overview() {
-  const { week } = useShell();
+  const { week, version } = useShell();
   // SOURCES is a fixed list, so calling the hook per entry keeps hook order stable.
   const states = Object.fromEntries(SOURCES.map((s) => [s.key, { src: s, state: useSource(s.key) }]));
 
@@ -28,7 +28,7 @@ export default function Overview() {
         <div>
           <h1>週報總覽</h1>
           <p className="purpose">
-            {weekName(week.offset)} {week.label}（Asia/Taipei，週一至週日）。各報告視角不同，筆數不可跨報告相加：R01 與 R10 共用外業工作單。
+            {weekName(week.offset)} {week.label}（Asia/Taipei，週一至週日）。各報告視角不同，筆數不可跨報告相加：R01 與 R10 共用外業工作單。V3 與 V4 分開計，不相加。
           </p>
         </div>
       </header>
@@ -40,13 +40,13 @@ export default function Overview() {
               <h2>{r.name}</h2>
             </div>
             <ul className="ov-sources">
-              {r.sources.map((key) => {
+              {r.sources.filter((key) => showSource(sourceByKey(key)!, version)).map((key) => {
                 const { src, state } = states[key];
                 const wc = weekCount(src, state, week.start, week.end);
                 return (
                   <li key={key}>
                     <span className={`dot ${state.status === "ok" ? (state.data?.stale ? "warn" : "good") : state.status === "error" ? "bad" : ""}`} aria-hidden />
-                    <span className="ov-src-name">{src.name}</span>
+                    <span className="ov-src-name">{sourceLabel(src)}</span>
                     <span className="ov-src-val">
                       {state.status === "ok" && state.data
                         ? wc

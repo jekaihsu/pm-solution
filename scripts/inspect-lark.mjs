@@ -2,7 +2,7 @@
 // then the fields (name + type) and record count of each table.
 // Usage: LARK_APP_ID=... LARK_APP_SECRET=... node scripts/inspect-lark.mjs [baseToken ...]
 const API = (process.env.LARK_API_BASE || "https://open.larksuite.com").replace(/\/$/, "");
-const BASES = process.argv.slice(2).length ? process.argv.slice(2) : ["Sdw1bG1djaHsVGsRPvmjyVWipgg", "JoOqbggsVar0ATsVgbcjh6IIp1g"];
+const BASES = process.argv.slice(2).length ? process.argv.slice(2) : ["Sdw1bG1djaHsVGsRPvmjyVWipgg", "H7W6b0PFWaVF1BsgqXJj3pQ9pXb", "JoOqbggsVar0ATsVgbcjh6IIp1g"];
 
 const TYPES = { 1: "文字", 2: "數字", 3: "單選", 4: "多選", 5: "日期", 7: "核取", 11: "人員", 13: "電話", 15: "超連結", 17: "附件", 18: "單向關聯", 19: "查找引用", 20: "公式", 21: "雙向關聯", 22: "地理位置", 23: "群組", 1001: "建立時間", 1002: "修改時間", 1003: "建立人", 1004: "修改人", 1005: "自動編號" };
 
