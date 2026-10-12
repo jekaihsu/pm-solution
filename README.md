@@ -46,7 +46,7 @@
 
 ## 部署到 Zeabur
 
-1. Zeabur → 建立 Project → Add Service → Git → 選 `jekaihsu/pm-solution` 與分支（自動偵測 Next.js）
+1. Zeabur → 建立 Project → Add Service → Git → 選 `jekaihsu/pm-solution` 與分支（使用 repo 內的 `Dockerfile` 建置，服務埠 8080）
 2. Variables 加入下表的環境變數 → 重新部署
 3. Networking 產生網域
 
