@@ -1,18 +1,13 @@
 // Server-only helpers for the Lark / Feishu Base (Bitable) Open API.
 import "server-only";
 import type { FieldMeta, FieldKind, TableData, TableMeta, CellValue } from "./types";
+import type { SourceDef } from "./reports";
 
 const API_BASE = (process.env.LARK_API_BASE || "https://open.larksuite.com").replace(/\/$/, "");
 const CACHE_TTL_MS = Number(process.env.CACHE_TTL_SECONDS ?? 30) * 1000;
 
 export function isLarkConfigured(): boolean {
-  return Boolean(process.env.LARK_APP_ID && process.env.LARK_APP_SECRET && process.env.LARK_BASE_APP_TOKEN);
-}
-
-function appToken(): string {
-  const token = process.env.LARK_BASE_APP_TOKEN;
-  if (!token) throw new Error("LARK_BASE_APP_TOKEN is not set");
-  return token;
+  return Boolean(process.env.LARK_APP_ID && process.env.LARK_APP_SECRET);
 }
 
 // ---------- auth ----------
@@ -64,11 +59,19 @@ async function cached<T>(key: string, fn: () => Promise<T>, force = false): Prom
   return value;
 }
 
+// Last successful value for a key, kept after expiry so a failed refresh can
+// fall back to it (marked stale) instead of showing nothing.
+export function lastGood<T>(key: string): T | undefined {
+  return cache.get(key)?.value as T | undefined;
+}
+
+export const sourceCacheKey = (src: SourceDef) => `source:${src.baseToken}:${src.tableId}:${src.viewId ?? ""}`;
+
 // ---------- tables & fields ----------
 
-export async function listTables(force = false): Promise<TableMeta[]> {
+export async function listTables(baseToken: string, force = false): Promise<TableMeta[]> {
   return cached(
-    "tables",
+    `tables:${baseToken}`,
     async () => {
       const tables: TableMeta[] = [];
       let pageToken: string | undefined;
@@ -76,7 +79,7 @@ export async function listTables(force = false): Promise<TableMeta[]> {
         const qs = new URLSearchParams({ page_size: "100" });
         if (pageToken) qs.set("page_token", pageToken);
         const data = await larkFetch<{ items?: { table_id: string; name: string }[]; has_more: boolean; page_token?: string }>(
-          `/bitable/v1/apps/${appToken()}/tables?${qs}`,
+          `/bitable/v1/apps/${baseToken}/tables?${qs}`,
         );
         for (const t of data.items ?? []) tables.push({ id: t.table_id, name: t.name });
         pageToken = data.has_more ? data.page_token : undefined;
@@ -115,7 +118,7 @@ function fieldKind(type: number, uiType?: string): FieldKind {
   }
 }
 
-async function listFields(tableId: string): Promise<FieldMeta[]> {
+export async function listFields(baseToken: string, tableId: string): Promise<FieldMeta[]> {
   const fields: FieldMeta[] = [];
   let pageToken: string | undefined;
   do {
@@ -125,7 +128,7 @@ async function listFields(tableId: string): Promise<FieldMeta[]> {
       items?: { field_id: string; field_name: string; type: number; ui_type?: string; is_primary?: boolean }[];
       has_more: boolean;
       page_token?: string;
-    }>(`/bitable/v1/apps/${appToken()}/tables/${tableId}/fields?${qs}`);
+    }>(`/bitable/v1/apps/${baseToken}/tables/${tableId}/fields?${qs}`);
     for (const f of data.items ?? []) {
       fields.push({ id: f.field_id, name: f.field_name, kind: fieldKind(f.type, f.ui_type), primary: Boolean(f.is_primary) });
     }
@@ -185,12 +188,15 @@ function normalizeValue(raw: unknown, kind: FieldKind): CellValue {
 
 const MAX_RECORDS = 20000;
 
-export async function getTableData(tableId: string, force = false): Promise<TableData> {
+export async function getSourceData(src: SourceDef, force = false): Promise<TableData> {
+  const { baseToken, tableId, viewId } = src;
+  if (!baseToken || !tableId) throw new Error(`Source ${src.key} has no Base/table configured`);
   return cached(
-    `table:${tableId}`,
+    sourceCacheKey(src),
     async () => {
-      const [tables, fields] = await Promise.all([listTables(), listFields(tableId)]);
+      const fields = await listFields(baseToken, tableId);
       const records: TableData["records"] = [];
+      let total: number | undefined;
       let pageToken: string | undefined;
       do {
         const qs = new URLSearchParams({ page_size: "500" });
@@ -199,10 +205,12 @@ export async function getTableData(tableId: string, force = false): Promise<Tabl
           items?: { record_id: string; fields: Record<string, unknown> }[];
           has_more: boolean;
           page_token?: string;
-        }>(`/bitable/v1/apps/${appToken()}/tables/${tableId}/records/search?${qs}`, {
+          total?: number;
+        }>(`/bitable/v1/apps/${baseToken}/tables/${tableId}/records/search?${qs}`, {
           method: "POST",
-          body: JSON.stringify({ automatic_fields: true }),
+          body: JSON.stringify({ automatic_fields: true, ...(viewId ? { view_id: viewId } : {}) }),
         });
+        total = data.total ?? total;
         for (const item of data.items ?? []) {
           const row: Record<string, CellValue> = {};
           for (const f of fields) row[f.name] = normalizeValue(item.fields[f.name], f.kind);
@@ -212,11 +220,13 @@ export async function getTableData(tableId: string, force = false): Promise<Tabl
       } while (pageToken && records.length < MAX_RECORDS);
 
       return {
-        table: tables.find((t) => t.id === tableId) ?? { id: tableId, name: tableId },
+        table: { id: tableId, name: src.name },
         fields,
         records,
         fetchedAt: Date.now(),
         source: "lark",
+        complete: !pageToken,
+        total: total ?? records.length,
       };
     },
     force,

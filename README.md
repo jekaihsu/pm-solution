@@ -1,80 +1,78 @@
-# PM Dashboard
+# PM 週報
 
-以 **Lark Base（多維表格）** 為資料來源的動態儀表板，使用 Next.js + Recharts，部署在 **Zeabur**。
+依《PM App 完整功能清單與開發驗收依據》v1.0 建置的**唯讀**週報網站：10 張獨立報告（R01–R10），資料由伺服器端讀取 Lark Base（國際版）。Next.js + Recharts，部署在 Zeabur。
 
-## 功能
+## 目前做了什麼
 
-- 自動讀取 Base 內所有資料表與欄位，依欄位類型自動產生預設圖表
-- 圖表可自由新增 / 編輯 / 刪除 / 排序：長條、橫向長條、堆疊、折線、面積、圓餅
-- 計算方式：筆數、加總、平均、最小、最大；日期欄位可依日 / 週 / 月 / 季 / 年分組
-- 篩選列（單選、多選、人員、核取方塊欄位），KPI 卡片，可搜尋 / 排序的資料表檢視
-- 自動更新（30 秒 / 1 分 / 5 分），伺服器端快取避免頻繁呼叫 Lark API
-- 圖表版面存在瀏覽器（localStorage），每個資料表各自一份
-- 未設定 Lark 憑證時自動使用示範資料，可以先部署看效果
-- 可選的帳密保護（HTTP Basic Auth）
-- 支援深色模式、手機版
+- **總覽**：10 張報告入口，各自的資料來源狀態與本期筆數（不跨報告相加，R01／R10 共用外業工作單）
+- **報告頁**：報告目的、必備內容、**待確認定義**（未定的口徑只列出，不計算），以及每個來源的：
+  - 週篩選（Asia/Taipei，週一至週日，可選依哪個日期欄位；日期空白的記錄另計，不歸入任何週）
+  - 欄位篩選、搜尋、排序的明細表（空白顯示「—」，不當成 0）
+  - 自訂圖表（筆數／加總／平均…，版面存在各自瀏覽器）
+  - CSV 匯出（UTF-8、附報告／模式／擷取時間／週／篩選；處理公式注入）
+- **資料來源與定義頁**：每個來源的 Base／表／視圖、讀取狀態、欄位與型別
+- **狀態分開顯示**：來源未定位、未連接、讀取失敗、過期快照（讀取失敗時保留上次成功資料並標示）、分頁未讀完
+- **示範資料**需手動開啟，全站顯示警示條；示範記錄 ID 以 `demo_` 開頭，不與真實資料混用
+- 可選的整站密碼（HTTP Basic Auth）
 
-## 1. 建立 Lark 自建應用
+**沒有做的（文件標為未定或未授權）**：營業額／失誤率／達成率／N+123 等公式、寫回 Lark、通知、補登覆核、角色權限、PDF 產報。
 
-1. 到 [Lark 開發者後台](https://open.larksuite.com/app)（飛書為 open.feishu.cn）→ 建立「企業自建應用」
-2. 「權限管理」開通：
-   - `bitable:app:readonly`（查看多維表格）
-3. 發布應用版本，讓管理員審核通過
-4. 打開要讀取的 Base → 右上角「…」→「新增文件應用」（Add document app）→ 加入剛建立的應用，讓應用有權限讀這個 Base
-5. 記下：
-   - 應用的 **App ID** 與 **App Secret**（「憑證與基礎資訊」頁）
-   - Base 的 **app_token**：網址 `https://xxx.larksuite.com/base/<app_token>?table=<table_id>` 中的 `<app_token>`
+## 資料來源
 
-> 如果 Base 是放在 Wiki（知識庫）裡，網址會是 `/wiki/<token>`，那個 token 不是 app_token，需要用 Wiki API 換取 `obj_token`，或直接把 Base 移出 Wiki。
+設定在 `lib/reports.ts`：
 
-## 2. 部署到 Zeabur
+| 來源 | Base / 資料表 | 用於 |
+|---|---|---|
+| 外業工作單 | `Sdw1bG…` / `tbl97f1uXqi7Qz0k` | R01、R10 |
+| 工作預排 | `Sdw1bG…` / `tblN8c3WN44233aG` | R09、R10 |
+| 案件應收未收 | `Sdw1bG…` / `tblWsSaOcy4nKuGI` | R06 |
+| 儀器費率 | `Sdw1bG…` / `tblfgeEtMuBTg72O` | R07 |
+| 報價總表 | `JoOqbg…` / `tblENZvYAya93Twa` | R05 |
+| 業主連絡資訊表 | `JoOqbg…` / `tbl4fmZN6cBB7u1d` | R08（通訊錄，非聯繫紀錄） |
+| 內業工作單、報告品管、人事、聯繫紀錄 | 尚未定位 | R02、R03、R04、R08、R09 |
 
-1. 登入 [Zeabur](https://zeabur.com) → 建立 Project（選一個區域）
-2. 「Add Service」→「Git」→ 第一次使用時授權 Zeabur GitHub App 並選擇 `jekaihsu/pm-solution`
-3. 選擇分支，Zeabur 會自動偵測為 Next.js 並建置
-4. 到服務的「Variables」加入環境變數（見下表），儲存後重新部署
-5. 「Networking」→ 產生 `*.zeabur.app` 網域或綁定自己的網域
+## Lark 應用設定
 
-之後每次 push 到該分支，Zeabur 會自動重新部署。
+1. [Lark 開發者後台](https://open.larksuite.com/app) → 建立企業自建應用
+2. 權限管理開通 `bitable:app:readonly`，發布版本並經管理員審核
+3. 在**兩個 Base** 各自「…」→「新增文件應用」，加入此應用
+4. 檢查是否讀得到：
+   ```bash
+   LARK_APP_ID=... LARK_APP_SECRET=... node scripts/inspect-lark.mjs
+   ```
+   會列出每個 Base 的資料表、欄位型別與筆數（只讀）。
 
-### 環境變數
+## 部署到 Zeabur
+
+1. Zeabur → 建立 Project → Add Service → Git → 選 `jekaihsu/pm-solution` 與分支（自動偵測 Next.js）
+2. Variables 加入下表的環境變數 → 重新部署
+3. Networking 產生網域
 
 | 變數 | 必填 | 說明 |
 |---|---|---|
 | `LARK_APP_ID` | ✔ | 自建應用 App ID |
 | `LARK_APP_SECRET` | ✔ | 自建應用 App Secret |
-| `LARK_BASE_APP_TOKEN` | ✔ | Base 的 app_token |
-| `LARK_API_BASE` | | Lark 國際版 `https://open.larksuite.com`（預設），飛書 `https://open.feishu.cn` |
-| `LARK_DEFAULT_TABLE_ID` | | 預設打開的資料表 |
+| `LARK_API_BASE` | | 預設 `https://open.larksuite.com`（國際版） |
 | `CACHE_TTL_SECONDS` | | 伺服器端快取秒數，預設 30 |
-| `DASHBOARD_USER` / `DASHBOARD_PASSWORD` | | 設定密碼後整站需要登入（帳號預設 `admin`） |
-
-三個必填變數任一沒設，網站會顯示示範資料。
+| `DASHBOARD_USER` / `DASHBOARD_PASSWORD` | | 設定後整站需要登入（帳號預設 `admin`） |
 
 ## 本機開發
 
 ```bash
-cp .env.example .env.local   # 填入憑證
+cp .env.example .env.local
 npm install
-npm run dev                  # http://localhost:3000
+npm run dev
 ```
 
 ## 架構
 
 ```
-app/
-  page.tsx                    儀表板頁面
-  api/tables/route.ts         列出 Base 中的資料表
-  api/tables/[tableId]/       取得欄位 + 所有記錄（已正規化）
-components/
-  Dashboard.tsx               主畫面：篩選、KPI、圖表格、資料表
-  ChartView.tsx               Recharts 圖表
-  WidgetEditor.tsx            新增 / 編輯圖表
-lib/
-  lark.ts                     Lark Open API（token 快取、分頁、欄位值正規化）
-  aggregate.ts                分組 / 聚合 / 預設圖表
-  demo.ts                     示範資料
-proxy.ts                      選用的 Basic Auth
+app/                         頁面：總覽、/reports/[slug]、/sources
+app/api/sources/[key]/       讀取單一來源（伺服器端，含快取與過期快照）
+components/                  AppShell（導覽、週、示範切換）、SourcePanel、圖表
+lib/reports.ts               R01–R10 與資料來源設定
+lib/lark.ts                  Lark Open API（token、分頁、欄位值正規化）
+lib/week.ts                  Asia/Taipei 週計算
+scripts/inspect-lark.mjs     檢查 Base 結構
+proxy.ts                     選用的 Basic Auth
 ```
-
-App Secret 只存在伺服器端，瀏覽器只會呼叫本站的 `/api/*`。

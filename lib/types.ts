@@ -20,4 +20,8 @@ export interface TableData {
   records: { id: string; fields: Record<string, CellValue> }[];
   fetchedAt: number;
   source: "lark" | "demo";
+  complete: boolean; // false when paging stopped early
+  total: number;
+  stale?: boolean; // served from the last good snapshot after a failed refresh
+  error?: string;
 }
