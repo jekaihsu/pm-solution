@@ -1,0 +1,23 @@
+export type FieldKind = "text" | "number" | "select" | "multiselect" | "date" | "checkbox" | "person";
+
+export type CellValue = string | number | boolean | string[] | null;
+
+export interface FieldMeta {
+  id: string;
+  name: string;
+  kind: FieldKind;
+  primary: boolean;
+}
+
+export interface TableMeta {
+  id: string;
+  name: string;
+}
+
+export interface TableData {
+  table: TableMeta;
+  fields: FieldMeta[];
+  records: { id: string; fields: Record<string, CellValue> }[];
+  fetchedAt: number;
+  source: "lark" | "demo";
+}
