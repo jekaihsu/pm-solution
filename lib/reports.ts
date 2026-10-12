@@ -15,7 +15,6 @@ export interface SourceDef {
 
 const MAIN_BASE = "Sdw1bG1djaHsVGsRPvmjyVWipgg";
 const SALES_BASE = "JoOqbggsVar0ATsVgbcjh6IIp1g";
-const WR_BASE = "HnAzbA4m1aoGQfsxaxPjXMCBpob"; // WR1.1 trial tables
 const LARK_WEB = "https://yong-xiang-survey.jp.larksuite.com";
 
 export const SOURCES: SourceDef[] = [
@@ -87,15 +86,7 @@ export const SOURCES: SourceDef[] = [
     viewId: "vewsBdznYd",
     url: `${LARK_WEB}/base/${MAIN_BASE}?table=tbl8JdWLLwlPFuoF&view=vewsBdznYd`,
   },
-  {
-    key: "report-delivery",
-    name: "週報交付版本（WR1.1 試用）",
-    baseToken: WR_BASE,
-    tableId: "tbl7PHyUKEgRynag",
-    viewId: "vewKiCq852",
-    url: `${LARK_WEB}/base/${WR_BASE}?table=tbl7PHyUKEgRynag&view=vewKiCq852`,
-    note: "試用表；正式使用中的成果送出／業主回饋紀錄尚未找到。Meego／Meegle 期程來源未接通。",
-  },
+  { key: "report-qc", name: "報告品管 / 送出 / 業主回覆", note: "待從 v3／v4 原始資料定位；N+123 期程規則未定。" },
   {
     key: "hr",
     name: "招聘 / 出勤 / 出差",
@@ -146,7 +137,7 @@ export const REPORTS: ReportDef[] = [
     slug: "r03",
     name: "報告檢查",
     purpose: "追蹤內業成果的品管、期程、送出與業主回饋，找出已完成未送出、已送出未登記等斷點。",
-    sources: ["report-delivery"],
+    sources: ["report-qc"],
     mustHave: ["期程 N+123", "內業品管檢核後數據", "完成／品管通過／送出／業主核定分開"],
     pending: ["N 起點、+1／+2／+3 節點、日曆日或工作日、重送規則（D-05）"],
   },
