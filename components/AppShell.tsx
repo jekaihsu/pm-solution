@@ -26,7 +26,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [navOpen, setNavOpen] = useState(false);
   const pathname = usePathname();
 
+  const [user, setUser] = useState<{ name: string } | null>(null);
+
   useEffect(() => setNavOpen(false), [pathname]);
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((j) => setUser(j.user))
+      .catch(() => {});
+  }, []);
   useEffect(() => {
     const t = setInterval(() => setTick((n) => n + 1), AUTO_REFRESH_MS);
     return () => clearInterval(t);
@@ -82,6 +90,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <button className="btn small" onClick={ctx.refresh}>
                 重新整理
               </button>
+              {user && (
+                <span className="user">
+                  {user.name}
+                  <a href="/api/auth/logout">登出</a>
+                </span>
+              )}
             </div>
           </header>
           {demo && <div className="demo-banner">目前顯示的是虛構示範資料，不是真實數字，請勿引用。</div>}

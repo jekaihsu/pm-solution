@@ -13,7 +13,7 @@
 - **資料來源與定義頁**：每個來源的 Base／表／視圖、讀取狀態、欄位與型別
 - **狀態分開顯示**：來源未定位、未連接、讀取失敗、過期快照（讀取失敗時保留上次成功資料並標示）、分頁未讀完
 - **示範資料**需手動開啟，全站顯示警示條；示範記錄 ID 以 `demo_` 開頭，不與真實資料混用
-- 可選的整站密碼（HTTP Basic Auth）
+- **以 Lark 帳號登入**：整站需登入組織的 Lark 帳號才能看（OAuth，登入狀態 7 天）
 
 **沒有做的（文件標為未定或未授權）**：營業額／失誤率／達成率／N+123 等公式、寫回 Lark、通知、補登覆核、角色權限、PDF 產報。
 
@@ -36,7 +36,9 @@
 1. [Lark 開發者後台](https://open.larksuite.com/app) → 建立企業自建應用
 2. 權限管理開通 `bitable:app:readonly`，發布版本並經管理員審核
 3. 在**兩個 Base** 各自「…」→「新增文件應用」，加入此應用
-4. 檢查是否讀得到：
+4. **登入設定**：「安全設定」→「重新導向 URL」加入 `https://<你的網域>/api/auth/callback`
+5. 「可用範圍」設定哪些同事可以登入（企業自建應用只有組織內成員能授權）
+6. 檢查是否讀得到：
    ```bash
    LARK_APP_ID=... LARK_APP_SECRET=... node scripts/inspect-lark.mjs
    ```
@@ -54,7 +56,10 @@
 | `LARK_APP_SECRET` | ✔ | 自建應用 App Secret |
 | `LARK_API_BASE` | | 預設 `https://open.larksuite.com`（國際版） |
 | `CACHE_TTL_SECONDS` | | 伺服器端快取秒數，預設 30 |
-| `DASHBOARD_USER` / `DASHBOARD_PASSWORD` | | 設定後整站需要登入（帳號預設 `admin`） |
+| `APP_URL` | | 網站對外網址（例如 `https://pm.zeabur.app`）；OAuth 回呼用，未設時自動判斷 |
+| `LARK_TENANT_KEY` | | 只允許此組織的帳號登入 |
+| `SESSION_SECRET` | | 登入 cookie 簽章密鑰，未設時由 App Secret 衍生 |
+| `AUTH_DISABLED` | | 設為 `1` 可暫時關閉登入（本機開發用） |
 
 ## 本機開發
 
@@ -74,5 +79,7 @@ lib/reports.ts               R01–R10 與資料來源設定
 lib/lark.ts                  Lark Open API（token、分頁、欄位值正規化）
 lib/week.ts                  Asia/Taipei 週計算
 scripts/inspect-lark.mjs     檢查 Base 結構
-proxy.ts                     選用的 Basic Auth
+app/api/auth/                Lark 登入（login / callback / logout / me）
+lib/session.ts               簽章 cookie
+proxy.ts                     未登入時導向 Lark 登入
 ```

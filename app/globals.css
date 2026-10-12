@@ -257,3 +257,6 @@ th button:focus-visible, .btn:focus-visible, a:focus-visible, summary:focus-visi
 .field-tag { font-size: 12px; border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; background: var(--page); }
 .field-tag em { font-style: normal; color: var(--muted); margin-left: 4px; }
 @media (max-width: 600px) { .facts { grid-template-columns: 1fr; } }
+.user { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); padding-left: 10px; border-left: 1px solid var(--border); }
+.user a { color: var(--accent); text-decoration: none; }
+@media (max-width: 600px) { .user { border-left: none; padding-left: 0; } }
