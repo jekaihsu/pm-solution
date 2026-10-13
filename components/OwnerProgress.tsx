@@ -18,17 +18,16 @@ export default function OwnerProgress({ data, wf, dateField, weekStart, weekEnd 
 
   const cases = useMemo(() => {
     if (!caseField) return [];
-    const map = new Map<string, { name: string; jobNo: string; week: number; weekOrders: number; total: number; last: number; due: number | null }>();
+    const map = new Map<string, { name: string; jobNo: string; week: number; weekOrders: number; last: number; due: number | null }>();
     for (const r of data.records) {
       const name = text(r.fields[caseField.name]) || "（未填案件）";
-      const cur = map.get(name) ?? { name, jobNo: "", week: 0, weekOrders: 0, total: 0, last: 0, due: null };
+      const cur = map.get(name) ?? { name, jobNo: "", week: 0, weekOrders: 0, last: 0, due: null };
       if (!cur.jobNo && wf.jobNo && wf.jobNo !== caseField) cur.jobNo = text(r.fields[wf.jobNo.name]);
       const pts = wf.revenue ? r.fields[wf.revenue.name] : null;
       const d = r.fields[dateField];
-      if (typeof pts === "number") cur.total += pts;
       if (typeof d === "number") {
-        cur.last = Math.max(cur.last, d);
         if (d >= weekStart && d < weekEnd) {
+          cur.last = Math.max(cur.last, d);
           cur.weekOrders++;
           if (typeof pts === "number") cur.week += pts;
         }
@@ -46,7 +45,7 @@ export default function OwnerProgress({ data, wf, dateField, weekStart, weekEnd 
       <div className="cg-head">
         <div>
           <h2>業主進度</h2>
-          <p className="muted small">本週有內業工作的案件・進度以百分比與天數呈現</p>
+          <p className="muted small">只列所選週有內業工作的案件，點數只算所選週・進度以百分比與天數呈現</p>
         </div>
       </div>
       <ul className="cg-notes">
@@ -72,10 +71,9 @@ export default function OwnerProgress({ data, wf, dateField, weekStart, weekEnd 
                 <th>案件</th>
                 <th>工作編號</th>
                 <th className="num">本週點數</th>
-                <th className="num">累計點數</th>
                 <th className="num">業主進度 %</th>
                 <th className="num">距交期（天）</th>
-                <th>最近工作日</th>
+                <th>本週最近工作日</th>
               </tr>
             </thead>
             <tbody>
@@ -84,7 +82,6 @@ export default function OwnerProgress({ data, wf, dateField, weekStart, weekEnd 
                   <td className="cg-group">{c.name}</td>
                   <td>{c.jobNo || "—"}</td>
                   <td className="num">{wf.revenue ? round1(c.week) : "—"}</td>
-                  <td className="num">{wf.revenue ? round1(c.total) : "—"}</td>
                   <td className="num muted">待定義</td>
                   <td className="num">{c.due ? Math.ceil((c.due - today) / 86400000) : "—"}</td>
                   <td>{c.last ? formatDate(c.last) : "—"}</td>

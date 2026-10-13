@@ -579,3 +579,10 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
 .hr-src-head .muted { font-weight: 400; }
 .hr-src > p { margin: 0; }
 .hr .cg-table { box-shadow: none; }
+
+/* Per-order SOP */
+.cg-detail-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.btn-sm { height: 28px; padding: 0 10px; font-size: 12.5px; gap: 5px; }
+.cg-sop-done { font-weight: 600; }
+.cg-sop.ok span:first-of-type { color: var(--good); font-weight: 500; }
+.cg-card-sop { display: flex; align-items: center; justify-content: space-between; }

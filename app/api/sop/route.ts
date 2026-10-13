@@ -28,8 +28,10 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as { version?: string; report?: string; weekStart?: number; group?: string; ok?: boolean } | null;
-  if (!body || !/^v[34]$/.test(body.version ?? "") || !validReport(body.report) || !Number.isFinite(body.weekStart) || !body.group || typeof body.ok !== "boolean" || body.group.length > 100) {
+  const body = (await req.json().catch(() => null)) as { version?: string; report?: string; weekStart?: number; group?: string; groups?: string[]; ok?: boolean } | null;
+  const keys = body?.groups ?? (body?.group ? [body.group] : []);
+  const validKeys = Array.isArray(keys) && keys.length > 0 && keys.length <= 1000 && keys.every((k) => typeof k === "string" && k.length > 0 && k.length <= 100);
+  if (!body || !/^v[34]$/.test(body.version ?? "") || !validReport(body.report) || !Number.isFinite(body.weekStart) || !validKeys || typeof body.ok !== "boolean") {
     return NextResponse.json({ error: "參數錯誤" }, { status: 400 });
   }
   const session = await readSession(req.cookies.get(SESSION_COOKIE)?.value);
@@ -37,7 +39,7 @@ export async function POST(req: NextRequest) {
   if (!perm.canEdit) return NextResponse.json({ error: `沒有勾選 SOP 的權限。${perm.reason ?? ""}` }, { status: 403 });
   const by = session?.name ?? "（本機開發）";
   try {
-    const entry = await setSop(scope(body.report, body.version!), body.weekStart!, body.group, body.ok, by);
+    const entry = await setSop(scope(body.report, body.version!), body.weekStart!, keys, body.ok, by);
     return NextResponse.json({ entry, persistent });
   } catch (err) {
     return NextResponse.json({ error: `儲存失敗：${(err as Error).message}` }, { status: 500 });

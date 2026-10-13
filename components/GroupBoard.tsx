@@ -1,5 +1,5 @@
 "use client";
-import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, CircleAlert, Minus } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, CheckCheck, ChevronDown, ChevronRight, CircleAlert, CircleCheck, Minus } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
 import { COST_FIELDS, JOINED_DATE, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, errorRate, groupRows, joinInternal, plannedPoints, resolveScheduleFields, resolveWorkFields, type GroupRow, type WorkFields } from "@/lib/controlGroup";
@@ -20,6 +20,7 @@ export interface BoardConfig {
   costKey?: (v: DataVersion) => string; // internal work: group + date come from the linked cost sheet
   scheduleKey: (v: DataVersion) => string;
   keepTrade: (trade: string) => boolean; // which schedule rows (by 業別) belong to this board
+  keepWorkTrade?: (trade: string) => boolean; // when the work sheet has a 業別 field, which rows belong here
   needsTrade: boolean; // true when the board can't work without a 業別 field
   scheduleTradeLabel?: string;
   checkNames: string[];
@@ -34,6 +35,7 @@ export const BOARDS: Record<"r01" | "r02", BoardConfig> = {
     workLabel: "外業工作單",
     scheduleKey: (v) => `${v}-schedule`,
     keepTrade: (t) => !/內業/.test(t),
+    keepWorkTrade: (t) => !/內業/.test(t), // 控制組只看外業
     needsTrade: false,
     scheduleTradeLabel: "業別不是內業",
     checkNames: ["控制組檢核"],
@@ -111,26 +113,33 @@ function useSop(report: string, version: DataVersion, weekStart: number) {
   const ready = state?.tag === tag ? state : null;
 
   const toggle = useCallback(
-    async (group: string, ok: boolean) => {
+    async (keys: string[], ok: boolean) => {
       const sent = tag;
       const update = (fn: (e: Record<string, SopEntry>) => Record<string, SopEntry>) =>
         setState((s) => (s && s.tag === sent ? { ...s, entries: fn(s.entries) } : s));
-      let prev: SopEntry | undefined;
+      const prev: Record<string, SopEntry | undefined> = {};
       update((e) => {
-        prev = e[group];
-        return { ...e, [group]: { ok, by: "儲存中…", at: Date.now() } };
+        const next = { ...e };
+        for (const k of keys) {
+          prev[k] = e[k];
+          next[k] = { ok, by: "儲存中…", at: Date.now() };
+        }
+        return next;
       });
       try {
-        const r = await fetch("/api/sop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ report, version, weekStart, group, ok }) });
+        const r = await fetch("/api/sop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ report, version, weekStart, groups: keys, ok }) });
         const j = await r.json();
         if (!r.ok) throw new Error(j.error ?? r.statusText);
-        update((e) => ({ ...e, [group]: j.entry }));
+        update((e) => ({ ...e, ...Object.fromEntries(keys.map((k) => [k, j.entry])) }));
         if (current.current === sent) setError("");
       } catch (err) {
         update((e) => {
           const next = { ...e };
-          if (prev) next[group] = prev;
-          else delete next[group];
+          for (const k of keys) {
+            const p = prev[k];
+            if (p) next[k] = p;
+            else delete next[k];
+          }
           return next;
         });
         if (current.current === sent) setError(String((err as Error).message ?? err));
@@ -149,23 +158,60 @@ function useSop(report: string, version: DataVersion, weekStart: number) {
   };
 }
 
-function SopBox({ group, entry, onToggle, disabled }: { group: string; entry?: SopEntry; onToggle: (g: string, ok: boolean) => void; disabled: boolean }) {
+// SOP is ticked per work order; the group only shows how many are done.
+const orderKey = (id: string) => `order:${id}`;
+type Sop = ReturnType<typeof useSop>;
+
+function sopCount(row: GroupRow, entries: Record<string, SopEntry>) {
+  return row.orders.filter((r) => entries[orderKey(r.id)]?.ok).length;
+}
+
+function SopStatus({ done, total }: { done: number; total: number }) {
+  if (total > 0 && done === total)
+    return (
+      <span className="pill pill-good cg-sop-done">
+        <CircleCheck size={12} /> SOP 完成
+      </span>
+    );
+  if (done > 0) return <span className="pill pill-warn">SOP {done}/{total}</span>;
+  return <span className="pill">未確認</span>;
+}
+
+function SopBox({ id, label, entry, onToggle, disabled }: { id: string; label: string; entry?: SopEntry; onToggle: (keys: string[], ok: boolean) => void; disabled: boolean }) {
   return (
     <label
-      className={`cg-sop ${disabled ? "readonly" : ""}`}
+      className={`cg-sop ${disabled ? "readonly" : ""} ${entry?.ok ? "ok" : ""}`}
       title={entry ? `${entry.ok ? "符合" : "取消"}：${entry.by}・${new Date(entry.at).toLocaleString("zh-TW")}` : disabled ? "僅授權主管可勾選" : "主管確認後勾選"}
       onClick={(e) => e.stopPropagation()}
     >
-      <input type="checkbox" checked={Boolean(entry?.ok)} disabled={disabled} onChange={(e) => onToggle(group, e.target.checked)} aria-label={`${group} 符合 SOP`} />
+      <input type="checkbox" checked={Boolean(entry?.ok)} disabled={disabled} onChange={(e) => onToggle([orderKey(id)], e.target.checked)} aria-label={`${label} 符合 SOP`} />
       <span>{entry?.ok ? "符合" : "未確認"}</span>
       {entry?.ok && <span className="cg-sop-by">{entry.by}</span>}
     </label>
   );
 }
 
-function OrderDetail({ row, wf, checkLabel }: { row: GroupRow; wf: WorkFields; checkLabel: string }) {
+function OrderDetail({ row, wf, checkLabel, sop, disabled }: { row: GroupRow; wf: WorkFields; checkLabel: string; sop: Sop; disabled: boolean }) {
+  const done = sopCount(row, sop.entries);
+  const allDone = done === row.orders.length;
   return (
     <div className="cg-detail">
+      {!disabled && (
+        <div className="cg-detail-bar">
+          <span className="muted small">
+            SOP 已確認 {done}/{row.orders.length} 張
+          </span>
+          <button
+            className="btn btn-sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              sop.toggle(row.orders.map((r) => orderKey(r.id)), !allDone);
+            }}
+          >
+            <CheckCheck size={14} /> {allDone ? "整組取消勾選" : "整組全部符合"}
+          </button>
+        </div>
+      )}
       <table>
         <thead>
           <tr>
@@ -176,15 +222,17 @@ function OrderDetail({ row, wf, checkLabel }: { row: GroupRow; wf: WorkFields; c
             <th className="num">營業額點數</th>
             <th>{checkLabel.replace(/（.*）/, "")}</th>
             <th>異常</th>
+            <th>符合 SOP</th>
           </tr>
         </thead>
         <tbody>
           {row.orders.map((r) => {
             const check = classifyCheck(r, wf);
             const an = anomalies(r, wf);
+            const no = wf.orderNo ? text(r.fields[wf.orderNo.name]) || r.id : r.id;
             return (
               <tr key={r.id}>
-                <td>{wf.orderNo ? text(r.fields[wf.orderNo.name]) : r.id}</td>
+                <td>{no}</td>
                 <td>{wf.jobNo ? text(r.fields[wf.jobNo.name]) : "—"}</td>
                 <td>{wf.item ? text(r.fields[wf.item.name]) : "—"}</td>
                 <td className="num">{wf.qty ? text(r.fields[wf.qty.name]) || "—" : "—"}</td>
@@ -197,6 +245,9 @@ function OrderDetail({ row, wf, checkLabel }: { row: GroupRow; wf: WorkFields; c
                   )}
                 </td>
                 <td>{!wf.flags.length ? <span className="muted">—</span> : an.length ? an.map((a) => <span key={a} className="tag">{a}</span>) : <span className="muted">無</span>}</td>
+                <td>
+                  <SopBox id={r.id} label={no} entry={sop.entries[orderKey(r.id)]} onToggle={sop.toggle} disabled={disabled} />
+                </td>
               </tr>
             );
           })}
@@ -228,7 +279,8 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
     const dateField = resolveDateField(src, data.fields, cfg.costKey ? JOINED_DATE : undefined);
     if (!dateField) return { error: "找不到可用的日期欄位" as const };
     const wf = resolveWorkFields(data.fields, cfg.checkNames);
-    const records = inRange(data.records, dateField, week.start, week.end);
+    const inWeek = inRange(data.records, dateField, week.start, week.end);
+    const records = cfg.keepWorkTrade && wf.trade ? inWeek.filter((r) => cfg.keepWorkTrade!(text(r.fields[wf.trade!.name]))) : inWeek;
     const sf = sched.data ? resolveScheduleFields(sched.data.fields) : {};
     const planned = plannedPoints(sched.data as TableData | undefined, sf, week.start, week.end, cfg.keepTrade);
     const rows = groupRows(records, wf, planned);
@@ -250,7 +302,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const header = (
     <div className="cg-head">
       <div>
-        <h2>各組上週表現</h2>
+        <h2>{weekName(week.offset)}各組表現</h2>
         <p className="muted small">
           {weekName(week.offset)} {week.label}
           {view && "dateField" in view && view.dateField ? `・依「${view.dateField}」` : ""}
@@ -315,6 +367,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const overallRate = errorRate(totals);
   const hasCheck = Boolean(wf.check || wf.status);
   const hasFlags = wf.flags.length > 0;
+  const sopLocked = demo || !sop.loaded || !sop.perm.canEdit;
 
   return (
     <section className="cg">
@@ -386,7 +439,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
       )}
 
       {rows.length === 0 ? (
-        <EmptyState kind="empty" title={`${weekName(week.offset)}沒有外業工作單`} />
+        <EmptyState kind="empty" title={`${weekName(week.offset)}沒有${cfg.workLabel}`} />
       ) : isMobile ? (
         <div className="cg-cards">
           {rows.map((r) => {
@@ -421,8 +474,11 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
                     <dd>{!hasFlags ? "—" : r.anomalyCount ? `${r.anomalyCount} 張` : "無"}</dd>
                   </div>
                 </dl>
-                <SopBox group={r.group} entry={sop.entries[r.group]} onToggle={sop.toggle} disabled={demo || !sop.loaded || !sop.perm.canEdit} />
-                {expanded && <OrderDetail row={r} wf={wf} checkLabel={cfg.checkLabel} />}
+                <div className="cg-card-sop">
+                  <span className="muted small">符合 SOP</span>
+                  <SopStatus done={sopCount(r, sop.entries)} total={r.orders.length} />
+                </div>
+                {expanded && <OrderDetail row={r} wf={wf} checkLabel={cfg.checkLabel} sop={sop} disabled={sopLocked} />}
               </article>
             );
           })}
@@ -489,13 +545,13 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
                       </td>
                       <td className="num">{wf.qty ? formatNumber(Math.round(r.qty * 10) / 10) : "—"}</td>
                       <td>
-                        <SopBox group={r.group} entry={sop.entries[r.group]} onToggle={sop.toggle} disabled={demo || !sop.loaded || !sop.perm.canEdit} />
+                        <SopStatus done={sopCount(r, sop.entries)} total={r.orders.length} />
                       </td>
                     </tr>
                     {expanded && (
                       <tr className="cg-detail-row">
                         <td colSpan={10}>
-                          <OrderDetail row={r} wf={wf} checkLabel={cfg.checkLabel} />
+                          <OrderDetail row={r} wf={wf} checkLabel={cfg.checkLabel} sop={sop} disabled={sopLocked} />
                         </td>
                       </tr>
                     )}
@@ -509,7 +565,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
 
       <p className="cg-foot">
         失誤率＝{cfg.checkLabel}「不通過」÷ 已檢核（未檢核不計）。預排點數＝預排表{cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}點數欄，未填以每組每天 1 點計（標 *）。差異＝營業額點數（原值）− 預排點數。
-        {cfg.costKey && " 組別與工作日期取自所屬內業成本單。"}SOP 由授權主管勾選，記錄勾選人與時間，不寫回 Lark。點組別可展開工作編號、工作項目與數量。
+        {cfg.keepWorkTrade && view.wf.trade && ` 只計${cfg.workLabel}中業別不是內業的工作單。`}{cfg.costKey && " 組別與工作日期取自所屬內業成本單。"}SOP 由授權主管在每張工作單上勾選（展開組別），整組都勾完才顯示綠色「SOP 完成」；記錄勾選人與時間，不寫回 Lark。
         {view.records.length > 0 && ` 資料至 ${formatDate(Math.max(...view.records.map((r) => (r.fields[view.dateField] as number) ?? 0)))}。`}
       </p>
 
