@@ -51,18 +51,29 @@ const HINTS: Record<number, string> = {
   91403: "應用沒有此 Base 的存取權，請在 Base 的「新增文件應用」加入 PM週報",
 };
 
+// Lark answers 99991400 when too many requests arrive at once (the startup warm-up
+// loads every source together); waiting and retrying keeps link titles from falling
+// back to raw record ids.
+const RATE_LIMITED = 99991400;
+const RETRY_DELAYS_MS = [500, 1500, 3000, 6000];
+
 async function larkFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = await getTenantAccessToken();
-  const res = await fetch(`${API_BASE}/open-apis${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json; charset=utf-8",
-      ...init.headers,
-    },
-    cache: "no-store",
-  });
-  const json = await res.json();
+  let json: { code: number; msg: string; data?: unknown };
+  for (let attempt = 0; ; attempt++) {
+    const token = await getTenantAccessToken();
+    const res = await fetch(`${API_BASE}/open-apis${path}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json; charset=utf-8",
+        ...init.headers,
+      },
+      cache: "no-store",
+    });
+    json = await res.json();
+    if (json.code !== RATE_LIMITED || attempt >= RETRY_DELAYS_MS.length) break;
+    await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt] + Math.random() * 300));
+  }
   if (json.code !== 0) throw new Error(`${HINTS[json.code] ? `${HINTS[json.code]}｜` : ""}Lark API ${path.split("?")[0]} failed: ${json.code} ${json.msg}`);
   return json.data as T;
 }
