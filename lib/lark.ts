@@ -414,6 +414,8 @@ export async function getSourceData(src: SourceDef, force = false): Promise<Tabl
       const records: TableData["records"] = [];
       let total: number | undefined;
       let excluded = 0;
+      let noCreatedTime = 0; // rows Lark returned without created_time (excluded as unknown)
+      let newestCreated = 0;
       let pageToken: string | undefined;
       do {
         const qs = new URLSearchParams({ page_size: "500" });
@@ -434,6 +436,8 @@ export async function getSourceData(src: SourceDef, force = false): Promise<Tabl
         });
         total = data.total ?? total;
         for (const item of data.items ?? []) {
+          if (typeof item.created_time !== "number") noCreatedTime++;
+          else newestCreated = Math.max(newestCreated, item.created_time);
           if (src.createdAfter !== undefined && !(typeof item.created_time === "number" && item.created_time >= src.createdAfter)) {
             excluded++;
             continue;
@@ -472,6 +476,8 @@ export async function getSourceData(src: SourceDef, force = false): Promise<Tabl
         total: records.length,
         sourceTotal: total ?? records.length + excluded,
         excluded,
+        noCreatedTime,
+        newestCreated: newestCreated || undefined,
       };
     },
     force,

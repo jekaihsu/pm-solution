@@ -33,6 +33,8 @@ export interface TableData {
   total: number; // records served (after any inclusion rule)
   sourceTotal?: number; // records in the Lark table/view before the inclusion rule
   excluded?: number; // records dropped by the inclusion rule
+  noCreatedTime?: number; // rows returned without a creation time
+  newestCreated?: number; // newest creation time seen (epoch ms)
   stale?: boolean; // served from the last good snapshot after a failed refresh
   error?: string;
 }
