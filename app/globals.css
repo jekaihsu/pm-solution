@@ -707,3 +707,34 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
   .ir-card { padding: 12px; }
   .ir-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 }
+
+/* ---------- R10 外業報告（外業經理） ---------- */
+.fr { min-width: 0; }
+.fr > * { min-width: 0; }
+.fr h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.fr .kpis { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.fr .kpi { min-width: 0; overflow-wrap: anywhere; }
+.fr-lead { margin: -6px 0 0; }
+.fr-sec { display: grid; gap: 8px; min-width: 0; }
+.fr-sec > * { min-width: 0; }
+.fr-sec-head { display: flex; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; }
+.fr-scroll { overflow-x: auto; max-width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.fr-scroll table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.fr-scroll th { text-align: left; font-weight: 500; font-size: 12.5px; color: var(--text-2); background: var(--bg); padding: 9px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.fr-scroll td { padding: 8px 10px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+.fr-scroll tbody tr:last-child td { border-bottom: none; }
+.fr-scroll .num { text-align: right; font-variant-numeric: tabular-nums; }
+.fr-scroll tfoot td { font-weight: 600; border-top: 2px solid var(--text-2); }
+.fr-nowrap { white-space: nowrap; }
+.fr-name { min-width: 150px; max-width: 260px; overflow-wrap: anywhere; }
+.fr-dup { margin-left: 6px; height: 18px; font-size: 11px; }
+.fr-desc { min-width: 220px; max-width: 440px; max-height: 9.5em; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.fr-desc > div + div { margin-top: 4px; }
+.fr-link { display: inline-flex; align-items: center; gap: 3px; color: var(--text-2); text-decoration: underline; }
+.fr-pending { padding: 12px 14px; border: 1px dashed var(--border); border-radius: 12px; background: var(--surface); display: grid; gap: 6px; }
+.fr-pending p { margin: 0; font-size: 13px; color: var(--text-2); }
+.fr .cg-notes li { align-items: flex-start; }
+.fr .cg-notes svg { flex: none; margin-top: 2px; }
+@media (max-width: 720px) {
+  .fr .kpis { grid-template-columns: 1fr 1fr; }
+}

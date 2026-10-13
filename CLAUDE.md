@@ -46,9 +46,7 @@
 | `lib/adminBoard.ts` | R11 行政口徑（純函式）：成本單帶人與日期、預排以人員 record_id＋日期展開、與預排差異分區 |
 | `components/AdminBoard.tsx` | R11 行政看板：一列一人（全部人）、合計列、點人展開工作單明細 |
 | `scripts/test-admin-board.mjs` | R11 邏輯測試（`node --test`，不連 Lark） |
-| `lib/internalReport.ts` | R09 內業報告口徑（純函式）：成本單 record_id 帶人與日期、預排以人員 record_id＋日期展開、人日吻合／有排未填／未排有填、案件結果、異常與人工確認列 |
-| `components/InternalReport.tsx` | R09 內業報告頁：人日表、案件表、異常與人工確認表、待定義區塊（讀 `v3-internal-work`／`v3-internal-cost`／`v3-schedule`／`v3-cases`） |
-| `scripts/test-internal-report.mjs` | R09 邏輯測試（`node --test`，不連 Lark） |
+node --test scripts/test-*.mjs   # 全部邏輯測試（不連 Lark）：R01／R02、R04、R07、R09、R10、R11
 | `components/HrBoard.tsx` | R04 人事：招聘暫無、出勤／出差待權限、加班取自詠翔加班（純函式在 `lib/overtime.ts`） |
 | `lib/demo.ts` | 示範資料（右下角「示範資料」開關） |
 | `lib/version.ts` | `APP_VERSION`，每次改版都要更新，用來確認部署是否生效 |
@@ -77,7 +75,7 @@ npm ci
 cp .env.example .env.local   # 填入 LARK_APP_ID / LARK_APP_SECRET（不要提交）
 AUTH_DISABLED=1 DATA_DIR=./data npm run dev     # http://localhost:3000
 npm run typecheck && npm run build              # 推送前必跑
-node --test scripts/test-*.mjs   # 全部邏輯測試（不連 Lark）：R01／R02、R04、R07、R09、R11
+node --test scripts/test-*.mjs   # 全部邏輯測試（不連 Lark）：R01／R02、R04、R07、R09、R10、R11
 node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄位
 ```
 
@@ -145,6 +143,16 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 - 車輛（`equipment-vehicles`）：`next_maintenance` 保養到期、`insurance_date` 保險到期；以台北日曆日計，已過＝紅、30 天內（含當天、含第 30 天）＝黃，沒填＝「無資料」；系統封存的車不列；不推算里程保養。
 - 預約與歸還（`equipment-bookings`／`equipment-returns`）：只算審批狀態「已通过」；借出依「借出日期」、歸還依「歸還日期」落在所選週；「已撤回」另計、不計入借出歸還。**借出未歸還＝待定義**（歸還單的「借出儀器/車輛」是顯示文字、歸還單的 ID／車牌全空，與預約單沒有明確對應鍵，不猜）。預約／歸還來源不讀申請人、處理人欄位（`allowField`）。
 - 月租儀器／車輛檢查（`equipment-inspection`）、TAF／自校驗（`equipment-calibration`）：新 Base 沒有對應表，維持「尚未定位」。
+
+**R10 外業報告（外業經理用）**（`components/FieldReport.tsx`、`lib/fieldReport.ts`；業主 2026-10-13 同意先做不需新口徑的兩塊）
+- 資料：V3 外業工作單、工作預排、案件表（新來源 `v3-cases`，只取案件編號、案件名稱＝工程簡稱）。V4 讀不到顯示原因、不報錯；V3、V4 不相加。
+- 沿用 R01：以「組」為單位；預排只取業別＝外業，ROV 一律算外業；預排組名去尾「組」比對；排除行政／業務／內業／資訊組與未對應組別（`keepFieldGroup`，與 R01 的 `keepGroup` 同規則，測試比對原文防走樣）；週一至週日台北，預設上週。預排日期依 field id（真起日 `fldMXOggGP`、真訖日 `fldjWv1xST`）；條類型＝休假的預排不算。
+- **案件比對用 link record_id**，不用案件編號文字（有 7 案編號重複、2 筆全 0 占位碼 `C000000`，列上標「編號重複」，兩筆分開計）。讀不到 record_id（示範資料）才退回用標題文字。
+- 組日＝（組別, 日期）。預排 vs 實際：預排組日、命中組日（預排的組日當天該組有出工）、計畫外出工組日（該組該日完全沒預排）、案件交集數（預排案件 ∩ 出工案件）。案件列：預排組日／實際出工組日／吻合組日（同組同日同案）／營業額點數／工作單張數，結果＝有排有做／有排未做／未排有做。預排只填組日沒填案件者（例如 ROV）只算組日、不進案件比對；工作單沒連案件者只算組日。預排日 ≥ 今天不納入（尚未到期不算「沒做」）。預排讀不到時不判「未排有做」，結果顯示「預排讀不到」。
+- 異常與人工確認（組×案件，連續日期合併成 起～迄）：未排有做、有排未做；工作單異常＝「突發狀況」有填、檢核狀態 trim 後＝「已退回」（選項結尾有空白）、修改後數量≠完成數量（兩邊都有值才比）。說明顯示工作單「突發狀況」「備註」原文（已退回另顯示「修改意見」）。**檢核說明需在 Lark 填，網站唯讀。**
+- 檢核待辦：依組統計外業經理檢核未勾、控制組檢核未勾（兩者是核取方塊，沒勾＝未勾）、已退回張數。
+- **待定義（這次不算、頁面留區塊）**：圖資／報告節點期限（N+1／N+2）與節點狀態（未逾期／預計逾期／已逾期／無工作）；工程編號是否合併成案件編號前 7 碼（目前以案件記錄為單位）；進行中工作營業額剩餘。
+- 上週（2026-10-05～10-11）實測：工作單 38 張／39.65 點；預排 10 組日、命中 8；實際出工 24 組日、計畫外 16；案件預排 7、出工 16、交集 6。
 
 **R11 行政數據**（`components/AdminBoard.tsx`、`lib/adminBoard.ts`；業主裁示 2026-10-13）
 - 一列一個人＝行政成本單（V3 `tbliyB0wgDhgUQbA`）的「填表人」，加合計列。工作單（V3 `tbl2c5CLgwPZ3Pl2`）沒有日期與人員，經「所屬成本單」帶入：先用 link record_id，其次成本單「工作單列」對工作單號，成本單標題只在唯一時備援（標題常重複）。

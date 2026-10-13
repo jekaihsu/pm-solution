@@ -97,7 +97,7 @@ export const SOURCES: SourceDef[] = [
   raw("v3-schedule", "工作預排", "v3", "tblN8c3WN44233aG", { columns: COLS.schedule, ...DASH.schedule }),
   raw("v4-schedule", "工作預排", "v4", "tblZz6Mkhv9gHrB2", { dateField: "開始日期", columns: COLS.schedule, ...DASH.schedule }),
   // R09 內業報告用：案件編號（主欄）與案件名稱。整張表讀進伺服器，頁面只投影這兩欄（請款、成本等欄位不外送）；V4 沒有對應表。
-  raw("v3-cases", "案件", "v3", "tblWsSaOcy4nKuGI", { columns: ["案件編號", "案件名稱", "業主", "狀態"], note: "R09 用來顯示工程名稱；與「案件應收未收」同一張表，不套視圖篩選。" }),
+  raw("v3-cases", "案件", "v3", "tblWsSaOcy4nKuGI", { columns: ["案件編號", "案件名稱", "業主", "狀態"], note: "R09／R10 取案件編號與案件名稱（工程名稱）；預排與工作單的案件以 record_id 比對，不可用編號文字（有編號重複與全 0 占位碼）。與「案件應收未收」同一張表，不套視圖篩選。" }),
   raw("v3-admin-work", "行政工作單", "v3", "tbl2c5CLgwPZ3Pl2", { note: "R11 用；沒有日期與人員，從「所屬成本單」帶入。" }),
   raw("v3-admin-cost", "行政成本單", "v3", "tbliyB0wgDhgUQbA", { dateField: "工作日期", note: "R11 用；填表人＝看板的一列。" }),
   // V4 行政表的 table id 未知，用表名自動找；應用目前讀不到（1254302），頁面會顯示失敗原因。
@@ -274,10 +274,10 @@ export const REPORTS: ReportDef[] = [
     id: "R10",
     slug: "r10",
     name: "外業報告",
-    purpose: "外業部門看工程編號層級的預排執行差異與所有進行中工作餘量。",
-    sources: ["v3-field-work", "v3-schedule", "v4-field-work", "v4-schedule"],
-    mustHave: ["預排達成率（以工程編號為主）", "進行中工作營業額剩餘"],
-    pending: ["外業分母粒度、延期、停工、委外規則（D-03）", "剩餘點數避免內外業重疊（D-06）"],
+    purpose: "外業經理看上週預排與實際完成的對照（以案件為單位）、異常與人工確認案件、檢核待辦，判斷預排是否失誤。",
+    sources: ["v3-field-work", "v3-schedule", "v3-cases", "v4-field-work", "v4-schedule"],
+    mustHave: ["預排 vs 實際（案件編號＋工程名稱）：預排組日、實際出工組日、吻合組日、結果分類", "異常與人工確認案件（未排有做、有排未做、突發狀況、已退回、修改後數量≠完成數量）", "檢核待辦（外業經理檢核未勾、控制組檢核未勾、已退回）"],
+    pending: ["圖資／報告節點期限（N+1／N+2）與節點狀態（未逾期／預計逾期／已逾期／無工作）口徑待業主說明", "工程編號是否合併成案件編號前 7 碼（目前以案件記錄為單位）", "進行中工作營業額剩餘：外業分母粒度、延期、停工、委外規則（D-03）與避免內外業重疊（D-06）"],
   },
   {
     id: "R11",

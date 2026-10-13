@@ -42,6 +42,8 @@ const innerPeople = ["王小明", "李小華", "陳大文", "林美玲"]; // 虛
 const projectNames = ["新北地形案", "桃園地籍案", "台中放樣案", "高雄控制案", "台南測量案", "新竹水深案"]; // 虛構，與 projects 同序
 const adminItems = ["公文收發", "請款作業", "採購對帳", "文件歸檔", "出差申請"];
 const innerItems = ["數值地形圖", "縱橫斷面", "成果報告", "點位清冊"];
+const caseNames = ["新北地形測量案", "桃園地籍調查案", "台中放樣案", "高雄控制測量案", "彰化水深測量案", "雲林管線調查案"]; // 虛構，與 projects 一一對應
+const caseOf = (i: number) => projects[(i * 5 + Math.floor(i / 7)) % projects.length]; // 工作單的案件（所屬案件／案件編號共用同一個）
 
 const SPECS: Record<string, { n: number; spec: Spec }> = {
   "field-work": {
@@ -51,10 +53,10 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["工程編號", "select", (r) => pick(r, projects)],
       ["組別", "select", (r) => pick(r, groups)],
       ["工作項目", "select", (r) => pick(r, items)],
-      ["出工日", "date", (r) => inWeeks(r)],
-      ["數量", "number", (r) => Math.round(r() * 20 * 10) / 10],
-      ["點數", "number", (r) => Math.round(r() * 8 * 10) / 10],
-      ["檢核狀態", "select", (r) => pick(r, ["已檢核", "已檢核", "待檢核", "退回"])],
+      ["出工日期", "date", (r) => inWeeks(r)],
+      ["完成數量", "number", (r) => Math.round(r() * 20 * 10) / 10],
+      ["最終營業額點數", "number", (r) => Math.round(r() * 8 * 10) / 10],
+      ["檢核狀態", "select", (r) => pick(r, ["已通過", "已通過", "待檢核", "已退回 "])], // 真實選項「已退回 」結尾有空白
       ["控制組檢核", "select", (r) => pick(r, ["通過", "通過", "通過", "不通過", null])],
       ["⚠營業額異常", "checkbox", (r) => r() > 0.92],
       ["出工人", "multiselect", (r) => [pick(r, ["王小明", "陳大文", "林志強", "張家豪", "李俊傑", "黃建宏"])]],
@@ -63,6 +65,18 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["退回原因", "text", (r) => (r() > 0.9 ? pick(r, ["數量與照片不符", "工項選錯"]) : null)],
       ["是否違反SOP", "select", (r) => (r() > 0.25 ? (r() > 0.88 ? "是" : "否") : null)],
       ["修改後營業額", "number", (r) => (r() > 0.9 ? Math.round(r() * 8 * 10) / 10 : null)],
+      // R10 外業報告：案件（以案件為單位比對）、突發狀況、外業經理檢核
+      ["所屬案件", "multiselect", (_, i) => [caseOf(i)]],
+      ["案件編號", "text", (_, i) => caseOf(i)],
+      ["突發狀況", "text", (r) => (r() > 0.9 ? pick(r, ["下雨停工", "儀器故障，改日補測", "業主臨時要求改測點"]) : null)],
+      ["外業經理檢核", "checkbox", (r) => r() > 0.5],
+    ],
+  },
+  cases: {
+    n: 6,
+    spec: [
+      ["案件編號", "text", (_, i) => projects[i]],
+      ["案件名稱", "text", (_, i) => caseNames[i]],
     ],
   },
   schedule: {
@@ -80,6 +94,8 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["開始日期", "date", (r) => inWeeks(r)],
       ["結束日期", "date", () => null],
       ["預排點數", "number", (r) => (r() > 0.5 ? Math.round(r() * 3 * 10) / 10 : null)],
+      ["案件", "multiselect", (r) => [pick(r, projects)]], // R10：預排的案件（標題＝案件編號）
+      ["條類型", "select", () => "出工"],
     ],
   },
   "internal-cost": {
@@ -289,7 +305,7 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
 };
 
 // R11 reads the schedule by field id; give the demo schedule the same ids.
-const DEMO_FID: Record<string, string> = { 人員: "fld7KNCsVe", 業別: "fldrENe4H6", 開始日期: "fldMXOggGP", 結束日期: "fldjWv1xST", 預估營業額點數: "fld5lTSN1r", 案件: "fldnzMsrzZ", 條類型: "fld78OmLVn", 備註: "fldpFvkV6G" };
+const DEMO_FID: Record<string, string> = { 人員: "fld7KNCsVe", 業別: "fldrENe4H6", 組別: "fldNDUy2XP", 開始日期: "fldMXOggGP", 結束日期: "fldjWv1xST", 預估營業額點數: "fld5lTSN1r", 案件: "fldnzMsrzZ", 條類型: "fld78OmLVn", 備註: "fldpFvkV6G" };
 const specKey = (key: string) => key.replace(/^v[34]-/, "");
 
 export function hasDemo(key: string) {
