@@ -10,7 +10,7 @@ export interface WarmStatus {
   lastEnd?: number;
   ok: number;
   total: number;
-  sources: Record<string, { ok: boolean; ms: number; at: number; records?: number; error?: string }>;
+  sources: Record<string, { ok: boolean; ms: number; at: number; records?: number; sourceTotal?: number; excluded?: number; error?: string }>;
 }
 // Shared across Next.js module copies (startup hook vs. API routes).
 const shared = (g.__pmWarm ??= { running: false, status: { ok: 0, total: 0, sources: {} } });
@@ -33,7 +33,7 @@ export async function warmAll() {
           try {
             const d = await getSourceData(src, true);
             ok++;
-            warmStatus.sources[src.key] = { ok: true, ms: Date.now() - t, at: Date.now(), records: d.total };
+            warmStatus.sources[src.key] = { ok: true, ms: Date.now() - t, at: Date.now(), records: d.total, sourceTotal: d.sourceTotal, excluded: d.excluded };
           } catch (err) {
             const message = (err as Error).message;
             warmStatus.sources[src.key] = { ok: false, ms: Date.now() - t, at: Date.now(), error: message.slice(0, 200) };
