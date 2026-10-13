@@ -57,6 +57,8 @@ function SourceRow({ src }: { src: SourceDef }) {
         </dd>
       </dl>
       {s.data && (
+        <details className="fields-details">
+          <summary>欄位清單（{s.data.fields.length}）</summary>
         <div className="field-list">
           {s.data.fields.map((f) => (
             <span key={f.id} className="field-tag">
@@ -64,6 +66,7 @@ function SourceRow({ src }: { src: SourceDef }) {
             </span>
           ))}
         </div>
+        </details>
       )}
     </section>
   );

@@ -14,6 +14,7 @@ export interface SourceDef {
   dateField?: string; // business date used for week filtering; auto-picked when unset
   createdAfter?: number; // epoch ms: drop records created before this (or with unknown creation time)
   createdAfterLabel?: string;
+  columns?: string[]; // key columns shown by default (names that don't exist are skipped)
   url?: string;
   note?: string;
 }
@@ -27,6 +28,15 @@ const LARK_WEB = "https://yong-xiang-survey.jp.larksuite.com";
 // earlier (the 535 legacy test rows) are permanently excluded.
 const V4_BASELINE = Date.UTC(2026, 9, 7, 12, 10, 44, 122);
 const V4_RULE = { createdAfter: V4_BASELINE, createdAfterLabel: "2026-10-07 20:10:44（台北）" };
+
+// Default visible columns, matched by field name; V3 and V4 share most names.
+const COLS = {
+  fieldWork: ["工作單號", "出工日期", "出工日", "工作日期-薪資", "組別", "出工人", "所屬案件", "案件編號", "合約工項", "完成數量", "計價數量", "營業額點數", "最終營業額點數", "檢核狀態", "控制組檢核", "外業經理檢核", "是否重工"],
+  fieldCost: ["單號", "工作日期", "組別", "組長", "出工人數", "當日營業額點數總和", "出工成本總計", "檢核狀態", "外業經理檢核", "工務助理檢核"],
+  internalWork: ["工作單號", "姓名", "所屬案件", "案件編號", "內業工項", "計價數量", "營業額點數", "最終營業額點數", "品管檢核", "雅雯檢核", "檢核時間", "是否重工"],
+  internalCost: ["單號", "工作日期", "組別", "所屬組別", "內業組別", "填報人", "當日營業額點數總和", "出工成本總計", "內業組長檢核", "PM檢核"],
+  schedule: ["日期", "開始日期", "結束日期", "業別", "組別", "人員", "案件", "工作內容", "車輛", "儀器"],
+};
 
 const tableUrl = (base: string, table: string, view?: string) => `${LARK_WEB}/base/${base}?table=${table}${view ? `&view=${view}` : ""}`;
 
@@ -45,15 +55,15 @@ function raw(key: string, name: string, version: DataVersion, table: string, ext
 }
 
 export const SOURCES: SourceDef[] = [
-  raw("v3-field-work", "外業工作單", "v3", "tbl97f1uXqi7Qz0k", { note: "R01 與 R10 共用同一批工作單，跨報告不可相加。" }),
-  raw("v4-field-work", "外業工作單", "v4", "tbl5zPLS0ExWNEty", { dateField: "工作日期-薪資", note: "R01 與 R10 共用；欄名含「最終」不代表已核定。" }),
-  raw("v4-field-cost", "外業成本單", "v4", "tbl8wRYCUCvbSoJG", { dateField: "工作日期" }),
-  raw("v3-internal-work", "內業工作單", "v3", "tblTP5Naz52FBpFg", { note: "R02 與 R09 共用；「最終營業額點數」欄名含「最終」不代表已核定。" }),
-  raw("v4-internal-work", "內業工作單", "v4", "tblrCo8KeZiuJUNh", { note: "R02、R03、R09 共用；含品管檢核、業主數量覆寫欄位。" }),
-  raw("v3-internal-cost", "內業成本單", "v3", "tbl8JdWLLwlPFuoF", { dateField: "工作日期" }),
-  raw("v4-internal-cost", "內業成本單", "v4", "tblKwSDRg6WaGHYr", { dateField: "工作日期" }),
-  raw("v3-schedule", "工作預排", "v3", "tblN8c3WN44233aG"),
-  raw("v4-schedule", "工作預排", "v4", "tblZz6Mkhv9gHrB2", { dateField: "開始日期" }),
+  raw("v3-field-work", "外業工作單", "v3", "tbl97f1uXqi7Qz0k", { columns: COLS.fieldWork, note: "R01 與 R10 共用同一批工作單，跨報告不可相加。" }),
+  raw("v4-field-work", "外業工作單", "v4", "tbl5zPLS0ExWNEty", { dateField: "工作日期-薪資", columns: COLS.fieldWork, note: "R01 與 R10 共用；欄名含「最終」不代表已核定。" }),
+  raw("v4-field-cost", "外業成本單", "v4", "tbl8wRYCUCvbSoJG", { dateField: "工作日期", columns: COLS.fieldCost }),
+  raw("v3-internal-work", "內業工作單", "v3", "tblTP5Naz52FBpFg", { columns: COLS.internalWork, note: "R02 與 R09 共用；「最終營業額點數」欄名含「最終」不代表已核定。" }),
+  raw("v4-internal-work", "內業工作單", "v4", "tblrCo8KeZiuJUNh", { columns: COLS.internalWork, note: "R02、R03、R09 共用；含品管檢核、業主數量覆寫欄位。" }),
+  raw("v3-internal-cost", "內業成本單", "v3", "tbl8JdWLLwlPFuoF", { dateField: "工作日期", columns: COLS.internalCost }),
+  raw("v4-internal-cost", "內業成本單", "v4", "tblKwSDRg6WaGHYr", { dateField: "工作日期", columns: COLS.internalCost }),
+  raw("v3-schedule", "工作預排", "v3", "tblN8c3WN44233aG", { columns: COLS.schedule }),
+  raw("v4-schedule", "工作預排", "v4", "tblZz6Mkhv9gHrB2", { dateField: "開始日期", columns: COLS.schedule }),
   raw("v3-equipment", "儀器費率", "v3", "tblfgeEtMuBTg72O", { note: "費率表不等於完整資產台帳；租金缺值是未知，不是免費。" }),
   raw("v4-equipment", "儀器費率", "v4", "tblg3Fo23T6Gos6S", {
     createdAfter: undefined,
