@@ -76,6 +76,14 @@ function raw(key: string, name: string, version: DataVersion, table: string, ext
   };
 }
 
+// 儀器管理系統 Base：PM週報 應用已實測可讀全部 5 張表。
+const EQUIP_BASE = "YHqcbb8MHa4VdGsA0UnjajNDpgd";
+// 預約單／歸還單不讀申請人、處理人等人員欄位。
+const BOOKING_FIELD = (name: string) => !/发起人|当前处理人|审批节点|审批流程/.test(name);
+function eqSys(key: string, name: string, table: string, note: string, extra: Partial<SourceDef> = {}): SourceDef {
+  return { key, name, baseToken: EQUIP_BASE, tableId: table, url: tableUrl(EQUIP_BASE, table), note, ...extra };
+}
+
 export const SOURCES: SourceDef[] = [
   raw("v3-field-work", "外業工作單", "v3", "tbl97f1uXqi7Qz0k", { dateField: "出工日期", columns: COLS.fieldWork, ...DASH.fieldWork, note: "R01 與 R10 共用同一批工作單，跨報告不可相加。" }),
   raw("v4-field-work", "外業工作單", "v4", "tbl5zPLS0ExWNEty", { dateField: "工作日期-薪資", columns: COLS.fieldWork, ...DASH.fieldWork, note: "R01 與 R10 共用；欄名含「最終」不代表已核定。" }),
@@ -137,9 +145,12 @@ export const SOURCES: SourceDef[] = [
     url: `${LARK_WEB}/base/${SALARY_BASE}`,
     note: "只讀加班時數／天數與人員、組別、月份欄位；底薪、總薪資等其他欄位一律不讀。僅 HR_VIEWERS 名單可看。",
   },
-  // R07: 儀器管理系統. Not located yet — set baseToken + tableId (or tableName) once
-  // the Base is known; the board finds its fields by name.
-  { key: "equipment-system", name: "儀器管理系統（儀器清單）", note: "尚未定位：請提供儀器管理系統的 Base 連結。" },
+  // R07: 儀器管理系統 Base（業主 2026-10-13 提供）。與 V3／V4 的儀器費率、車輛分開，不相加、不去重。
+  eqSys("equipment-system", "儀器管理系統：儀器總表（借用台帳）", "tblHZFEypeKfWOsF", "138 筆台帳，含租賃型態（月租／日租）、借用狀態（可借用／已借出）、系統封存；與「資料表」命名不同，兩者不去重。"),
+  eqSys("equipment-rates", "儀器管理系統：資料表（儀器費率清單）", "tblZmvrjDC5Q3sIp", "含日租金、啟用、狀態（正常／送修-損壞／出險）；與「儀器總表」是兩份清單，不去重、不相加。"),
+  eqSys("equipment-vehicles", "儀器管理系統：車輛", "tblYUUwi0MEGuLZ0", "保養到期、保險到期取自本表；與 V4 車輛主檔分開，不相加。", { columns: ["車牌", "狀態", "current_mileage", "next_maintenance", "insurance_date", "insurance_company", "maintenance_company"] }),
+  eqSys("equipment-bookings", "儀器管理系統：儀器預約申請單", "tblVLETpvLxMNwaC", "借出以「已通过」且借出日期落在所選週計；已撤回另計。不讀申請人、處理人欄位。", { allowField: BOOKING_FIELD, dateField: "借出日期" }),
+  eqSys("equipment-returns", "儀器管理系統：儀器管理歸還單", "tbl2qFvPOihhe3R1", "歸還以「已通过」且歸還日期落在所選週計；已撤回另計。不讀申請人、處理人欄位。", { allowField: BOOKING_FIELD, dateField: "歸還日期" }),
   { key: "equipment-inspection", name: "月租儀器／車輛檢查紀錄", note: "尚未定位：請提供檢查紀錄所在的 Base／資料表。" },
   { key: "equipment-calibration", name: "TAF／自校驗紀錄", note: "尚未定位：請提供 TAF 與自校驗紀錄所在的 Base／資料表。" },
   {
@@ -225,9 +236,9 @@ export const REPORTS: ReportDef[] = [
     slug: "r07",
     name: "儀器車輛管理詳情",
     purpose: "掌握儀器／車輛可用狀態、月租儀器與車輛是否有檢查，以及 TAF 與自校驗是否到期。",
-    sources: ["equipment-system", "equipment-inspection", "equipment-calibration", "v3-equipment", "v4-equipment", "v4-vehicles"],
+    sources: ["equipment-system", "equipment-rates", "equipment-vehicles", "equipment-bookings", "equipment-returns", "equipment-inspection", "equipment-calibration", "v3-equipment", "v4-equipment", "v4-vehicles"],
     mustHave: ["儀器管理系統", "月租型儀器與車輛是否有檢查", "TAF 與自校驗檢核紀錄"],
-    pending: ["資產範圍與同物異名去重", "停用／送修及保養日曆定義"],
+    pending: ["資產範圍與同物異名去重（儀器總表與資料表兩份清單不去重）", "借出未歸還：預約單與歸還單沒有明確對應鍵，待定義", "停用／送修及保養日曆定義"],
   },
   {
     id: "R08",

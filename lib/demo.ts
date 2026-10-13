@@ -131,15 +131,62 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["日租金", "number", (r) => (r() > 0.3 ? Math.round(500 + r() * 3000) : null)],
     ],
   },
+  // 儀器管理系統 Base（示範）：儀器總表（借用台帳）。欄位同真實表：設備類別、ID、設備、rent_type、owner_group、狀態、系統封存。
   "equipment-system": {
     n: 14,
     spec: [
+      ["設備類別", "text", (_, i) => DEMO_GEAR[i][2]],
+      ["ID", "text", (_, i) => DEMO_GEAR[i][1]],
+      ["設備", "text", (_, i) => DEMO_GEAR[i][0]],
+      ["rent_type", "select", (_, i) => (DEMO_GEAR[i][3] === "月租" ? "月租型" : "日租型")],
+      ["owner_group", "select", (r) => pick(r, groups)],
+      ["狀態", "select", (r) => pick(r, ["可借用", "可借用", "可借用", "已借出"])],
+      ["系統封存", "checkbox", (_, i) => (i === 13 ? true : null)],
+    ],
+  },
+  // 儀器管理系統 Base（示範）：資料表（費率清單）。
+  "equipment-rates": {
+    n: 12,
+    spec: [
       ["儀器名稱", "text", (_, i) => DEMO_GEAR[i][0]],
-      ["儀器編號", "text", (_, i) => DEMO_GEAR[i][1]],
-      ["種類", "select", (_, i) => DEMO_GEAR[i][2]],
-      ["租賃方式", "select", (_, i) => DEMO_GEAR[i][3]],
-      ["狀態", "select", (r) => pick(r, ["可用", "可用", "可用", "可用", "使用中", "使用中", "送修", "停用"])],
-      ["保管組別", "select", (r) => pick(r, groups)],
+      ["日租金", "number", (r) => (r() > 0.3 ? Math.round(500 + r() * 3000) : null)],
+      ["啟用", "checkbox", () => true],
+      ["狀態", "select", (_, i) => (i === 3 ? "送修-損壞" : i === 7 ? "出險" : "正常")],
+      ["類別", "text", (_, i) => DEMO_GEAR[i][2]],
+      ["備註", "text", (_, i) => (i === 3 ? "示範：螢幕破裂送原廠" : null)],
+    ],
+  },
+  // 儀器管理系統 Base（示範）：車輛。日期相對今天，讓逾期與 30 天內都看得到。
+  "equipment-vehicles": {
+    n: 6,
+    spec: [
+      ["車牌", "text", (_, i) => `DEMO-${100 + i}`],
+      ["狀態", "select", () => "可借用"],
+      ["current_mileage", "number", (r) => Math.round(20000 + r() * 90000)],
+      ["next_maintenance", "date", (_, i) => (i === 5 ? null : Date.now() + [-6, 12, 25, 60, 120][i]! * day)],
+      ["insurance_date", "date", (_, i) => Date.now() + [200, 18, -2, 90, 300, 45][i]! * day],
+      ["insurance_company", "select", (r) => pick(r, ["乙(新光)", "乙(兆豐)"])],
+      ["系統封存", "checkbox", () => false],
+    ],
+  },
+  // 儀器管理系統 Base（示範）：儀器預約申請單。
+  "equipment-bookings": {
+    n: 16,
+    spec: [
+      ["申请状态", "select", (_, i) => (i === 5 ? "已撤回" : "已通过")],
+      ["設備類別", "select", (r) => pick(r, ["日租型儀器", "車輛", "月租型儀器"])],
+      ["所屬組別", "select", (r) => pick(r, ["水深A", "水深B", "地形C"])],
+      ["借出日期", "date", (r) => inWeeks(r)],
+      ["預計歸還日期", "date", (r) => inWeeks(r) + day],
+    ],
+  },
+  // 儀器管理系統 Base（示範）：儀器管理歸還單。
+  "equipment-returns": {
+    n: 12,
+    spec: [
+      ["申请状态", "select", (_, i) => (i === 4 ? "已撤回" : "已通过")],
+      ["借出儀器/車輛", "select", (_, i) => DEMO_GEAR[i % 10][0]],
+      ["歸還日期", "date", (r) => inWeeks(r) + day],
     ],
   },
   "equipment-inspection": {

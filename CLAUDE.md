@@ -93,6 +93,7 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 | 詠翔日報系統 V4 | `H7W6b0PFWaVF1BsgqXJj3pQ9pXb` | 1254302：進階權限「僅自訂角色可存取」，應用不在任何角色 |
 | 報價 | `JoOqbggsVar0ATsVgbcjh6IIp1g` | 1254302，同上 |
 | 薪水總表 | `VwAsbezz9app3YsramgjduLYp2U` | 新接入；需把 PM週報 應用加入（只給可閱讀），表名以 `/薪水總表|薪資總表|薪水|薪資/` 自動尋找 |
+| 儀器管理系統 | `YHqcbb8MHa4VdGsA0UnjajNDpgd` | 可讀（2026-10-13 業主提供；已開進階權限，但 PM週報 應用實測可讀全部 5 張表）。R07 來源 `equipment-system`／`equipment-rates`／`equipment-vehicles`／`equipment-bookings`／`equipment-returns` |
 
 1254302 的處理方向：角色無法直接指派給應用，可建立一個群組、把 PM週報 機器人加入群組，再把群組指派到唯讀角色（需使用者同意）。
 
@@ -116,7 +117,12 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 
 **R02 內業檢查**：同 R01 六項＋業主進度；失誤率用「雅雯檢核」；預排取業別＝內業；組別與工作日期由「所屬成本單」帶入；只顯示所選週；進度 % 先不算，只顯示；天數＝距交期天數（交期欄位未定位）。
 
-**R07 儀器車輛管理詳情**（`components/EquipmentBoard.tsx`）：三塊——儀器管理系統（清單、可用、送修／停用、月租型）；月租型儀器＋車輛在所選週有沒有檢查（未檢查＝紅，檢查結果異常另計）；TAF 與自校驗（TAF 依最近一次有效期限：逾期紅、30 天內黃；自校顯示最近一次日期與結果）。來源 `equipment-system`／`equipment-inspection`／`equipment-calibration` 尚未定位；清單未接入前暫用 V3 儀器費率。欄位用名稱自動辨識（見檔案內 `masterFields` 等）。
+**R07 儀器車輛管理詳情**（`components/EquipmentBoard.tsx`，純函式在 `lib/equipment.ts`，測試 `scripts/test-equipment.mjs`）：五塊來自「儀器管理系統」Base（與 V3／V4 的儀器費率、車輛分開，不相加、不去重），另保留檢查與校驗兩塊。
+- 儀器總表（`equipment-system`，138 筆）＝借用台帳：狀態是借用狀態（可借用／已借出）、`rent_type` 月租型／日租型、`系統封存` 勾選＝已下架，不列入清單與數量。
+- 資料表（`equipment-rates`，144 筆）＝費率清單：日租金、啟用、狀態（正常／送修-損壞／出險）。可用＝啟用且狀態不含送修／損壞／故障／出險／停用／報廢；送修／出險數取自本表。兩份清單名稱格式不同、無共同鍵，**不去重、不相加**。
+- 車輛（`equipment-vehicles`）：`next_maintenance` 保養到期、`insurance_date` 保險到期；以台北日曆日計，已過＝紅、30 天內（含當天、含第 30 天）＝黃，沒填＝「無資料」；系統封存的車不列；不推算里程保養。
+- 預約與歸還（`equipment-bookings`／`equipment-returns`）：只算審批狀態「已通过」；借出依「借出日期」、歸還依「歸還日期」落在所選週；「已撤回」另計、不計入借出歸還。**借出未歸還＝待定義**（歸還單的「借出儀器/車輛」是顯示文字、歸還單的 ID／車牌全空，與預約單沒有明確對應鍵，不猜）。預約／歸還來源不讀申請人、處理人欄位（`allowField`）。
+- 月租儀器／車輛檢查（`equipment-inspection`）、TAF／自校驗（`equipment-calibration`）：新 Base 沒有對應表，維持「尚未定位」。
 
 **R04 人事**：招聘暫無；出勤、出差需開通 Lark 假勤／審批權限；加班取自薪水總表（以月為單位）。
 

@@ -2,10 +2,11 @@
 // R07 儀器車輛管理詳情: 1) 儀器管理系統（清單） 2) 月租型儀器與車輛是否有檢查
 // 3) TAF 與自校驗檢核紀錄. Fields are found by name so the board works once the
 // 儀器管理系統 tables are located in lib/reports.ts.
-import { CircleAlert, ClipboardCheck, Gauge, Wrench } from "lucide-react";
+import { CalendarClock, Car, CircleAlert, ClipboardCheck, Gauge, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
 import { pickField } from "@/lib/controlGroup";
+import { ALERT_DAYS, bookingStats, isBadStatus, summarizeRates, vehicleReminders, type Due } from "@/lib/equipment";
 import type { CellValue, FieldMeta, TableData } from "@/lib/types";
 import { formatDate, weekName } from "@/lib/week";
 import { useShell } from "./AppShell";
@@ -21,12 +22,12 @@ const key = (s: string) => s.replace(/\s+/g, "").toLowerCase();
 
 function masterFields(fields: FieldMeta[]) {
   return {
-    name: pickField(fields, ["儀器名稱", "設備名稱", "名稱", "車輛名稱", "車牌", "車牌號碼"]) ?? fields.find((f) => f.primary),
-    code: pickField(fields, ["儀器編號", "設備編號", "財產編號", "編號", "序號", "車牌號碼"]),
+    name: pickField(fields, ["儀器名稱", "設備名稱", "設備", "名稱", "車輛名稱", "車牌", "車牌號碼"]) ?? fields.find((f) => f.primary),
+    code: pickField(fields, ["儀器編號", "設備編號", "財產編號", "編號", "ID", "序號", "車牌號碼"]),
     kind: pickField(fields, ["種類", "類別", "儀器類別", "設備類別", "類型"]),
     status: pickField(fields, ["狀態", "使用狀態", "設備狀態"]),
-    rent: pickField(fields, ["租賃方式", "租賃類型", "取得方式", "租用方式", "是否月租", "月租"]),
-    owner: pickField(fields, ["保管組別", "保管人", "使用組別", "使用人", "負責人", "組別"]),
+    rent: pickField(fields, ["租賃方式", "租賃類型", "rent_type", "取得方式", "租用方式", "是否月租", "月租"]),
+    owner: pickField(fields, ["保管組別", "owner_group", "保管人", "使用組別", "使用人", "負責人", "組別"]),
   };
 }
 type MF = ReturnType<typeof masterFields>;
@@ -65,12 +66,15 @@ function SourceNote({ state, label }: { state: SourceState; label: string }) {
 const Pill = ({ tone, children }: { tone?: "good" | "bad" | "warn"; children: React.ReactNode }) => <span className={`pill ${tone ? `pill-${tone}` : ""}`}>{children}</span>;
 
 // 1. 儀器管理系統
-function Inventory({ data, label }: { data: TableData; label: string }) {
+function Inventory({ data: all, label }: { data: TableData; label: string }) {
+  // 系統封存（已下架）的不列入清單與可用數。
+  const data = useMemo(() => ({ ...all, records: all.records.filter((r) => r.fields["系統封存"] !== true) }), [all]);
+  const archived = all.records.length - data.records.length;
   const mf = masterFields(data.fields);
   const [kind, setKind] = useState<string | null>(null);
   const kinds = [...new Set(data.records.map((r) => val(r, mf.kind)).filter(Boolean))];
   const rows = data.records.filter((r) => !kind || val(r, mf.kind) === kind);
-  const bad = (r: Rec) => /送修|停用|損壞|故障|報廢/.test(val(r, mf.status));
+  const bad = (r: Rec) => isBadStatus(val(r, mf.status));
   const count = (f: (r: Rec) => boolean) => data.records.filter(f).length;
   return (
     <>
@@ -78,7 +82,9 @@ function Inventory({ data, label }: { data: TableData; label: string }) {
         <div className="kpi">
           <div className="kpi-label">儀器／車輛</div>
           <div className="kpi-value">{data.records.length}</div>
-          <div className="kpi-sub">取自「{label}」</div>
+          <div className="kpi-sub">
+            取自「{label}」{archived ? `，另有 ${archived} 筆已封存不列` : ""}
+          </div>
         </div>
         <div className="kpi">
           <div className="kpi-label">可用</div>
@@ -88,7 +94,7 @@ function Inventory({ data, label }: { data: TableData; label: string }) {
         <div className="kpi">
           <div className="kpi-label">送修／停用</div>
           <div className={`kpi-value ${count(bad) ? "bad-text" : ""}`}>{mf.status ? count(bad) : "—"}</div>
-          <div className="kpi-sub">狀態含送修、停用、損壞、故障</div>
+          <div className="kpi-sub">狀態含送修、停用、損壞、故障、出險</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">月租型</div>
@@ -134,6 +140,175 @@ function Inventory({ data, label }: { data: TableData; label: string }) {
           </tbody>
         </table>
       </div>
+    </>
+  );
+}
+
+// 1b. 儀器管理系統「資料表」（費率清單）：狀態分布與可用／送修
+function RateList({ data }: { data: TableData }) {
+  const s = useMemo(() => summarizeRates(data.records), [data]);
+  const nameF = pickField(data.fields, ["儀器名稱"]) ?? data.fields.find((f) => f.primary);
+  const kindF = pickField(data.fields, ["類別"]);
+  const statusF = pickField(data.fields, ["狀態"]);
+  const noteF = pickField(data.fields, ["備註"]);
+  const bad = data.records.filter((r) => r.fields["啟用"] === true && isBadStatus(val(r, statusF)));
+  return (
+    <>
+      <div className="kpis">
+        <div className="kpi">
+          <div className="kpi-label">清單筆數</div>
+          <div className="kpi-value">{s.total}</div>
+          <div className="kpi-sub">
+            其中啟用 {s.enabled}、有日租金 {s.withRate}
+          </div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">可用</div>
+          <div className="kpi-value">{s.usable}</div>
+          <div className="kpi-sub">啟用且狀態不是送修／出險</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">送修／出險</div>
+          <div className={`kpi-value ${s.repair ? "bad-text" : ""}`}>{s.repair}</div>
+          <div className="kpi-sub">
+            {Object.entries(s.byStatus)
+              .map(([k, n]) => `${k} ${n}`)
+              .join("、")}
+          </div>
+        </div>
+      </div>
+      {bad.length > 0 && (
+        <div className="cg-detail">
+          <table>
+            <thead>
+              <tr>
+                <th>儀器</th>
+                <th>類別</th>
+                <th>狀態</th>
+                <th>備註</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bad.map((r) => (
+                <tr key={r.id} className="cg-err">
+                  <td className="strong">{val(r, nameF) || "—"}</td>
+                  <td>{val(r, kindF) || "—"}</td>
+                  <td>
+                    <Pill tone="bad">{val(r, statusF)}</Pill>
+                  </td>
+                  <td className="cg-notes-cell">{val(r, noteF) || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+// 4. 車輛：保養到期、保險到期（30 天內黃、已過紅）
+const dueText = (d: Due) => (d.at === null ? "—" : formatDate(d.at));
+const duePill = (d: Due) =>
+  d.state === "none" ? (
+    <span className="muted">無資料</span>
+  ) : d.state === "overdue" ? (
+    <Pill tone="bad">已過 {-d.days!} 天</Pill>
+  ) : d.state === "soon" ? (
+    <Pill tone="warn">{d.days === 0 ? "今天到期" : `${d.days} 天內`}</Pill>
+  ) : (
+    <Pill tone="good">未到期</Pill>
+  );
+
+function Vehicles({ data }: { data: TableData }) {
+  const v = useMemo(() => vehicleReminders(data.records, Date.now()), [data]);
+  const rank = (d: Due) => (d.state === "overdue" ? 0 : d.state === "soon" ? 1 : d.state === "ok" ? 2 : 3);
+  const rows = [...v.rows].sort((a, b) => Math.min(rank(a.maintenance), rank(a.insurance)) - Math.min(rank(b.maintenance), rank(b.insurance)));
+  return (
+    <>
+      <div className="kpis">
+        <div className="kpi">
+          <div className="kpi-label">車輛</div>
+          <div className="kpi-value">{v.rows.length}</div>
+          <div className="kpi-sub">已封存的不列</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">保養到期提醒</div>
+          <div className={`kpi-value ${v.maintenanceAlerts ? "bad-text" : ""}`}>{v.maintenanceAlerts}</div>
+          <div className="kpi-sub">已過或 {ALERT_DAYS} 天內（next_maintenance）</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">保險到期提醒</div>
+          <div className={`kpi-value ${v.insuranceAlerts ? "bad-text" : ""}`}>{v.insuranceAlerts}</div>
+          <div className="kpi-sub">已過或 {ALERT_DAYS} 天內（insurance_date）</div>
+        </div>
+      </div>
+      <div className="cg-detail">
+        <table>
+          <thead>
+            <tr>
+              <th>車牌</th>
+              <th>狀態</th>
+              <th>里程</th>
+              <th>下次保養</th>
+              <th>保養提醒</th>
+              <th>保險到期</th>
+              <th>保險提醒</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.plate} className={r.maintenance.state === "overdue" || r.insurance.state === "overdue" ? "cg-err" : undefined}>
+                <td className="strong">{r.plate}</td>
+                <td>{r.status || "—"}</td>
+                <td>{r.mileage === null ? "—" : formatNumber(r.mileage)}</td>
+                <td>{dueText(r.maintenance)}</td>
+                <td>{duePill(r.maintenance)}</td>
+                <td>{dueText(r.insurance)}</td>
+                <td>{duePill(r.insurance)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+// 5. 預約與歸還（所選週）
+function Bookings({ book, ret, start, end }: { book: TableData; ret: TableData; start: number; end: number }) {
+  const b = useMemo(() => bookingStats(book.records, ret.records, start, end), [book, ret, start, end]);
+  const cats = Object.entries(b.lentByCategory);
+  return (
+    <>
+      <div className="kpis">
+        <div className="kpi">
+          <div className="kpi-label">本週借出</div>
+          <div className="kpi-value">{b.lent}</div>
+          <div className="kpi-sub">{cats.length ? cats.map(([k, n]) => `${k} ${n}`).join("、") : "預約單已通過、借出日期落在所選週"}</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">本週歸還</div>
+          <div className="kpi-value">{b.returned}</div>
+          <div className="kpi-sub">歸還單已通過、歸還日期落在所選週</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">借出未歸還</div>
+          <div className="kpi-value">{b.outstanding === null ? "待定義" : b.outstanding}</div>
+          <div className="kpi-sub">預約單與歸還單沒有明確對應鍵，不猜</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">已撤回</div>
+          <div className="kpi-value">{b.lentWithdrawn + b.returnedWithdrawn}</div>
+          <div className="kpi-sub">
+            預約 {b.lentWithdrawn}、歸還 {b.returnedWithdrawn}（全部期間，不計入借出歸還）
+          </div>
+        </div>
+      </div>
+      <p className="muted small">
+        全部期間共 {b.bookingTotal} 張預約單、{b.returnTotal} 張歸還單
+        {b.lentNoDate + b.returnedNoDate ? `；已通過但沒填日期：預約 ${b.lentNoDate}、歸還 ${b.returnedNoDate}` : ""}。
+      </p>
     </>
   );
 }
@@ -331,10 +506,14 @@ export default function EquipmentBoard() {
   const { week, demo } = useShell();
   const system = useSource("equipment-system");
   const fallback = useSource("v3-equipment", { enabled: system.status !== "ok" && system.status !== "loading" });
+  const rates = useSource("equipment-rates");
+  const vehicles = useSource("equipment-vehicles");
+  const bookings = useSource("equipment-bookings");
+  const returns = useSource("equipment-returns");
   const insp = useSource("equipment-inspection");
   const cal = useSource("equipment-calibration");
   const master = system.status === "ok" ? system.data : fallback.status === "ok" ? fallback.data : undefined;
-  const masterLabel = system.status === "ok" ? "儀器管理系統" : "V3 儀器費率（暫代，非完整台帳）";
+  const masterLabel = system.status === "ok" ? "儀器管理系統：儀器總表" : "V3 儀器費率（暫代，非完整台帳）";
   const notLocated = useMemo(() => [system, insp, cal].some((s) => s.status === "not-located"), [system, insp, cal]);
 
   return (
@@ -349,6 +528,28 @@ export default function EquipmentBoard() {
 
       <Section icon={<Wrench size={16} />} title="儀器管理系統" sub={master ? `取自「${masterLabel}」` : undefined}>
         {master ? <Inventory data={master} label={masterLabel} /> : <SourceNote state={system} label="儀器清單" />}
+      </Section>
+
+      <Section icon={<Wrench size={16} />} title="儀器管理系統：資料表（費率清單）" sub="另一份清單，不與儀器總表相加或去重">
+        {rates.status === "ok" && rates.data ? <RateList data={rates.data} /> : <SourceNote state={rates} label="資料表" />}
+        <p className="muted small">「儀器總表」是借用台帳（可借用／已借出），「資料表」帶日租金與送修狀態；兩份名稱格式不同，沒有共同鍵，所以分開顯示，數量不互相加總。</p>
+      </Section>
+
+      <Section icon={<Car size={16} />} title="車輛（保養與保險）" sub="取自「儀器管理系統：車輛」，與 V4 車輛主檔分開">
+        {vehicles.status === "ok" && vehicles.data ? <Vehicles data={vehicles.data} /> : <SourceNote state={vehicles} label="車輛" />}
+        <p className="muted small">下次保養＝next_maintenance、保險到期＝insurance_date；已過＝紅、{ALERT_DAYS} 天內＝黃，只做提醒，不推算里程保養。</p>
+      </Section>
+
+      <Section icon={<CalendarClock size={16} />} title="預約與歸還" sub={`${weekName(week.offset)} ${week.label}`}>
+        {bookings.status === "ok" && bookings.data && returns.status === "ok" && returns.data ? (
+          <Bookings book={bookings.data} ret={returns.data} start={week.start} end={week.end} />
+        ) : (
+          <>
+            <SourceNote state={bookings} label="預約申請單" />
+            <SourceNote state={returns} label="歸還單" />
+          </>
+        )}
+        <p className="muted small">只算審批狀態「已通过」；借出依借出日期、歸還依歸還日期。借出未歸還需要兩張單的對應鍵，目前待定義。</p>
       </Section>
 
       <Section icon={<ClipboardCheck size={16} />} title="月租型儀器與車輛檢查" sub={`${weekName(week.offset)} ${week.label}`}>
