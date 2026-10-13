@@ -38,7 +38,7 @@ export const BOARDS: Record<"r01" | "r02", BoardConfig> = {
     keepTrade: (t) => !/內業/.test(t),
     keepWorkTrade: (t) => !/內業/.test(t), // 控制組只看外業
     // 控制組只看外業組：不列行政、業務、內業，以及沒轉成名稱的關聯記錄 ID。
-    keepGroup: (g) => !/行政|業務|业务|內業|内业/.test(g) && !/^(id|rec[A-Za-z0-9]{6,})$/i.test(g.trim()),
+    keepGroup: (g) => !/行政|業務|业务|內業|内业|資訊|资讯/.test(g) && !/^(it|id|rec[A-Za-z0-9]{6,})$/i.test(g.trim()) && !/(^|[^a-z])it([^a-z]|$)/i.test(g),
     needsTrade: false,
     scheduleTradeLabel: "業別不是內業",
     checkNames: ["控制組檢核"],
