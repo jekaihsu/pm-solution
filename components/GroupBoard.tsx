@@ -1,6 +1,6 @@
 "use client";
-import { ArrowDownRight, ArrowUpRight, CheckCheck, ChevronDown, ChevronRight, CircleAlert, CircleCheck, Minus } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, CircleAlert, CircleCheck, Minus } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
 import { COST_FIELDS, FIELD_COST_FIELDS, JOINED_DATE, keepFieldSchedule, keepInternalSchedule, planDiffTotals, personRows, plannedByPerson, resolvePersonScheduleFields, splitCrews, sumRows, teamSections, teamSummary, filterByTeam, REPORT_MERGED, REPORT_MERGED_LABEL, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, dayOfWeek, errorRate, fixDiffs, groupRows, orderNotes, violatesSop, joinInternal, plannedPoints, resolveFixFields, resolveScheduleFields, resolveWorkFields, type FixFields, type GroupRow, type ScheduleFields, type TeamSummaryLine, type WorkFields } from "@/lib/controlGroup";
 import { inRange, resolveDateField } from "@/lib/metrics";
@@ -63,12 +63,6 @@ export const BOARDS: Record<"r01" | "r02", BoardConfig> = {
   },
 };
 
-interface SopEntry {
-  ok: boolean;
-  by: string;
-  at: number;
-}
-
 const round1 = (n: number) => formatNumber(Math.round(n * 10) / 10);
 const pct = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)}%`);
 const text = (v: CellValue) => (v === null || v === undefined ? "" : Array.isArray(v) ? v.join("、") : typeof v === "number" ? formatNumber(v) : String(v));
@@ -86,106 +80,7 @@ function Diff({ value }: { value: number | null }) {
   );
 }
 
-function useSop(report: string, version: DataVersion, weekStart: number) {
-  // Everything is tagged with the version + week it belongs to: a switch shows
-  // nothing (and allows no ticks) until that week's sign-offs are loaded, and a
-  // late response for another week is dropped.
-  const tag = `${report}|${version}|${weekStart}`;
-  const current = useRef(tag);
-  current.current = tag;
-  const [state, setState] = useState<{
-    tag: string;
-    entries: Record<string, SopEntry>;
-    persistent: boolean;
-    perm: { canEdit: boolean; reason?: string; openId?: string };
-  } | null>(null);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    setError("");
-    fetch(`/api/sop?report=${report}&version=${version}&week=${weekStart}`)
-      .then((r) => r.json())
-      .then((j) => {
-        if (cancelled) return;
-        if (j.error) setError(j.error);
-        setState({ tag, entries: j.entries ?? {}, persistent: j.persistent !== false, perm: { canEdit: Boolean(j.canEdit), reason: j.reason, openId: j.openId } });
-      })
-      .catch((e) => !cancelled && setError(String(e)));
-    return () => {
-      cancelled = true;
-    };
-  }, [report, version, weekStart, tag]);
-
-  const ready = state?.tag === tag ? state : null;
-
-  const toggle = useCallback(
-    async (keys: string[], ok: boolean) => {
-      const sent = tag;
-      const update = (fn: (e: Record<string, SopEntry>) => Record<string, SopEntry>) =>
-        setState((s) => (s && s.tag === sent ? { ...s, entries: fn(s.entries) } : s));
-      const prev: Record<string, SopEntry | undefined> = {};
-      update((e) => {
-        const next = { ...e };
-        for (const k of keys) {
-          prev[k] = e[k];
-          next[k] = { ok, by: "儲存中…", at: Date.now() };
-        }
-        return next;
-      });
-      try {
-        const r = await fetch("/api/sop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ report, version, weekStart, groups: keys, ok }) });
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.error ?? r.statusText);
-        update((e) => ({ ...e, ...Object.fromEntries(keys.map((k) => [k, j.entry])) }));
-        if (current.current === sent) setError("");
-      } catch (err) {
-        update((e) => {
-          const next = { ...e };
-          for (const k of keys) {
-            const p = prev[k];
-            if (p) next[k] = p;
-            else delete next[k];
-          }
-          return next;
-        });
-        if (current.current === sent) setError(String((err as Error).message ?? err));
-      }
-    },
-    [tag, report, version, weekStart],
-  );
-
-  return {
-    loaded: Boolean(ready),
-    entries: ready?.entries ?? {},
-    persistent: ready?.persistent ?? true,
-    perm: ready?.perm ?? { canEdit: false },
-    error,
-    toggle,
-  };
-}
-
-// SOP is ticked per work order; the group only shows how many are done.
-const orderKey = (id: string) => `order:${id}`;
-type Sop = ReturnType<typeof useSop>;
-
-function sopCount(row: GroupRow, entries: Record<string, SopEntry>) {
-  return row.orders.filter((r) => entries[orderKey(r.id)]?.ok).length;
-}
-
-function SopStatus({ done, total }: { done: number; total: number }) {
-  if (total > 0 && done === total)
-    return (
-      <span className="pill pill-good cg-sop-done">
-        <CircleCheck size={12} /> SOP 完成
-      </span>
-    );
-  if (done > 0) return <span className="pill pill-warn">SOP {done}/{total}</span>;
-  return <span className="pill">未確認</span>;
-}
-
-// When the 日報 has「是否違反SOP」(filled in Lark) that is the answer; the site's
-// own ticks are only used for tables without it.
+// SOP comes only from the 日報「是否違反SOP」field in Lark; the site only shows it.
 function sopSummary(row: GroupRow, wf: WorkFields) {
   let viol = 0;
   let filled = 0;
@@ -197,8 +92,8 @@ function sopSummary(row: GroupRow, wf: WorkFields) {
   return { viol, filled, total: row.orders.length };
 }
 
-function GroupSop({ row, wf, entries }: { row: GroupRow; wf: WorkFields; entries: Record<string, SopEntry> }) {
-  if (!wf.sopViolation) return <SopStatus done={sopCount(row, entries)} total={row.orders.length} />;
+function GroupSop({ row, wf }: { row: GroupRow; wf: WorkFields }) {
+  if (!wf.sopViolation) return <span className="muted" title="日報找不到「是否違反SOP」欄位">—</span>;
   const { viol, filled, total } = sopSummary(row, wf);
   if (viol)
     return (
@@ -215,42 +110,10 @@ function GroupSop({ row, wf, entries }: { row: GroupRow; wf: WorkFields; entries
   return <span className="pill">{filled ? `已填 ${filled}/${total}，無違反` : "未填"}</span>;
 }
 
-function SopBox({ id, label, entry, onToggle, disabled }: { id: string; label: string; entry?: SopEntry; onToggle: (keys: string[], ok: boolean) => void; disabled: boolean }) {
-  return (
-    <label
-      className={`cg-sop ${disabled ? "readonly" : ""} ${entry?.ok ? "ok" : ""}`}
-      title={entry ? `${entry.ok ? "符合" : "取消"}：${entry.by}・${new Date(entry.at).toLocaleString("zh-TW")}` : disabled ? "目前無法勾選" : "確認符合 SOP 後勾選"}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <input type="checkbox" checked={Boolean(entry?.ok)} disabled={disabled} onChange={(e) => onToggle([orderKey(id)], e.target.checked)} aria-label={`${label} 符合 SOP`} />
-      <span>{entry?.ok ? "符合" : "未確認"}</span>
-      {entry?.ok && <span className="cg-sop-by">{entry.by}</span>}
-    </label>
-  );
-}
-
-function OrderDetail({ row, wf, checkLabel, sop, disabled, ff, dateField, onlyDay, weekStart }: { row: GroupRow; wf: WorkFields; checkLabel: string; sop: Sop; disabled: boolean; ff: FixFields; dateField: string; onlyDay?: number | null; weekStart: number }) {
-  const done = sopCount(row, sop.entries);
+function OrderDetail({ row, wf, checkLabel, ff, dateField, onlyDay, weekStart }: { row: GroupRow; wf: WorkFields; checkLabel: string; ff: FixFields; dateField: string; onlyDay?: number | null; weekStart: number }) {
   const orders = onlyDay == null ? row.orders : row.orders.filter((r) => typeof r.fields[dateField] === "number" && dayOfWeek(r.fields[dateField] as number, weekStart) === onlyDay);
-  const allDone = done === row.orders.length;
   return (
     <div className="cg-detail">
-      {!disabled && !wf.sopViolation && (
-        <div className="cg-detail-bar">
-          <span className="muted small">
-            SOP 已確認 {done}/{row.orders.length} 張
-          </span>
-          <button
-            className="btn btn-sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              sop.toggle(row.orders.map((r) => orderKey(r.id)), !allDone);
-            }}
-          >
-            <CheckCheck size={14} /> {allDone ? "整組取消勾選" : "整組全部符合"}
-          </button>
-        </div>
-      )}
       <table>
         <thead>
           <tr>
@@ -311,7 +174,7 @@ function OrderDetail({ row, wf, checkLabel, sop, disabled, ff, dateField, onlyDa
                       return v === null ? <span className="muted">未填</span> : v ? <span className="pill pill-bad">違反</span> : <span className="pill pill-good">符合</span>;
                     })()
                   ) : (
-                    <SopBox id={r.id} label={no} entry={sop.entries[orderKey(r.id)]} onToggle={sop.toggle} disabled={disabled} />
+                    <span className="muted">—</span>
                   )}
                 </td>
               </tr>
@@ -783,7 +646,7 @@ function SopPanel({ items, wf, dateField, weekStart, onPick }: { items: { key: s
 }
 
 // One group, one week: every R01 item for that group on a single screen.
-function GroupFocus({ row, group, wf, cfg, sop, disabled, hasCheck, hasFlags, ff, hasFix, dateField, weekStart, day, setDay }: { row?: GroupRow; group: string; wf: WorkFields; cfg: BoardConfig; sop: Sop; disabled: boolean; hasCheck: boolean; hasFlags: boolean; ff: FixFields; hasFix: boolean; dateField: string; weekStart: number; day: number | null; setDay: (d: number | null) => void }) {
+function GroupFocus({ row, group, wf, cfg, hasCheck, hasFlags, ff, hasFix, dateField, weekStart, day, setDay }: { row?: GroupRow; group: string; wf: WorkFields; cfg: BoardConfig; hasCheck: boolean; hasFlags: boolean; ff: FixFields; hasFix: boolean; dateField: string; weekStart: number; day: number | null; setDay: (d: number | null) => void }) {
   const [failOpen, setFailOpen] = useState(false);
   if (!row) return <EmptyState kind="empty" title={`${group.includes("|") ? "這位人員" : group} 這週沒有${cfg.workLabel}`} />;
   const diff = row.planned && wf.revenue ? row.revenue - row.planned.points : null;
@@ -797,7 +660,7 @@ function GroupFocus({ row, group, wf, cfg, sop, disabled, hasCheck, hasFlags, ff
         <span className="muted small">{row.orders.length} 張工作單</span>
         <span className="cg-focus-sop">
           <span className="muted small">符合 SOP（可派新工作）</span>
-          <GroupSop row={row} wf={wf} entries={sop.entries} />
+          <GroupSop row={row} wf={wf} />
         </span>
       </div>
       <div className="kpis">
@@ -854,13 +717,13 @@ function GroupFocus({ row, group, wf, cfg, sop, disabled, hasCheck, hasFlags, ff
         {row.items.length ? row.items.map((i) => <span key={i} className="tag">{i}</span>) : <span className="muted">—</span>}
         <span className="muted small cg-focus-qty">工作數量合計 {wf.qty ? round1(row.qty) : "—"}</span>
       </div>
-      <OrderDetail row={row} wf={wf} checkLabel={cfg.checkLabel} sop={sop} disabled={disabled} ff={ff} dateField={dateField} onlyDay={day} weekStart={weekStart} />
+      <OrderDetail row={row} wf={wf} checkLabel={cfg.checkLabel} ff={ff} dateField={dateField} onlyDay={day} weekStart={weekStart} />
     </div>
   );
 }
 
 export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
-  const { week, version: globalVersion, demo } = useShell();
+  const { week, version: globalVersion } = useShell();
   const [localVersion, setLocalVersion] = useState<DataVersion>("v3");
   const version: DataVersion = globalVersion === "all" ? localVersion : globalVersion;
   const work = useSource(cfg.workKey(version), { fields: WORK_FIELDS, links: true });
@@ -870,7 +733,6 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const sched = useSource(cfg.scheduleKey(version), { fields: SCHEDULE_FIELDS, links: true });
   const isMobile = useMedia(MOBILE);
   const [open, setOpen] = useState<Set<string>>(new Set());
-  const sop = useSop(cfg.report, version, week.start);
   // Selected group stays put across weeks (so you can step through one group's
   // weeks) and lives in the URL (?group=) so the view can be shared.
   const [focus, setFocus] = useState<string | null>(null);
@@ -1023,7 +885,6 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const overallRate = errorRate(totals);
   const hasCheck = Boolean(wf.check || wf.status);
   const hasFlags = wf.flags.length > 0;
-  const sopLocked = demo || !sop.loaded || !sop.perm.canEdit;
 
   const detailView = (list: GroupRow[]) =>
     isMobile ? (
@@ -1070,9 +931,9 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
                 ))}
                 <div className="cg-card-sop">
                   <span className="muted small">符合 SOP</span>
-                  <GroupSop row={r} wf={wf} entries={sop.entries} />
+                  <GroupSop row={r} wf={wf} />
                 </div>
-                {expanded && <OrderDetail row={r} wf={wf} checkLabel={cfg.checkLabel} sop={sop} disabled={sopLocked} ff={ff} dateField={dateField} weekStart={week.start} />}
+                {expanded && <OrderDetail row={r} wf={wf} checkLabel={cfg.checkLabel} ff={ff} dateField={dateField} weekStart={week.start} />}
               </article>
             );
           })}
@@ -1139,7 +1000,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
                       </td>
                       <td className="num">{wf.qty ? formatNumber(Math.round(r.qty * 10) / 10) : "—"}</td>
                       <td>
-                        <GroupSop row={r} wf={wf} entries={sop.entries} />
+                        <GroupSop row={r} wf={wf} />
                       </td>
                     </tr>
                     {r.crews?.map((c) => (
@@ -1153,13 +1014,13 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
                         <td>{!hasFlags ? <span className="muted">—</span> : c.anomalyCount ? <span className="pill pill-warn"><CircleAlert size={12} /> {c.anomalyCount} 張</span> : <span className="pill">無異常</span>}</td>
                         <td className="cg-items" title={c.items.join("、")}>{c.items.slice(0, 2).join("、") || "—"}</td>
                         <td className="num">{wf.qty ? formatNumber(Math.round(c.qty * 10) / 10) : "—"}</td>
-                        <td><GroupSop row={c} wf={wf} entries={sop.entries} /></td>
+                        <td><GroupSop row={c} wf={wf} /></td>
                       </tr>
                     ))}
                     {expanded && (
                       <tr className="cg-detail-row">
                         <td colSpan={10}>
-                          <OrderDetail row={r} wf={wf} checkLabel={cfg.checkLabel} sop={sop} disabled={sopLocked} ff={ff} dateField={dateField} weekStart={week.start} />
+                          <OrderDetail row={r} wf={wf} checkLabel={cfg.checkLabel} ff={ff} dateField={dateField} weekStart={week.start} />
                         </td>
                       </tr>
                     )}
@@ -1213,7 +1074,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
 
       {!focus && failOpen && hasCheck && <FailPanel rows={rows} wf={wf} cfg={cfg} dateField={dateField} weekStart={week.start} onPick={(g) => pick(g)} />}
 
-      {(missing.length > 0 || schedNote || joinNote || sop.error || !sop.persistent || (sop.loaded && !sop.perm.canEdit && !demo)) && (
+      {(missing.length > 0 || schedNote || joinNote) && (
         <ul className="cg-notes">
           {missing.length > 0 && (
             <li>
@@ -1228,26 +1089,6 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
           {schedNote && (
             <li>
               <CircleAlert size={14} /> {schedNote}
-            </li>
-          )}
-          {sop.error && (
-            <li className="bad-text">
-              <CircleAlert size={14} /> SOP 勾選：{sop.error}
-            </li>
-          )}
-          {sop.loaded && !sop.perm.canEdit && !demo && (
-            <li>
-              <CircleAlert size={14} /> 你目前不能勾選 SOP。{sop.perm.reason}
-              {sop.perm.openId && (
-                <>
-                  {" "}你的 Lark ID：<code className="mono">{sop.perm.openId}</code>（如需勾選權限，請提供給管理員）
-                </>
-              )}
-            </li>
-          )}
-          {!sop.persistent && (
-            <li>
-              <CircleAlert size={14} /> SOP 勾選目前存在暫存空間，網站重新部署後會遺失（管理員需在 Zeabur 掛載硬碟並設定 DATA_DIR）。
             </li>
           )}
         </ul>
@@ -1294,7 +1135,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
       )}
 
       {focus ? (
-        <GroupFocus row={allRows.find((r) => rk(r) === focus)} group={focus} wf={wf} cfg={cfg} sop={sop} disabled={sopLocked} hasCheck={hasCheck} hasFlags={hasFlags} ff={ff} hasFix={hasFix} dateField={dateField} weekStart={week.start} day={day} setDay={setDay} />
+        <GroupFocus row={allRows.find((r) => rk(r) === focus)} group={focus} wf={wf} cfg={cfg} hasCheck={hasCheck} hasFlags={hasFlags} ff={ff} hasFix={hasFix} dateField={dateField} weekStart={week.start} day={day} setDay={setDay} />
       ) : rows.length === 0 ? (
         <EmptyState kind="empty" title={`${weekName(week.offset)}${byPerson && team ? `「${team}」` : ""}沒有${cfg.workLabel}`} />
       ) : null}
@@ -1327,7 +1168,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
 
       <p className="cg-foot">
         失誤率＝{cfg.checkLabel}「不通過」÷ 已檢核（未檢核不計）。{byPerson ? `一列一個人（內業成本單的填報人），依成本單的內業組別分段，每組一列小計；同一人在不同內業組別填單時，每組各一列。預排點數＝預排表${cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}依「人員＋日期」比對（組別不參與，預排「人員」欄多人逐人展開，休假條不算），有填「預估營業額點數」就分攤到每天，未填以每人每天 1 點計（同人同日多條只算一次，標 *）；預排日期認欄位 id，不看欄名。` : `預排點數＝預排表${cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}點數欄，未填以每組每天 1 點計（標 *）。`}差異＝營業額點數（原值）− 預排點數。
-        {cfg.keepWorkTrade && view.wf.trade && ` 只計${cfg.workLabel}中業別不是內業的工作單。`}{hidden.length > 0 && ` 不列入：${hidden.map((h) => `${/^rec/.test(h.group) ? "未對應組別" : h.group}（${h.orders} 張）`).join("、")}。`}{cfg.costKey && " 組別與工作日期取自所屬內業成本單。"}{byPerson && ` 組別總結＝每個內業組別一列（口徑同下方人員表），「${REPORT_MERGED_LABEL}」＝圖報A＋圖報B，最後是全部合計；人數同一人跨組只算一次（圖報合計與全部合計去重），工作單、點數等直接加總（每張工作單只屬於一個組）；與預排差異只算有預排的人。點組別列或上方組別按鈕，下方人員表、每日出錯、失誤率明細只看該組（${REPORT_MERGED}＝圖報A＋圖報B），網址帶 ?team= 可分享。`}{" 主表列出全部組與人（沒預排的預排顯示「未排」）；工作單、營業額等合計含全部，與預排差異只算有預排的組／人。"}{cfg.crewKey && " 拆組判定：所選週內，同一組別、同一工作日期，工作單所屬外業成本單的「組長」有 2 個以上不同的人，該組視為拆組出工，依組長分列子隊（組長空白歸「未填組長」）；預排表沒有分隊，預排點數只掛在組別合計列；子列不重複計入合計；讀不到成本單時不拆組。"}出錯＝工作單的{[ff.qtyFixed && `「${ff.qtyFixed.name}」≠「${ff.qtyOrig?.name ?? "數量"}」`, ff.revFixed && ff.revOrig && ff.revFixed !== ff.revOrig && `「${ff.revFixed.name}」≠「${ff.revOrig.name}」`].filter(Boolean).join(" 或 ") || "修改後數值與原填不同"}（兩邊都有值才比較）。{wf.sopViolation ? `SOP 取自日報「${wf.sopViolation.name}」：有任一張違反顯示紅色，全部填寫且沒有違反顯示綠色「SOP 完成」。` : "SOP 由控制組成員在每張工作單上勾選（展開組別），整組都勾完才顯示綠色「SOP 完成」；記錄勾選人與時間，不寫回 Lark。"}
+        {cfg.keepWorkTrade && view.wf.trade && ` 只計${cfg.workLabel}中業別不是內業的工作單。`}{hidden.length > 0 && ` 不列入：${hidden.map((h) => `${/^rec/.test(h.group) ? "未對應組別" : h.group}（${h.orders} 張）`).join("、")}。`}{cfg.costKey && " 組別與工作日期取自所屬內業成本單。"}{byPerson && ` 組別總結＝每個內業組別一列（口徑同下方人員表），「${REPORT_MERGED_LABEL}」＝圖報A＋圖報B，最後是全部合計；人數同一人跨組只算一次（圖報合計與全部合計去重），工作單、點數等直接加總（每張工作單只屬於一個組）；與預排差異只算有預排的人。點組別列或上方組別按鈕，下方人員表、每日出錯、失誤率明細只看該組（${REPORT_MERGED}＝圖報A＋圖報B），網址帶 ?team= 可分享。`}{" 主表列出全部組與人（沒預排的預排顯示「未排」）；工作單、營業額等合計含全部，與預排差異只算有預排的組／人。"}{cfg.crewKey && " 拆組判定：所選週內，同一組別、同一工作日期，工作單所屬外業成本單的「組長」有 2 個以上不同的人，該組視為拆組出工，依組長分列子隊（組長空白歸「未填組長」）；預排表沒有分隊，預排點數只掛在組別合計列；子列不重複計入合計；讀不到成本單時不拆組。"}出錯＝工作單的{[ff.qtyFixed && `「${ff.qtyFixed.name}」≠「${ff.qtyOrig?.name ?? "數量"}」`, ff.revFixed && ff.revOrig && ff.revFixed !== ff.revOrig && `「${ff.revFixed.name}」≠「${ff.revOrig.name}」`].filter(Boolean).join(" 或 ") || "修改後數值與原填不同"}（兩邊都有值才比較）。{wf.sopViolation ? `SOP 取自日報「${wf.sopViolation.name}」：有任一張違反顯示紅色，全部填寫且沒有違反顯示綠色「SOP 完成」。` : "SOP 只顯示 Lark 日報「是否違反SOP」欄位；目前這份資料表找不到該欄位，顯示「—」。"}
         {view.records.length > 0 && ` 資料至 ${formatDate(Math.max(...view.records.map((r) => (r.fields[view.dateField] as number) ?? 0)))}。`}
       </p>
 
