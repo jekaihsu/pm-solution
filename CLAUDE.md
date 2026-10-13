@@ -13,7 +13,7 @@
 | Zeabur | 專案 `pmsolution`，服務名稱 `settings`（以 Git URL 部署，Dockerfile 內容貼在服務設定裡） |
 | Lark 自建應用 | `PM週報`，App ID `cli_aa464a1e04b8de2c`，權限 `bitable:app:readonly`、`contact:user.basic_profile:readonly` |
 | Lark 網域 | 國際版，組織網址 https://yong-xiang-survey.jp.larksuite.com ，API `https://open.larksuite.com` |
-| 圖文說明書 | https://claude.ai/artifact/PsfLBoQjPkdmkeSTqczg9F （R01／R02／R04 段落尚未補） |
+| 圖文說明書 | https://claude.ai/artifact/PsfLBoQjPkdmkeSTqczg9F （含 R01／R02／R04 與操作動畫） |
 
 ## 2. 硬規則（不可違反）
 
@@ -131,4 +131,4 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 8. **真實資料驗收 R01**（V3、上週）：挑兩組對 Lark 原表核對營業額點數、不通過、異常、被修改、張數；檢查註腳「不列入：…」是否合理（只應排除行政、業務、內業、IT、未對應組別）。對不上就修並附組別、工作單號。
 9. **手機版檢查**：用瀏覽器 390px 寬看 R01、R02、R04，不能有水平捲動整頁。
 10. **出勤、出差**：需要 Lark 假勤／審批權限與可看名單，等使用者決定。
-11. **圖文說明書**（https://claude.ai/artifact/PsfLBoQjPkdmkeSTqczg9F）：補 R01（簡表、單組單週、每日出錯、失誤率明細、SOP、備註）、R02、R04。若無法編輯，在 repo 新增 `docs/manual.md` 並告訴使用者。
+11. ~~圖文說明書~~：已補 R01／R02／R04 與最上方操作動畫（2026-10-13）。之後功能有改，請同步更新說明書截圖。
