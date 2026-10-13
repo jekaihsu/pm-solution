@@ -1,24 +1,33 @@
 "use client";
-import { CalendarCheck, CircleAlert, Clock, Plane, UserPlus } from "lucide-react";
+import { CircleAlert, Clock, UserPlus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
-import { OT_DEPT, OT_HOURS, OT_HOURS_RAW, OT_NAME, OT_START, OT_STATUS, OT_TYPE, summarizeOvertime, type OtRecord } from "@/lib/overtime";
+import { OT_HOURS, OT_HOURS_RAW, OT_NAME, OT_START, OT_STATUS, OT_TYPE, summarizeOvertime, type OtRecord } from "@/lib/overtime";
+import { PEOPLE_GROUP, PEOPLE_NAME, buildPeopleDirectory, type PeopleRow } from "@/lib/people";
 import { weekName } from "@/lib/week";
 import { useShell } from "./AppShell";
+import AttendanceCards from "./AttendanceCards";
 import { STATUS_TEXT, useSource, type SourceState } from "./useSource";
 
 const round1 = (n: number) => formatNumber(Math.round(n * 10) / 10);
 
-function SalaryOvertime({ state, weekStart }: { state: SourceState; weekStart: number }) {
+function SalaryOvertime({ state, peopleState, weekStart }: { state: SourceState; peopleState: SourceState; weekStart: number }) {
   const [picked, setPicked] = useState<string | null>(null);
+  // 公司組織架構＝V3 人員名單：加班人 open_id → Lark帳號 → 所屬組別。讀不到（或缺欄位）就沒有組別，不亂歸。
+  const directory = useMemo(() => {
+    const d = peopleState.status === "ok" ? peopleState.data : undefined;
+    if (!d) return null;
+    const names = new Set(d.fields.map((f) => f.name));
+    return names.has(PEOPLE_NAME) && names.has(PEOPLE_GROUP) ? buildPeopleDirectory(d.records as PeopleRow[]) : null;
+  }, [peopleState.status, peopleState.data]);
   const view = useMemo(() => {
     const d = state.data;
     if (!d) return null;
     const names = new Set(d.fields.map((f) => f.name));
     const missing = [OT_NAME, OT_START, OT_TYPE, OT_STATUS].filter((n) => !names.has(n));
     const noHours = !names.has(OT_HOURS) && !names.has(OT_HOURS_RAW);
-    return { missing, noHours, hasDept: names.has(OT_DEPT), sum: summarizeOvertime(d.records as OtRecord[]) };
-  }, [state.data]);
+    return { missing, noHours, sum: summarizeOvertime(d.records as OtRecord[], directory) };
+  }, [state.data, directory]);
 
   if (state.status === "forbidden") {
     return (
@@ -40,6 +49,8 @@ function SalaryOvertime({ state, weekStart }: { state: SourceState; weekStart: n
       </p>
     );
   }
+  if (peopleState.status === "loading")
+    return <p className="muted small">{STATUS_TEXT.loading}</p>;
   if (view.missing.length || view.noHours)
     return (
       <p className="muted small">
@@ -71,9 +82,14 @@ function SalaryOvertime({ state, weekStart }: { state: SourceState; weekStart: n
           ))}
         </div>
       )}
-      {month && month.groups.length > 0 && (
+      {!sum.hasDirectory && (
+        <p className="bad-text small">
+          V3 人員名單讀取失敗，暫時無法歸組別（下表組別顯示「—」）{peopleState.error ? `：${peopleState.error}` : ""}。
+        </p>
+      )}
+      {month && sum.hasDirectory && month.groups.length > 0 && (
         <div className="cg-focus-items">
-          <span className="muted small">各{view.hasDept ? "部門（發起人部門，是否等同組別待確認）" : "組"}加班時數</span>
+          <span className="muted small">各組加班時數</span>
           {month.groups.map((g) => (
             <span key={g.group} className="tag">
               {g.group} {round1(g.hours)}
@@ -87,7 +103,7 @@ function SalaryOvertime({ state, weekStart }: { state: SourceState; weekStart: n
             <thead>
               <tr>
                 <th>姓名</th>
-                <th>部門</th>
+                <th>組別</th>
                 <th className="num">平日</th>
                 <th className="num">假日</th>
                 {hasOther && <th className="num">類型待定義</th>}
@@ -120,8 +136,14 @@ function SalaryOvertime({ state, weekStart }: { state: SourceState; weekStart: n
         <p className="muted small">沒有已通过的加班紀錄。</p>
       )}
       <p className="muted small">
-        口徑：逐筆加班審批單，只計「已通过」；未通过 {sum.excludedStatus} 筆（審批中、已撤回、已拒絕、已刪除等）不計；已通过但時數空白 {sum.noHours} 筆不計。時數＝「薪資計算加班時數」（原始時數＋人工補正；缺時用原始時數）。平日＝加班類型「平日」，其餘（休息日、例假日、國定假日）算假日；類型空白另列「待定義」。部門取自發起人部門。不讀任何金額欄位。
+        口徑：逐筆加班審批單，只計「已通过」；未通过 {sum.excludedStatus} 筆（審批中、已撤回、已拒絕、已刪除等）不計；已通过但時數空白 {sum.noHours} 筆不計。時數＝「薪資計算加班時數」（原始時數＋人工補正；缺時用原始時數）。平日＝加班類型「平日」，其餘（休息日、例假日、國定假日）算假日；類型空白另列「待定義」。不讀任何金額欄位。
       </p>
+      {sum.hasDirectory && (
+        <p className="muted small">
+          組別依 V3 人員名單的所屬組別（公司組織架構）：先用加班人的 open_id 對人員名單的 Lark帳號，對不到時以姓名完全相同對。未對應組別 {month?.unmapped ?? 0} 張（{current ?? "本月"}；全部月份 {sum.unmapped} 張）：加班人不在人員名單、名單沒填所屬組別，或同名無法判斷。
+          {sum.multiPerson > 0 ? `加班人填了多位的單 ${sum.multiPerson} 張，整張算一列、時數不拆分；這類單的人都同組才歸該組，否則歸未對應組別。` : ""}
+        </p>
+      )}
     </div>
   );
 }
@@ -140,7 +162,8 @@ function Pending({ icon, title, children }: { icon: React.ReactNode; title: stri
 
 export default function HrBoard() {
   const { week } = useShell();
-  const salary = useSource("salary-overtime");
+  const salary = useSource("salary-overtime", { people: true });
+  const people = useSource("v3-people", { people: true });
 
   return (
     <div className="hr">
@@ -148,24 +171,7 @@ export default function HrBoard() {
         <p>暫無。</p>
       </Pending>
 
-      <Pending icon={<CalendarCheck size={16} />} title="出勤紀錄">
-        <p>出勤資料在 Lark「假勤」，不在多維表格。要顯示需由管理員：</p>
-        <ol>
-          <li>在 PM週報 應用開通假勤唯讀權限並發布新版本；</li>
-          <li>決定哪些人可以看出勤資料（個人資料，見 D-09）。</li>
-        </ol>
-        <p className="muted small">完成前不讀取、不顯示任何出勤資料。</p>
-      </Pending>
-
-      <Pending icon={<Plane size={16} />} title="出差紀錄">
-        <p>出差申請在 Lark「審批」，不在多維表格。要顯示需由管理員：</p>
-        <ol>
-          <li>確認出差使用哪一個審批表單；</li>
-          <li>在 PM週報 應用開通審批唯讀權限並發布新版本；</li>
-          <li>決定哪些人可以看出差資料。</li>
-        </ol>
-        <p className="muted small">外業成本單的「是否過夜／住宿」是住宿津貼用途，不等於出差紀錄，未拿來代替。</p>
-      </Pending>
+      <AttendanceCards />
 
       <section className="hr-card">
         <div className="hr-card-head">
@@ -177,10 +183,10 @@ export default function HrBoard() {
         </div>
         <ul className="cg-notes">
           <li>
-            <CircleAlert size={14} /> 取自 Lark「薪水總表」，只讀加班時數／天數與姓名、組別、月份；底薪、總薪資、加班費等其他欄位不讀取。只有 HR_VIEWERS 名單內的人看得到。
+            <CircleAlert size={14} /> 取自薪水計算 Base 的「詠翔加班」，只讀加班人、開始時間、加班類型、申請狀態與時數；組別取自 V3 人員名單（只讀姓名、Lark帳號、所屬組別、在職）。底薪、總薪資、加班費等其他欄位不讀取。誰能看由 HR_VIEWERS 設定。
           </li>
         </ul>
-        <SalaryOvertime state={salary} weekStart={week.start} />
+        <SalaryOvertime state={salary} peopleState={people} weekStart={week.start} />
       </section>
     </div>
   );

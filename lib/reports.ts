@@ -27,9 +27,16 @@ export interface SourceDef {
 // 薪水計算 Base 的「詠翔加班」（逐筆加班審批單）：只讀下列欄位，精確比對、不用關鍵字。
 // 金額、薪資、身分、帳號、電話、地址、事由、明細、發起人等欄一律不向 Lark 要求。
 // 「薪資計算加班時數」名稱含薪資，但它是時數公式（原始加班時數＋人工補正），不是金額。
+// 組別不讀「发起人部门」，改依 V3 人員名單的所屬組別（公司組織架構），所以部門欄也不要了。
 // 欄名與 lib/overtime.ts 的常數一致（scripts/test-hr-overtime.mjs 會檢查）。
-const SALARY_ALLOW = ["加班人", "发起人部门", "开始时间", "加班类型", "申请状态", "薪資計算加班時數", "加班时长（小时）"];
+const SALARY_ALLOW = ["加班人", "开始时间", "加班类型", "申请状态", "薪資計算加班時數", "加班时长（小时）"];
 export const salaryField = (name: string) => SALARY_ALLOW.includes(name);
+
+// V3「人員名單」：R04 加班只拿來把加班人對到所屬組別，所以只讀這四欄，精確比對。
+// 電話、身分、帳戶、薪資、職級、備註、各種成本單連結、OpenID 同步欄一律不向 Lark 要求。
+// 欄名與 lib/people.ts 的常數一致（scripts/test-hr-overtime.mjs 會檢查）。
+const PEOPLE_ALLOW = ["姓名", "Lark帳號", "所屬組別", "在職"];
+export const peopleField = (name: string) => PEOPLE_ALLOW.includes(name);
 
 const V3 = "Sdw1bG1djaHsVGsRPvmjyVWipgg"; // 詠翔日報系統 v3
 const V4 = "H7W6b0PFWaVF1BsgqXJj3pQ9pXb"; // 詠翔日報系統 V4
@@ -95,6 +102,11 @@ export const SOURCES: SourceDef[] = [
   raw("v3-internal-cost", "內業成本單", "v3", "tbl8JdWLLwlPFuoF", { dateField: "工作日期", columns: COLS.internalCost, ...DASH.internalCost }),
   raw("v4-internal-cost", "內業成本單", "v4", "tblKwSDRg6WaGHYr", { dateField: "工作日期", columns: COLS.internalCost, ...DASH.internalCost }),
   raw("v3-schedule", "工作預排", "v3", "tblN8c3WN44233aG", { columns: COLS.schedule, ...DASH.schedule }),
+  raw("v3-people", "人員名單（組織架構）", "v3", "tblmlpA6nG5Ou7NQ", {
+    allowField: peopleField,
+    restricted: "hr",
+    note: "R04 加班用它把加班人對到「所屬組別」（公司組織架構）；只讀姓名、Lark帳號、所屬組別、在職，其他欄位一律不讀。依 HR_VIEWERS 設定才看得到。",
+  }),
   raw("v4-schedule", "工作預排", "v4", "tblZz6Mkhv9gHrB2", { dateField: "開始日期", columns: COLS.schedule, ...DASH.schedule }),
   // R09 內業報告用：案件編號（主欄）與案件名稱。整張表讀進伺服器，頁面只投影這兩欄（請款、成本等欄位不外送）；V4 沒有對應表。
   raw("v3-cases", "案件", "v3", "tblWsSaOcy4nKuGI", { columns: ["案件編號", "案件名稱", "業主", "狀態"], note: "R09／R10 取案件編號與案件名稱（工程名稱）；預排與工作單的案件以 record_id 比對，不可用編號文字（有編號重複與全 0 占位碼）。與「案件應收未收」同一張表，不套視圖篩選。" }),
@@ -151,7 +163,7 @@ export const SOURCES: SourceDef[] = [
     allowField: (n) => salaryField(n),
     restricted: "hr",
     url: tableUrl(SALARY_BASE, "tblomH0DXCzXgenE"),
-    note: "逐筆加班審批單；只讀加班人、發起人部門、開始時間、加班類型、申請狀態、加班時數，只計「已通过」。金額、薪資、身分等欄一律不讀。需 PM週報 在該 Base 有唯讀角色。僅 HR_VIEWERS 名單可看。",
+    note: "逐筆加班審批單；只讀加班人、開始時間、加班類型、申請狀態、加班時數，只計「已通过」；組別依 V3 人員名單。金額、薪資、身分等欄一律不讀。需 PM週報 在該 Base 有唯讀角色。依 HR_VIEWERS 設定才看得到。",
   },
   // R07: 儀器管理系統 Base（業主 2026-10-13 提供）。與 V3／V4 的儀器費率、車輛分開，不相加、不去重。
   eqSys("equipment-system", "儀器管理系統：儀器總表（借用台帳）", "tblHZFEypeKfWOsF", "138 筆台帳，含租賃型態（月租／日租）、借用狀態（可借用／已借出）、系統封存；與「資料表」命名不同，兩者不去重。"),
@@ -217,7 +229,7 @@ export const REPORTS: ReportDef[] = [
     slug: "r04",
     name: "人事數據",
     purpose: "讓授權主管掌握招聘、出勤、出差與加班的營運狀態與待處理事項。",
-    sources: ["hr", "salary-overtime"],
+    sources: ["hr", "salary-overtime", "v3-people"],
     mustHave: ["招聘（暫無）", "出勤紀錄", "出差紀錄", "加班紀錄"],
     pending: ["出勤、出差需開通 Lark 假勤／審批 API 權限", "可見範圍與敏感欄位（D-09）", "加班時數是成本單層級，非每人實際時數"],
   },

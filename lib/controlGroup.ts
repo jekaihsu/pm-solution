@@ -608,6 +608,54 @@ export function teamSections(rows: GroupRow[]): TeamSection[] {
     .sort((a, b) => b.total.revenue - a.total.revenue || a.team.localeCompare(b.team));
 }
 
+// ---- R02 組別總結（業主要求 2026-10-13：控制、圖報…各組一列的小總結）----
+// 圖報合計（報告）＝圖報A＋圖報B（2026-07-17 起「報告」改名圖報A／圖報B）。
+export const REPORT_TEAMS = ["圖報A", "圖報B"];
+export const REPORT_MERGED = "圖報合計"; // 篩選用的鍵（網址 ?team=）
+export const REPORT_MERGED_LABEL = "圖報合計（報告）";
+export const ALL_TEAMS_KEY = "全部合計";
+
+export interface TeamSummaryLine {
+  key: string; // 組別名／REPORT_MERGED／ALL_TEAMS_KEY
+  label: string;
+  kind: "team" | "merged" | "all";
+  teams: string[]; // 涵蓋的內業組別
+  people: number; // 去重人數（同一人跨組只算一次）
+  total: GroupRow; // 張數、點數等直接加總（每張工作單只屬於一個組，不會重複）
+  plan: { people: number; points: number; diff: number }; // 只算有預排的人；people 同樣去重
+}
+
+// 一組一列，再加「圖報合計」（圖報A、圖報B 至少一個存在才有）與最後的「全部合計」。
+// rows 是 personRows 的結果（一人×組一列）。
+export function teamSummary(rows: GroupRow[]): TeamSummaryLine[] {
+  const who = (r: GroupRow) => r.personId ?? r.group;
+  const line = (key: string, label: string, kind: TeamSummaryLine["kind"], teams: string[], list: GroupRow[]): TeamSummaryLine => {
+    const pd = planDiffTotals(list);
+    return {
+      key,
+      label,
+      kind,
+      teams,
+      people: new Set(list.map(who)).size,
+      total: sumRows(label, list),
+      plan: { people: new Set(list.filter((r) => r.planned && r.planned.points > 0).map(who)).size, points: pd.points, diff: pd.diff },
+    };
+  };
+  const secs = teamSections(rows);
+  const out = secs.map((s) => line(s.team, s.team, "team", [s.team], s.rows));
+  const rep = secs.filter((s) => REPORT_TEAMS.includes(s.team));
+  if (rep.length) out.push(line(REPORT_MERGED, REPORT_MERGED_LABEL, "merged", rep.map((s) => s.team), rep.flatMap((s) => s.rows)));
+  out.push(line(ALL_TEAMS_KEY, ALL_TEAMS_KEY, "all", secs.map((s) => s.team), rows));
+  return out;
+}
+
+// 依組別篩人：null＝全部；REPORT_MERGED＝圖報A＋圖報B；其餘＝該內業組別。
+export function filterByTeam(rows: GroupRow[], sel: string | null): GroupRow[] {
+  if (!sel) return rows;
+  const teams = sel === REPORT_MERGED ? REPORT_TEAMS : [sel];
+  return rows.filter((r) => teams.includes(r.team ?? NO_TEAM));
+}
+
 // Field names the dashboards request from the server (see /api/sources projection).
 export const WORK_FIELDS = [
   "組別", "工作單號", "案件編號", "工程編號", "工作編號", "可能確認單工作編號", "可能的確認單工編(若暫無確認單才需填寫)",

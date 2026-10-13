@@ -2,6 +2,7 @@
 // mode. Every record id is prefixed "demo_" and the payload is marked source="demo".
 import type { CellValue, FieldKind, TableData } from "./types";
 import type { SourceDef } from "./reports";
+import { buildAttendanceView, weekDates, ymdInt, type AttendanceResponse, type LarkUserApprovals, type LarkUserTask } from "./attendanceCore";
 
 type Gen = (r: () => number, i: number) => CellValue;
 type Spec = [name: string, kind: FieldKind, gen: Gen][];
@@ -43,6 +44,12 @@ const adminItems = ["公文收發", "請款作業", "採購對帳", "文件歸�
 const innerItems = ["數值地形圖", "縱橫斷面", "成果報告", "點位清冊"];
 const caseNames = ["新北地形測量案", "桃園地籍調查案", "台中放樣案", "高雄控制測量案", "彰化水深測量案", "雲林管線調查案"]; // 虛構，與 projects 一一對應
 const caseOf = (i: number) => projects[(i * 5 + Math.floor(i / 7)) % projects.length]; // 工作單的案件（所屬案件／案件編號共用同一個）
+// R04 加班示範：人員名單（組織架構）與加班人要能對上，也要有對不到的情形。全部虛構。
+const otPeople = ["王小明", "陳大文", "林志強", "張家豪", "李俊傑", "黃建宏"];
+const otPeopleGroups = [groups[0], groups[1], groups[2], groups[3], "圖資A", "報告組"];
+const otPerson = (i: number) => (i % 7 === 6 ? "周小華" : otPeople[i % 7]); // 周小華不在名單 → 未對應組別
+// Person (人員) cells carry an open_id in real data; the demo derives a stable fake one from the name.
+const demoOpenId = (name: string) => `ou_demo_${name}`;
 
 const SPECS: Record<string, { n: number; spec: Spec }> = {
   "field-work": {
@@ -275,11 +282,19 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["狀態", "select", (r) => pick(r, ["報價中", "已回傳", "已成交", "未成交"])],
     ],
   },
+  people: {
+    n: 6,
+    spec: [
+      ["姓名", "text", (_, i) => otPeople[i]],
+      ["Lark帳號", "person", (_, i) => (i === 4 ? null : [otPeople[i]])], // 李俊傑沒填帳號 → 只能用姓名對
+      ["所屬組別", "select", (_, i) => otPeopleGroups[i]],
+      ["在職", "checkbox", (_, i) => i !== 5],
+    ],
+  },
   "salary-overtime": {
     n: 36,
     spec: [
-      ["加班人", "text", (_, i) => ["王小明", "陳大文", "林志強", "張家豪", "李俊傑", "黃建宏"][i % 6]],
-      ["发起人部门", "select", (_, i) => groups[i % 4]],
+      ["加班人", "person", (_, i) => [otPerson(i)]],
       ["开始时间", "date", (_, i) => { const d = new Date(); d.setDate(10); d.setMonth(d.getMonth() - Math.floor(i / 12)); return d.getTime(); }],
       ["加班类型", "select", (r) => pick(r, ["平日", "平日", "平日", "休息日(六)", "例假日(日)", "國定假日"])],
       ["申请状态", "select", (r) => pick(r, ["已通过", "已通过", "已通过", "审批中", "已撤回"])],
@@ -311,10 +326,17 @@ export function demoSourceData(src: SourceDef): TableData {
     seed = (seed * 1664525 + 1013904223) % 4294967296;
     return seed / 4294967296;
   };
-  const records = Array.from({ length: def.n }, (_, i) => ({
-    id: `demo_${src.key}_${i}`,
-    fields: Object.fromEntries(def.spec.map(([name, , gen]) => [name, gen(r, i)])),
-  }));
+  const personFields = def.spec.filter(([, kind]) => kind === "person").map(([name]) => name);
+  const records = Array.from({ length: def.n }, (_, i) => {
+    const fields = Object.fromEntries(def.spec.map(([name, , gen]) => [name, gen(r, i)]));
+    const people = Object.fromEntries(
+      personFields.flatMap((name) => {
+        const v = fields[name];
+        return Array.isArray(v) && v.length ? [[name, v.map((n) => ({ id: demoOpenId(n), name: n }))]] : [];
+      }),
+    );
+    return { id: `demo_${src.key}_${i}`, fields, ...(Object.keys(people).length ? { people } : {}) };
+  });
   return {
     table: { id: `demo_${src.key}`, name: `${src.name}（示範）` },
     fields: def.spec.map(([name, kind], i) => ({ id: DEMO_FID[name] && specKey(src.key) === "schedule" ? DEMO_FID[name] : `f${i}`, name, kind, primary: i === 0 })),
@@ -324,4 +346,30 @@ export function demoSourceData(src: SourceDef): TableData {
     complete: true,
     total: records.length,
   };
+}
+
+// R04 出勤／出差示範：假的 Lark 假勤回應 → 走同一套 buildAttendanceView。全部虛構。
+export function demoAttendance(weekStart: number, now: number): AttendanceResponse {
+  const dates = weekDates(weekStart);
+  const roster = otPeople.map((name, i) => ({ name, group: otPeopleGroups[i], openId: demoOpenId(name) }));
+  const employeeIds = new Map(roster.map((p) => [p.openId, `demo_emp_${p.name}`]));
+  const R = (i: string, o: string, si = "None", so = "None") => ({ check_in_result: i, check_out_result: o, check_in_result_supplement: si, check_out_result_supplement: so });
+  const tasks: LarkUserTask[] = [];
+  roster.forEach((p, pi) => {
+    dates.forEach((d, di) => {
+      const uid = employeeIds.get(p.openId)!;
+      const rec = di >= 5 ? R("NoNeedCheck", "NoNeedCheck") : pi === 1 && di === 1 ? R("NoNeedCheck", "NoNeedCheck", "Leave", "Leave") : pi === 2 && di === 2 ? R("Late", "Normal") : pi === 3 && di === 3 ? R("Normal", "Early") : pi === 4 && di === 0 ? R("Lack", "Normal") : pi === 5 && di === 4 ? R("NoNeedCheck", "NoNeedCheck", "GoOut", "None") : R("Normal", "Normal");
+      tasks.push({ user_id: uid, day: ymdInt(d), records: [rec] });
+    });
+  });
+  const approvals: LarkUserApprovals[] = [
+    { user_id: employeeIds.get(roster[0].openId), trips: [{ approval_id: "demo_trip_1", start_time: `${dates[2]} 09:00:00`, end_time: `${dates[3]} 18:00:00`, reason: "（示範）赴外縣市辦理控制測量查核" }] },
+  ];
+  tasks.forEach((t) => {
+    if (t.user_id === employeeIds.get(roster[0].openId) && (t.day === ymdInt(dates[2]) || t.day === ymdInt(dates[3]))) t.records = [R("NoNeedCheck", "NoNeedCheck", "Travel", "Travel")];
+  });
+  return buildAttendanceView({
+    weekStart, now, roster, employeeIds, members: new Set(employeeIds.values()), tasks, approvals, source: "demo",
+    notes: { rosterInService: roster.length + 1, noAccount: 1, groupCount: 1, invalidIds: 0 },
+  });
 }

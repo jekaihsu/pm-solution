@@ -76,6 +76,7 @@ V3 與 V4 是不同系統的原始資料，分開顯示、不相加也不去重�
 | `SESSION_SECRET` | | 登入 cookie 簽章密鑰，未設時由 App Secret 衍生 |
 | `AUTH_DISABLED` | | 設為 `1` 可暫時關閉登入（本機開發用） |
 | `SOP_EDITORS` | | 可勾選 R01「是否符合 SOP」的主管 Lark open_id，以逗號分隔；未設定時沒有人能勾選。主管在 R01 頁面可看到自己的 Lark ID |
+| `HR_VIEWERS` | | 誰能看人事頁（R04 加班）：`*`＝所有登入者都能看；填 Lark open_id（逗號或空白分隔）＝只有名單內的人；留空＝沒有人能看（預設）。業主 2026-10-13 裁示全員可看，Zeabur 設 `HR_VIEWERS=*` |
 | `DATA_DIR` | | R01「是否符合 SOP」勾選紀錄的儲存位置；在 Zeabur「硬碟」掛載 `/app/data` 並設 `DATA_DIR=/app/data`，未設定時重新部署會遺失 |
 
 ## 本機開發
