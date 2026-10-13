@@ -2,7 +2,7 @@
 import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, CircleAlert, Minus } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
-import { anomalies, classifyCheck, errorRate, groupRows, plannedPoints, resolveScheduleFields, resolveWorkFields, type GroupRow, type WorkFields } from "@/lib/controlGroup";
+import { JOINED_DATE, anomalies, classifyCheck, errorRate, groupRows, joinInternal, plannedPoints, resolveScheduleFields, resolveWorkFields, type GroupRow, type WorkFields } from "@/lib/controlGroup";
 import { inRange, resolveDateField } from "@/lib/metrics";
 import { sourceByKey, type DataVersion } from "@/lib/reports";
 import type { CellValue, TableData } from "@/lib/types";
@@ -10,7 +10,49 @@ import { formatDate, weekName } from "@/lib/week";
 import { useShell } from "./AppShell";
 import EmptyState from "./EmptyState";
 import { MOBILE, useMedia } from "./useMedia";
+import OwnerProgress from "./OwnerProgress";
 import { STATUS_TEXT, useSource } from "./useSource";
+
+export interface BoardConfig {
+  report: "r01" | "r02";
+  workKey: (v: DataVersion) => string;
+  workLabel: string;
+  costKey?: (v: DataVersion) => string; // internal work: group + date come from the linked cost sheet
+  scheduleKey: (v: DataVersion) => string;
+  keepTrade: (trade: string) => boolean; // which schedule rows (by 業別) belong to this board
+  needsTrade: boolean; // true when the board can't work without a 業別 field
+  scheduleTradeLabel?: string;
+  checkNames: string[];
+  checkLabel: string;
+  ownerProgress?: boolean;
+}
+
+export const BOARDS: Record<"r01" | "r02", BoardConfig> = {
+  r01: {
+    report: "r01",
+    workKey: (v) => `${v}-field-work`,
+    workLabel: "外業工作單",
+    scheduleKey: (v) => `${v}-schedule`,
+    keepTrade: (t) => !/內業/.test(t),
+    needsTrade: false,
+    scheduleTradeLabel: "業別不是內業",
+    checkNames: ["控制組檢核"],
+    checkLabel: "控制組檢核",
+  },
+  r02: {
+    report: "r02",
+    workKey: (v) => `${v}-internal-work`,
+    workLabel: "內業工作單",
+    costKey: (v) => `${v}-internal-cost`,
+    scheduleKey: (v) => `${v}-schedule`,
+    keepTrade: (t) => /內業/.test(t),
+    needsTrade: true,
+    scheduleTradeLabel: "業別為內業",
+    checkNames: ["雅雯檢核"],
+    checkLabel: "雅雯檢核（數量檢查）",
+    ownerProgress: true,
+  },
+};
 
 interface SopEntry {
   ok: boolean;
@@ -35,11 +77,11 @@ function Diff({ value }: { value: number | null }) {
   );
 }
 
-function useSop(version: DataVersion, weekStart: number) {
+function useSop(report: string, version: DataVersion, weekStart: number) {
   // Everything is tagged with the version + week it belongs to: a switch shows
   // nothing (and allows no ticks) until that week's sign-offs are loaded, and a
   // late response for another week is dropped.
-  const tag = `${version}|${weekStart}`;
+  const tag = `${report}|${version}|${weekStart}`;
   const current = useRef(tag);
   current.current = tag;
   const [state, setState] = useState<{
@@ -53,7 +95,7 @@ function useSop(version: DataVersion, weekStart: number) {
   useEffect(() => {
     let cancelled = false;
     setError("");
-    fetch(`/api/sop?version=${version}&week=${weekStart}`)
+    fetch(`/api/sop?report=${report}&version=${version}&week=${weekStart}`)
       .then((r) => r.json())
       .then((j) => {
         if (cancelled) return;
@@ -64,7 +106,7 @@ function useSop(version: DataVersion, weekStart: number) {
     return () => {
       cancelled = true;
     };
-  }, [version, weekStart, tag]);
+  }, [report, version, weekStart, tag]);
 
   const ready = state?.tag === tag ? state : null;
 
@@ -79,7 +121,7 @@ function useSop(version: DataVersion, weekStart: number) {
         return { ...e, [group]: { ok, by: "儲存中…", at: Date.now() } };
       });
       try {
-        const r = await fetch("/api/sop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version, weekStart, group, ok }) });
+        const r = await fetch("/api/sop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ report, version, weekStart, group, ok }) });
         const j = await r.json();
         if (!r.ok) throw new Error(j.error ?? r.statusText);
         update((e) => ({ ...e, [group]: j.entry }));
@@ -94,7 +136,7 @@ function useSop(version: DataVersion, weekStart: number) {
         if (current.current === sent) setError(String((err as Error).message ?? err));
       }
     },
-    [tag, version, weekStart],
+    [tag, report, version, weekStart],
   );
 
   return {
@@ -121,7 +163,7 @@ function SopBox({ group, entry, onToggle, disabled }: { group: string; entry?: S
   );
 }
 
-function OrderDetail({ row, wf }: { row: GroupRow; wf: WorkFields }) {
+function OrderDetail({ row, wf, checkLabel }: { row: GroupRow; wf: WorkFields; checkLabel: string }) {
   return (
     <div className="cg-detail">
       <table>
@@ -132,7 +174,7 @@ function OrderDetail({ row, wf }: { row: GroupRow; wf: WorkFields }) {
             <th>工作項目</th>
             <th className="num">工作數量</th>
             <th className="num">營業額點數</th>
-            <th>控制組檢核</th>
+            <th>{checkLabel.replace(/（.*）/, "")}</th>
             <th>異常</th>
           </tr>
         </thead>
@@ -164,34 +206,38 @@ function OrderDetail({ row, wf }: { row: GroupRow; wf: WorkFields }) {
   );
 }
 
-export default function ControlGroupBoard() {
+export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const { week, version: globalVersion, demo } = useShell();
   const [localVersion, setLocalVersion] = useState<DataVersion>("v3");
   const version: DataVersion = globalVersion === "all" ? localVersion : globalVersion;
-  const work = useSource(`${version}-field-work`);
-  const sched = useSource(`${version}-schedule`);
+  const work = useSource(cfg.workKey(version));
+  // Hooks run unconditionally; boards without a cost sheet reuse the work key (cached).
+  const cost = useSource(cfg.costKey ? cfg.costKey(version) : cfg.workKey(version));
+  const sched = useSource(cfg.scheduleKey(version));
   const isMobile = useMedia(MOBILE);
   const [open, setOpen] = useState<Set<string>>(new Set());
-  const sop = useSop(version, week.start);
+  const sop = useSop(cfg.report, version, week.start);
   useEffect(() => setOpen(new Set()), [version, week.start]);
 
   const view = useMemo(() => {
-    const data = work.data;
-    if (!data) return null;
-    const src = sourceByKey(`${version}-field-work`)!;
-    const dateField = resolveDateField(src, data.fields);
+    if (!work.data) return null;
+    if (cfg.costKey && cost.status === "loading") return null;
+    const join = cfg.costKey ? joinInternal(work.data, cost.status === "ok" ? cost.data : undefined) : null;
+    const data = join ? join.data : work.data;
+    const src = sourceByKey(cfg.workKey(version))!;
+    const dateField = resolveDateField(src, data.fields, cfg.costKey ? JOINED_DATE : undefined);
     if (!dateField) return { error: "找不到可用的日期欄位" as const };
-    const wf = resolveWorkFields(data.fields);
+    const wf = resolveWorkFields(data.fields, cfg.checkNames);
     const records = inRange(data.records, dateField, week.start, week.end);
     const sf = sched.data ? resolveScheduleFields(sched.data.fields) : {};
-    const planned = plannedPoints(sched.data as TableData | undefined, sf, week.start, week.end);
+    const planned = plannedPoints(sched.data as TableData | undefined, sf, week.start, week.end, cfg.keepTrade);
     const rows = groupRows(records, wf, planned);
     const totals = rows.reduce(
       (t, r) => ({ orders: t.orders + r.orders.length, revenue: t.revenue + r.revenue, pass: t.pass + r.pass, fail: t.fail + r.fail, anomaly: t.anomaly + r.anomalyCount }),
       { orders: 0, revenue: 0, pass: 0, fail: 0, anomaly: 0 },
     );
-    return { dateField, wf, sf, rows, totals, records };
-  }, [work.data, sched.data, version, week.start, week.end]);
+    return { dateField, wf, sf, rows, totals, records, data, join };
+  }, [work.data, cost.data, cost.status, sched.data, version, week.start, week.end, cfg]);
 
   const toggleOpen = (g: string) =>
     setOpen((s) => {
@@ -226,7 +272,7 @@ export default function ControlGroupBoard() {
     return (
       <section className="cg">
         {header}
-        <EmptyState kind={work.status} title={`外業工作單（${version.toUpperCase()}）：${STATUS_TEXT[work.status]}`}>
+        <EmptyState kind={work.status} title={`${cfg.workLabel}（${version.toUpperCase()}）：${STATUS_TEXT[work.status]}`}>
           {work.error && <div className="mono">{work.error}</div>}
         </EmptyState>
       </section>
@@ -241,11 +287,11 @@ export default function ControlGroupBoard() {
     );
   }
 
-  const { wf, sf, rows, totals } = view;
+  const { wf, sf, rows, totals, join } = view;
   const missing = [
     !wf.group && "組別",
     !wf.revenue && "營業額點數",
-    !wf.check && "控制組檢核",
+    !wf.check && cfg.checkLabel,
     !wf.flags.length && "⚠ 異常欄位",
   ].filter(Boolean) as string[];
   const schedNote =
@@ -253,7 +299,19 @@ export default function ControlGroupBoard() {
       ? `預排表${STATUS_TEXT[sched.status]}，預排差異無法計算`
       : !sf.group || !sf.start
         ? "預排表找不到組別或日期欄位，預排差異無法計算"
-        : null;
+        : cfg.needsTrade && !sf.trade
+          ? "預排表找不到「業別」欄位，無法篩出內業預排"
+          : null;
+  const joinNote =
+    cfg.costKey && join
+      ? cost.status !== "ok"
+        ? `內業成本單${STATUS_TEXT[cost.status]}，組別與工作日期無法帶入`
+        : !join.costLink
+          ? "內業工作單找不到「所屬成本單」欄位，組別與工作日期無法帶入"
+          : join.joined < view.data.records.length
+            ? `${view.data.records.length - join.joined} 張工作單對不到內業成本單，沒有組別與工作日期`
+            : null
+      : null;
   const overallRate = errorRate(totals);
   const hasCheck = Boolean(wf.check || wf.status);
   const hasFlags = wf.flags.length > 0;
@@ -278,7 +336,7 @@ export default function ControlGroupBoard() {
         <div className="kpi">
           <div className="kpi-label">失誤率</div>
           <div className="kpi-value">{pct(overallRate)}</div>
-          <div className="kpi-sub">{hasCheck ? `不通過 ${totals.fail} ÷ 已檢核 ${totals.pass + totals.fail}` : "找不到控制組檢核欄位"}</div>
+          <div className="kpi-sub">{hasCheck ? `不通過 ${totals.fail} ÷ 已檢核 ${totals.pass + totals.fail}` : `找不到${cfg.checkLabel}欄位`}</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">異常工作單</div>
@@ -287,11 +345,16 @@ export default function ControlGroupBoard() {
         </div>
       </div>
 
-      {(missing.length > 0 || schedNote || sop.error || !sop.persistent || (sop.loaded && !sop.perm.canEdit && !demo)) && (
+      {(missing.length > 0 || schedNote || joinNote || sop.error || !sop.persistent || (sop.loaded && !sop.perm.canEdit && !demo)) && (
         <ul className="cg-notes">
           {missing.length > 0 && (
             <li>
               <CircleAlert size={14} /> 此資料表找不到欄位：{missing.join("、")}，相關數字顯示為「—」。
+            </li>
+          )}
+          {joinNote && (
+            <li>
+              <CircleAlert size={14} /> {joinNote}
             </li>
           )}
           {schedNote && (
@@ -359,7 +422,7 @@ export default function ControlGroupBoard() {
                   </div>
                 </dl>
                 <SopBox group={r.group} entry={sop.entries[r.group]} onToggle={sop.toggle} disabled={demo || !sop.loaded || !sop.perm.canEdit} />
-                {expanded && <OrderDetail row={r} wf={wf} />}
+                {expanded && <OrderDetail row={r} wf={wf} checkLabel={cfg.checkLabel} />}
               </article>
             );
           })}
@@ -432,7 +495,7 @@ export default function ControlGroupBoard() {
                     {expanded && (
                       <tr className="cg-detail-row">
                         <td colSpan={10}>
-                          <OrderDetail row={r} wf={wf} />
+                          <OrderDetail row={r} wf={wf} checkLabel={cfg.checkLabel} />
                         </td>
                       </tr>
                     )}
@@ -445,9 +508,12 @@ export default function ControlGroupBoard() {
       )}
 
       <p className="cg-foot">
-        失誤率＝控制組檢核「不通過」÷ 已檢核（未檢核不計）。預排點數＝預排表點數欄，未填以每組每天 1 點計（標 *）。差異＝營業額點數（原值）− 預排點數。SOP 由主管勾選，記錄勾選人與時間，不寫回 Lark。點組別可展開工作編號、工作項目與數量。
+        失誤率＝{cfg.checkLabel}「不通過」÷ 已檢核（未檢核不計）。預排點數＝預排表{cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}點數欄，未填以每組每天 1 點計（標 *）。差異＝營業額點數（原值）− 預排點數。
+        {cfg.costKey && " 組別與工作日期取自所屬內業成本單。"}SOP 由授權主管勾選，記錄勾選人與時間，不寫回 Lark。點組別可展開工作編號、工作項目與數量。
         {view.records.length > 0 && ` 資料至 ${formatDate(Math.max(...view.records.map((r) => (r.fields[view.dateField] as number) ?? 0)))}。`}
       </p>
+
+      {cfg.ownerProgress && <OwnerProgress data={view.data} wf={wf} dateField={view.dateField} weekStart={week.start} weekEnd={week.end} />}
     </section>
   );
 }

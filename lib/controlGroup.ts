@@ -29,15 +29,15 @@ export interface WorkFields {
   flags: FieldMeta[];
 }
 
-export function resolveWorkFields(fields: FieldMeta[]): WorkFields {
+export function resolveWorkFields(fields: FieldMeta[], checkNames: string[] = ["控制組檢核"]): WorkFields {
   return {
     group: pickField(fields, ["組別"]),
     orderNo: pickField(fields, ["工作單號"]),
-    jobNo: pickField(fields, ["案件編號", "工程編號", "工作編號", "可能確認單工作編號"]),
-    item: pickField(fields, ["合約工項", "工作項目", "工項"]),
-    qty: pickField(fields, ["完成數量", "計價數量", "數量"], ["number"]),
+    jobNo: pickField(fields, ["案件編號", "工程編號", "工作編號", "可能確認單工作編號", "可能的確認單工編(若暫無確認單才需填寫)"]),
+    item: pickField(fields, ["合約工項", "內業工項", "工作項目", "工項"]),
+    qty: pickField(fields, ["完成數量", "計價數量", "對外計價數量", "數量"], ["number"]),
     revenue: pickField(fields, ["最終營業額點數", "營業額點數", "點數"], ["number"]),
-    check: pickField(fields, ["控制組檢核"]),
+    check: pickField(fields, checkNames),
     status: pickField(fields, ["檢核狀態"]),
     flags: fields.filter((f) => f.name.startsWith("⚠")),
   };
@@ -61,6 +61,7 @@ export function anomalies(r: TableData["records"][number], wf: WorkFields): stri
 }
 
 export interface ScheduleFields {
+  trade?: FieldMeta; // 業別
   group?: FieldMeta;
   start?: FieldMeta;
   end?: FieldMeta;
@@ -70,6 +71,7 @@ export interface ScheduleFields {
 
 export function resolveScheduleFields(fields: FieldMeta[]): ScheduleFields {
   return {
+    trade: pickField(fields, ["業別"]),
     group: pickField(fields, ["組別"]),
     start: pickField(fields, ["開始日期", "日期", "預排開始日", "預排日期"], ["date"]),
     end: pickField(fields, ["結束日期", "預排結束日"], ["date"]),
@@ -81,7 +83,7 @@ export function resolveScheduleFields(fields: FieldMeta[]): ScheduleFields {
 // Planned points per group inside [start, end). A schedule row with points
 // spreads them over its days; a group-day with no filled points anywhere counts
 // as 1 point — once per group per day, however many jobs or people are booked.
-export function plannedPoints(data: TableData | undefined, sf: ScheduleFields, start: number, end: number) {
+export function plannedPoints(data: TableData | undefined, sf: ScheduleFields, start: number, end: number, keepTrade?: (trade: string) => boolean) {
   const out = new Map<string, { points: number; days: number; defaulted: number }>();
   if (!data || !sf.group || !sf.start) return out;
   const TZ = 8 * 3600000; // business days are Asia/Taipei dates
@@ -95,6 +97,7 @@ export function plannedPoints(data: TableData | undefined, sf: ScheduleFields, s
   };
 
   for (const r of data.records) {
+    if (keepTrade && !keepTrade(sf.trade ? text(r.fields[sf.trade.name]) : "")) continue;
     const s = r.fields[sf.start.name];
     if (typeof s !== "number") continue;
     const e0 = sf.end ? r.fields[sf.end.name] : null;
@@ -181,3 +184,41 @@ export function groupRows(records: TableData["records"], wf: WorkFields, planned
 }
 
 export const errorRate = (row: { pass: number; fail: number }) => (row.pass + row.fail ? row.fail / (row.pass + row.fail) : null);
+
+// Internal work orders carry no group or work date of their own: both live on the
+// linked 內業成本單 (所屬成本單). Adds 工作日期 and 組別 to each work order from its
+// cost sheet, matched on the cost sheet's primary field (the link shows that text).
+export const JOINED_DATE = "工作日期";
+export const JOINED_GROUP = "組別";
+
+export function joinInternal(work: TableData, cost: TableData | undefined): { data: TableData; joined: number; costLink?: string } {
+  const link = pickField(work.fields, ["所屬成本單"]);
+  const hasDate = work.fields.some((f) => f.name === JOINED_DATE && f.kind === "date");
+  const hasGroup = work.fields.some((f) => f.name === JOINED_GROUP);
+  if (!cost || !link || (hasDate && hasGroup)) return { data: work, joined: 0, costLink: link?.name };
+  const primary = cost.fields.find((f) => f.primary) ?? cost.fields[0];
+  const cDate = pickField(cost.fields, ["工作日期"], ["date"]);
+  const cGroup = pickField(cost.fields, ["內業組別", "所屬組別", "組別"]);
+  const index = new Map<string, TableData["records"][number]>();
+  for (const r of cost.records) {
+    const key = text(r.fields[primary.name]);
+    if (key) index.set(key, r);
+    index.set(r.id, r); // in case the link could not be resolved to titles
+  }
+  let joined = 0;
+  const records = work.records.map((r) => {
+    const ref = r.fields[link.name];
+    const keys = Array.isArray(ref) ? ref : ref ? [String(ref)] : [];
+    const c = keys.map((k) => index.get(k)).find(Boolean);
+    if (!c) return r;
+    joined++;
+    const fields = { ...r.fields };
+    if (!hasDate && cDate) fields[JOINED_DATE] = c.fields[cDate.name] ?? null;
+    if (!hasGroup && cGroup) fields[JOINED_GROUP] = c.fields[cGroup.name] ?? null;
+    return { ...r, fields };
+  });
+  const extra: FieldMeta[] = [];
+  if (!hasDate && cDate) extra.push({ id: "__joined_date", name: JOINED_DATE, kind: "date", primary: false });
+  if (!hasGroup && cGroup) extra.push({ id: "__joined_group", name: JOINED_GROUP, kind: "select", primary: false });
+  return { data: { ...work, fields: [...work.fields, ...extra], records }, joined, costLink: link.name };
+}

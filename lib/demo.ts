@@ -20,6 +20,8 @@ const inWeeks = (r: () => number) => weekStart() - 49 * day + Math.floor(r() * 6
 const groups = ["外業一組", "外業二組", "外業三組", "外業四組"];
 const projects = ["P-2601", "P-2602", "P-2603", "P-2604", "P-2605", "P-2606"];
 const items = ["地形測量", "控制測量", "放樣", "地籍調查"];
+const innerGroups = ["圖資A", "圖資B", "報告組"];
+const innerItems = ["數值地形圖", "縱橫斷面", "成果報告", "點位清冊"];
 
 const SPECS: Record<string, { n: number; spec: Spec }> = {
   "field-work": {
@@ -41,11 +43,34 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
     n: 120,
     spec: [
       ["工程編號", "select", (r) => pick(r, projects)],
-      ["組別", "select", (r) => pick(r, groups)],
+      ["業別", "select", (_, i) => (i % 3 === 0 ? "內業" : "外業")],
+      ["組別", "select", (r, i) => pick(r, i % 3 === 0 ? innerGroups : groups)],
       ["工作項目", "select", (r) => pick(r, items)],
       ["開始日期", "date", (r) => inWeeks(r)],
       ["結束日期", "date", () => null],
       ["預排點數", "number", (r) => (r() > 0.5 ? Math.round(r() * 3 * 10) / 10 : null)],
+    ],
+  },
+  "internal-cost": {
+    n: 60,
+    spec: [
+      ["單號", "text", (_, i) => `IC-${i}`],
+      ["工作日期", "date", (r) => inWeeks(r)],
+      ["內業組別", "select", (r) => pick(r, innerGroups)],
+    ],
+  },
+  "internal-work": {
+    n: 200,
+    spec: [
+      ["工作單號", "text", (_, i) => `IW-${2000 + i}`],
+      ["所屬成本單", "multiselect", (r) => [`IC-${Math.floor(r() * 60)}`]],
+      ["所屬案件", "select", (r) => pick(r, ["新北地形案", "桃園地籍案", "台中放樣案", "高雄控制案"])],
+      ["案件編號", "select", (r) => pick(r, projects)],
+      ["內業工項", "select", (r) => pick(r, innerItems)],
+      ["計價數量", "number", (r) => Math.round(r() * 12 * 10) / 10],
+      ["營業額點數", "number", (r) => Math.round(r() * 3 * 10) / 10],
+      ["雅雯檢核", "select", (r) => pick(r, ["通過", "通過", "通過", "不通過", null])],
+      ["⚠負值", "checkbox", (r) => r() > 0.95],
     ],
   },
   receivables: {

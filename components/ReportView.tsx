@@ -3,7 +3,7 @@ import { Info } from "lucide-react";
 import { useEffect, useState } from "react";
 import { sourceByKey, type ReportDef } from "@/lib/reports";
 import { showSource, useShell } from "./AppShell";
-import ControlGroupBoard from "./ControlGroupBoard";
+import GroupBoard, { BOARDS } from "./GroupBoard";
 import EmptyState from "./EmptyState";
 import SourcePanel from "./SourcePanel";
 
@@ -57,11 +57,11 @@ export default function ReportView({ report }: { report: ReportDef }) {
         </div>
       )}
 
-      {report.id === "R01" ? (
+      {report.id === "R01" || report.id === "R02" ? (
         <>
-          <ControlGroupBoard />
+          <GroupBoard key={report.id} cfg={report.id === "R01" ? BOARDS.r01 : BOARDS.r02} />
           <details className="raw-data">
-            <summary>查看原始工作單</summary>
+            <summary>查看原始資料表</summary>
             <div className="raw-data-body">
       {sources.length > 1 && (
         <nav className="tabs" role="tablist" aria-label="資料表">
