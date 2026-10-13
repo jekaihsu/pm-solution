@@ -605,3 +605,45 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
   .cg-focus-sop, .cg-focus-qty { margin-left: 0; }
 }
 .cg-focus, .cg-focus > * { min-width: 0; max-width: 100%; }
+
+/* 失誤率 drill-down */
+.kpi-btn { text-align: left; font: inherit; color: inherit; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+.kpi-btn:hover:not(:disabled) { border-color: var(--muted); }
+.kpi-btn:disabled { cursor: default; }
+.kpi-btn.on { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+.kpi-caret { transition: transform 0.15s; color: var(--muted); }
+.kpi-btn.on .kpi-caret { transform: rotate(180deg); }
+.cg-focus .kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.cg-fail { display: grid; gap: 12px; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; min-width: 0; }
+.cg-fail h4 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+.cg-fail-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.cg-fail-cols table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.cg-fail-cols th { text-align: left; font-weight: 500; color: var(--text-2); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.cg-fail-cols td { padding: 6px 8px; border-bottom: 1px solid var(--border-soft); }
+.cg-fail-cols .num { text-align: right; font-variant-numeric: tabular-nums; }
+.cg-link { cursor: pointer; }
+.cg-link:hover td { background: var(--hover); }
+
+/* 每日出錯 */
+.cg-days { display: grid; gap: 8px; min-width: 0; }
+.cg-days-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.cg-days-head h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.cg-days-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.cg-days table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.cg-days th { font-weight: 500; color: var(--text-2); padding: 8px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; text-align: center; }
+.cg-days th:first-child, .cg-days td:first-child { text-align: left; padding-left: 14px; }
+.cg-days td { padding: 6px; border-bottom: 1px solid var(--border-soft); text-align: center; white-space: nowrap; }
+.cg-days tr:last-child td { border-bottom: none; }
+.cg-days .num { text-align: right; padding-right: 14px; }
+.cg-day { min-width: 46px; height: 28px; padding: 0 8px; border-radius: 7px; border: 1px solid transparent; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.cg-day.none { background: transparent; color: var(--muted); cursor: default; font-weight: 400; }
+.cg-day.ok { background: var(--good-soft); color: var(--good); }
+.cg-day.err { background: var(--bad-soft); color: var(--bad); }
+.cg-day.on { border-color: currentColor; }
+.cg-day:not(:disabled):hover { filter: brightness(0.96); }
+.cg-strip { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-end; }
+.cg-strip-day { display: grid; gap: 4px; justify-items: center; }
+.cg-strip-all { margin-left: 4px; }
+.cg-err td { background: var(--bad-soft); }
+.cg-fix { margin-right: 4px; }
+.cg-strip-day { min-width: 62px; }

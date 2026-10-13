@@ -27,6 +27,7 @@ export interface WorkFields {
   check?: FieldMeta;
   status?: FieldMeta;
   trade?: FieldMeta;
+  person?: FieldMeta;
   flags: FieldMeta[];
 }
 
@@ -41,6 +42,7 @@ export function resolveWorkFields(fields: FieldMeta[], checkNames: string[] = ["
     check: pickField(fields, checkNames),
     status: pickField(fields, ["檢核狀態"]),
     trade: pickField(fields, ["業別", "工作類別"]),
+    person: pickField(fields, ["出工人", "組長", "填報人"]),
     flags: fields.filter((f) => f.name.startsWith("⚠")),
   };
 }
@@ -57,6 +59,53 @@ export function classifyCheck(r: TableData["records"][number], wf: WorkFields): 
   if (/通過|合格|OK|✓|已檢核|正確/i.test(t)) return "pass";
   return "unchecked";
 }
+
+// 出錯 = the 控制組／檢核 changed a work order: the modified quantity or points
+// differ from what the group filled in. Only compared when both values exist.
+export interface FixFields {
+  qtyOrig?: FieldMeta;
+  qtyFixed?: FieldMeta;
+  revOrig?: FieldMeta;
+  revFixed?: FieldMeta;
+}
+
+export interface FixDiff {
+  kind: "數量" | "營業額";
+  from: number;
+  to: number;
+}
+
+export function resolveFixFields(fields: FieldMeta[]): FixFields {
+  return {
+    qtyOrig: pickField(fields, ["完成數量", "計價數量", "數量"]),
+    qtyFixed: pickField(fields, ["修改後數量"]),
+    revOrig: pickField(fields, ["營業額點數", "點數"]),
+    revFixed: pickField(fields, ["修改後營業額", "修改後營業額點數", "最終營業額點數"]),
+  };
+}
+
+const num = (v: CellValue): number | null => {
+  if (typeof v === "number") return v;
+  if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) return Number(v);
+  if (Array.isArray(v) && v.length === 1) return num(v[0]);
+  return null;
+};
+
+export function fixDiffs(r: TableData["records"][number], ff: FixFields): FixDiff[] {
+  const out: FixDiff[] = [];
+  const cmp = (kind: FixDiff["kind"], a?: FieldMeta, b?: FieldMeta) => {
+    if (!a || !b || a === b) return;
+    const from = num(r.fields[a.name]);
+    const to = num(r.fields[b.name]);
+    if (from !== null && to !== null && Math.abs(from - to) > 1e-6) out.push({ kind, from, to });
+  };
+  cmp("數量", ff.qtyOrig, ff.qtyFixed);
+  cmp("營業額", ff.revOrig, ff.revFixed);
+  return out;
+}
+
+// Taipei weekday 0–6 (Mon–Sun) of a timestamp inside the week starting at weekStart.
+export const dayOfWeek = (t: number, weekStart: number) => Math.floor((t - weekStart) / DAY);
 
 export function anomalies(r: TableData["records"][number], wf: WorkFields): string[] {
   return wf.flags.filter((f) => truthy(r.fields[f.name])).map((f) => f.name.replace(/^⚠/, ""));
@@ -229,7 +278,7 @@ export function joinInternal(work: TableData, cost: TableData | undefined): { da
 export const WORK_FIELDS = [
   "組別", "工作單號", "案件編號", "工程編號", "工作編號", "可能確認單工作編號", "可能的確認單工編(若暫無確認單才需填寫)",
   "合約工項", "內業工項", "工作項目", "工項", "完成數量", "計價數量", "對外計價數量", "數量",
-  "最終營業額點數", "營業額點數", "點數", "控制組檢核", "雅雯檢核", "檢核狀態", "所屬成本單", "業別", "工作類別",
+  "最終營業額點數", "營業額點數", "點數", "控制組檢核", "雅雯檢核", "檢核狀態", "所屬成本單", "業別", "工作類別", "修改後數量", "修改後營業額", "修改後營業額點數", "出工人", "組長", "填報人",
   "所屬案件", "案件", "工程名稱", "交期", "合約交期", "預定完成日", "完工期限", "到期日", "⚠*", "@dates",
 ];
 export const COST_FIELDS = ["工作日期", "內業組別", "所屬組別", "組別", "@dates"];
