@@ -2,51 +2,22 @@
 import { CalendarCheck, CircleAlert, Clock, Plane, UserPlus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
-import { pickField } from "@/lib/controlGroup";
-import type { CellValue, TableData } from "@/lib/types";
+import { OT_DEPT, OT_HOURS, OT_HOURS_RAW, OT_NAME, OT_START, OT_STATUS, OT_TYPE, summarizeOvertime, type OtRecord } from "@/lib/overtime";
 import { weekName } from "@/lib/week";
 import { useShell } from "./AppShell";
 import { STATUS_TEXT, useSource, type SourceState } from "./useSource";
 
-const text = (v: CellValue) => (v === null || v === undefined ? "" : Array.isArray(v) ? v.join("、") : String(v));
 const round1 = (n: number) => formatNumber(Math.round(n * 10) / 10);
-
-// 薪水總表 is monthly: one row per person per month. The server only ever asks
-// Lark for overtime hours/days plus who/which group/which month.
-const NAME = ["姓名", "員工姓名", "員工", "人員", "名字"];
-const GROUP = ["組別", "所屬組別", "部門"];
-const MONTH = ["月份", "年月", "薪資月份", "計薪月份", "期間", "月"];
-
-function monthKey(v: CellValue, isDate: boolean): string | null {
-  if (isDate && typeof v === "number") {
-    const d = new Date(v + 8 * 3600000);
-    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-  }
-  const m = text(v).match(/(\d{2,4})\D{0,3}(\d{1,2})/);
-  if (!m) return null;
-  let y = Number(m[1]);
-  if (y < 1000) y += 1911; // 民國年
-  return `${y}-${m[2].padStart(2, "0")}`;
-}
 
 function SalaryOvertime({ state, weekStart }: { state: SourceState; weekStart: number }) {
   const [picked, setPicked] = useState<string | null>(null);
   const view = useMemo(() => {
     const d = state.data;
     if (!d) return null;
-    const name = pickField(d.fields, NAME) ?? d.fields.find((f) => f.primary);
-    const group = pickField(d.fields, GROUP);
-    const month = pickField(d.fields, MONTH) ?? d.fields.find((f) => f.kind === "date");
-    const ot = d.fields.filter((f) => /加班/.test(f.name) && d.records.some((r) => typeof r.fields[f.name] === "number"));
-    const hourFields = ot.filter((f) => !/天/.test(f.name));
-    const byMonth = new Map<string, TableData["records"]>();
-    for (const r of d.records) {
-      const k = month ? monthKey(r.fields[month.name], month.kind === "date") : null;
-      const key = k ?? "（未填月份）";
-      byMonth.set(key, [...(byMonth.get(key) ?? []), r]);
-    }
-    const months = [...byMonth.keys()].sort().reverse();
-    return { name, group, month, ot, hourFields, byMonth, months };
+    const names = new Set(d.fields.map((f) => f.name));
+    const missing = [OT_NAME, OT_START, OT_TYPE, OT_STATUS].filter((n) => !names.has(n));
+    const noHours = !names.has(OT_HOURS) && !names.has(OT_HOURS_RAW);
+    return { missing, noHours, hasDept: names.has(OT_DEPT), sum: summarizeOvertime(d.records as OtRecord[]) };
   }, [state.data]);
 
   if (state.status === "forbidden") {
@@ -69,87 +40,88 @@ function SalaryOvertime({ state, weekStart }: { state: SourceState; weekStart: n
       </p>
     );
   }
-  if (!view.ot.length) return <p className="muted small">薪水總表找不到有數字的「加班」欄位（已讀取的欄位：{state.data.fields.map((f) => f.name).join("、") || "無"}）。</p>;
+  if (view.missing.length || view.noHours)
+    return (
+      <p className="muted small">
+        詠翔加班缺少必要欄位，待定義：{[...view.missing, ...(view.noHours ? ["加班時數"] : [])].join("、")}（已讀取的欄位：{state.data.fields.map((f) => f.name).join("、") || "無"}）。
+      </p>
+    );
 
+  const { sum } = view;
   const d = new Date(weekStart + 8 * 3600000);
   const weekMonth = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-  const current = picked && view.byMonth.has(picked) ? picked : view.byMonth.has(weekMonth) ? weekMonth : view.months[0];
-  const records = view.byMonth.get(current) ?? [];
-  const num = (r: TableData["records"][number], f: { name: string }) => (typeof r.fields[f.name] === "number" ? (r.fields[f.name] as number) : 0);
-  const rows = records
-    .map((r) => ({
-      id: r.id,
-      name: view.name ? text(r.fields[view.name.name]) || "—" : "—",
-      group: view.group ? text(r.fields[view.group.name]) || "—" : "—",
-      values: view.ot.map((f) => (typeof r.fields[f.name] === "number" ? (r.fields[f.name] as number) : null)),
-      total: view.hourFields.reduce((s, f) => s + num(r, f), 0),
-    }))
-    .filter((r) => r.values.some((v) => v))
-    .sort((a, b) => b.total - a.total);
-  const groups = new Map<string, number>();
-  for (const r of rows) groups.set(r.group, (groups.get(r.group) ?? 0) + r.total);
+  const current = picked && sum.byMonth.has(picked) ? picked : sum.byMonth.has(weekMonth) ? weekMonth : sum.months[0];
+  const month = current ? sum.byMonth.get(current) : undefined;
+  const hasOther = !!month?.people.some((p) => p.other > 0);
 
   return (
     <div className="hr-src">
       <div className="hr-src-head">
-        薪水總表
+        詠翔加班
         <span className="muted small">
-          以月為單位・{view.month ? `依「${view.month.name}」` : "找不到月份欄位"}・{rows.length} 人有加班
+          以月為單位（依開始時間）・只計申請狀態「已通过」・{month ? `${month.people.length} 人有加班` : "沒有已通过的加班"}
         </span>
       </div>
-      {view.months.length > 1 && (
+      {sum.months.length > 1 && (
         <div className="cg-picker" role="group" aria-label="選擇月份">
-          {view.months.slice(0, 12).map((m) => (
+          {sum.months.slice(0, 12).map((m) => (
             <button key={m} className={`cg-chip ${m === current ? "on" : ""}`} onClick={() => setPicked(m)} aria-pressed={m === current}>
               {m}
             </button>
           ))}
         </div>
       )}
-      {view.hourFields.length > 0 && groups.size > 0 && (
+      {month && month.groups.length > 0 && (
         <div className="cg-focus-items">
-          <span className="muted small">各組加班時數</span>
-          {[...groups].sort((a, b) => b[1] - a[1]).map(([g, h]) => (
-            <span key={g} className="tag">
-              {g} {round1(h)}
+          <span className="muted small">各{view.hasDept ? "部門（發起人部門，是否等同組別待確認）" : "組"}加班時數</span>
+          {month.groups.map((g) => (
+            <span key={g.group} className="tag">
+              {g.group} {round1(g.hours)}
             </span>
           ))}
         </div>
       )}
-      {rows.length === 0 ? (
-        <p className="muted small">{current} 沒有加班紀錄。</p>
-      ) : (
+      {month ? (
         <div className="cg-detail">
           <table>
             <thead>
               <tr>
                 <th>姓名</th>
-                <th>組別</th>
-                {view.ot.map((f) => (
-                  <th key={f.name} className="num">
-                    {f.name}
-                  </th>
-                ))}
-                {view.hourFields.length > 1 && <th className="num">加班時數合計</th>}
+                <th>部門</th>
+                <th className="num">平日</th>
+                <th className="num">假日</th>
+                {hasOther && <th className="num">類型待定義</th>}
+                <th className="num">加班時數合計</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <td className="strong">{r.name}</td>
-                  <td>{r.group}</td>
-                  {r.values.map((v, i) => (
-                    <td key={i} className="num">
-                      {v === null ? "—" : round1(v)}
-                    </td>
-                  ))}
-                  {view.hourFields.length > 1 && <td className="num strong">{round1(r.total)}</td>}
+              {month.people.map((p) => (
+                <tr key={`${p.name}|${p.group}`}>
+                  <td className="strong">{p.name}</td>
+                  <td>{p.group}</td>
+                  <td className="num">{p.weekday ? round1(p.weekday) : "—"}</td>
+                  <td className="num">{p.holiday ? round1(p.holiday) : "—"}</td>
+                  {hasOther && <td className="num">{p.other ? round1(p.other) : "—"}</td>}
+                  <td className="num strong">{round1(p.total)}</td>
                 </tr>
               ))}
+              <tr>
+                <td className="strong">合計</td>
+                <td />
+                <td className="num strong">{round1(month.people.reduce((s, p) => s + p.weekday, 0))}</td>
+                <td className="num strong">{round1(month.people.reduce((s, p) => s + p.holiday, 0))}</td>
+                {hasOther && <td className="num strong">{round1(month.people.reduce((s, p) => s + p.other, 0))}</td>}
+                <td className="num strong">{round1(month.total)}</td>
+              </tr>
             </tbody>
           </table>
         </div>
+      ) : (
+        <p className="muted small">沒有已通过的加班紀錄。</p>
       )}
+      <p className="muted small">
+        口徑：逐筆加班審批單，只計「已通过」；未通过 {sum.excludedStatus} 筆（審批中、已撤回、已拒絕、已刪除等）不計；已通过但時數空白 {sum.noHours} 筆不計。時數＝「薪資計算加班時數」（原始時數＋人工補正；缺時用原始時數）。平日＝加班類型「平日」，其餘（休息日、例假日、國定假日）算假日；類型空白另列「待定義」。部門取自發起人部門。不讀任何金額欄位。
+      </p>
     </div>
   );
 }

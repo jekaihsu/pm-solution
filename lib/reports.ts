@@ -24,17 +24,17 @@ export interface SourceDef {
   restricted?: "hr"; // only HR_VIEWERS may load it
 }
 
-// 薪水總表: only overtime hours/days plus who/when. Pay amounts, base salary,
-// totals, deductions and IDs are never requested from Lark.
-const SALARY_DENY = /費|金額|薪|資|扣|保|獎|津貼|補助|帳|身分|身份|電話|地址|銀行|稅|實領|應發|合計|總額/;
-const SALARY_ALLOW = /加班|姓名|員工|人員|名字|組別|部門|月份|年月|期間|日期|年度|月/;
-export const salaryField = (name: string) =>
-  /^(薪資|計薪)月份$/.test(name) || (SALARY_ALLOW.test(name) && !SALARY_DENY.test(name.replace(/加班(時數|天數|小時)(合計)?/, "")));
+// 薪水計算 Base 的「詠翔加班」（逐筆加班審批單）：只讀下列欄位，精確比對、不用關鍵字。
+// 金額、薪資、身分、帳號、電話、地址、事由、明細、發起人等欄一律不向 Lark 要求。
+// 「薪資計算加班時數」名稱含薪資，但它是時數公式（原始加班時數＋人工補正），不是金額。
+// 欄名與 lib/overtime.ts 的常數一致（scripts/test-hr-overtime.mjs 會檢查）。
+const SALARY_ALLOW = ["加班人", "发起人部门", "开始时间", "加班类型", "申请状态", "薪資計算加班時數", "加班时长（小时）"];
+export const salaryField = (name: string) => SALARY_ALLOW.includes(name);
 
 const V3 = "Sdw1bG1djaHsVGsRPvmjyVWipgg"; // 詠翔日報系統 v3
 const V4 = "H7W6b0PFWaVF1BsgqXJj3pQ9pXb"; // 詠翔日報系統 V4
 const SALES_BASE = "JoOqbggsVar0ATsVgbcjh6IIp1g";
-const SALARY_BASE = "VwAsbezz9app3YsramgjduLYp2U"; // 薪水總表
+const SALARY_BASE = "VwAsbezz9app3YsramgjduLYp2U"; // 薪水計算 Base
 const LARK_WEB = "https://yong-xiang-survey.jp.larksuite.com";
 
 // V4 service inclusion baseline: 2026-10-07 20:10:44.122 Asia/Taipei. Records created
@@ -142,13 +142,13 @@ export const SOURCES: SourceDef[] = [
   },
   {
     key: "salary-overtime",
-    name: "薪水總表（加班）",
+    name: "薪水計算：詠翔加班",
     baseToken: SALARY_BASE,
-    tableName: /薪水總表|薪資總表|薪水|薪資/,
+    tableId: "tblomH0DXCzXgenE",
     allowField: (n) => salaryField(n),
     restricted: "hr",
-    url: `${LARK_WEB}/base/${SALARY_BASE}`,
-    note: "只讀加班時數／天數與人員、組別、月份欄位；底薪、總薪資等其他欄位一律不讀。僅 HR_VIEWERS 名單可看。",
+    url: tableUrl(SALARY_BASE, "tblomH0DXCzXgenE"),
+    note: "逐筆加班審批單；只讀加班人、發起人部門、開始時間、加班類型、申請狀態、加班時數，只計「已通过」。金額、薪資、身分等欄一律不讀。需 PM週報 在該 Base 有唯讀角色。僅 HR_VIEWERS 名單可看。",
   },
   // R07: 儀器管理系統 Base（業主 2026-10-13 提供）。與 V3／V4 的儀器費率、車輛分開，不相加、不去重。
   eqSys("equipment-system", "儀器管理系統：儀器總表（借用台帳）", "tblHZFEypeKfWOsF", "138 筆台帳，含租賃型態（月租／日租）、借用狀態（可借用／已借出）、系統封存；與「資料表」命名不同，兩者不去重。"),
