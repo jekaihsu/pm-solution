@@ -185,3 +185,46 @@ test("維護／TAF 紀錄：沒有有效期限欄 → 到期一律「none」（�
   assert.equal(e.latestAt, null);
   assert.deepEqual(e.rows, []);
 });
+
+// 2026-10-13 實測：歸還單值可能是「申請人 日期 設備類別 編號    申請編號」，結尾多一串 12 碼申請編號，且編號與類別之間靠空白分隔。
+test("借出未歸還：歸還值結尾帶申請編號（含空白分隔）也要對得上；T1 仍不能對到 XT1／申請編號不可誤吞編號", () => {
+  const o = outstandingLoans(
+    [
+      rec({ 日租ID: "S901", 借出日期: dayAt(-3) }), // 歸還值「某 2026/08/18 GPS S901    202608180025」
+      rec({ 日租ID: "901", 借出日期: dayAt(-3) }), // 前一字是 S（空白在 S 後）→ 不是同一個編號
+      rec({ 日租ID: "T1", 借出日期: dayAt(-3) }), // 歸還值「某 2026/08/18 XT1    202608180026」→ 不可對到
+      rec({ 日租ID: "TM60(892768)", 借出日期: dayAt(-3) }), // 編號本身以括號數字結尾，不可被當申請編號誤剝
+      rec({ 日租ID: "AAA組大稜鏡(2)", 借出日期: dayAt(-3) }), // 歸還值緊貼姓名＋類別＋編號（舊格式）
+    ],
+    [
+      rec({ 申请状态: "已通过", "借出儀器/車輛": "某 2026/08/18 GPS S901    202608180025" }),
+      rec({ 申请状态: "已通过", "借出儀器/車輛": "某 2026/08/18 XT1    202608180026" }),
+      rec({ 申请状态: "已通过", "借出儀器/車輛": "某全站儀TM60(892768)" }),
+      rec({ 申请状态: "已通过", "借出儀器/車輛": "某大稜鏡AAA組大稜鏡(2)" }),
+    ],
+    now,
+  );
+  assert.equal(o.matched, 3); // S901、TM60、大稜鏡
+  assert.deepEqual(o.rows.map((r) => r.item).sort(), ["901", "T1"]);
+});
+
+test("借出未歸還：歸還要發生在借出日（含當天）之後；舊的歸還單不能抵新的借單，缺日期則退回只比對識別", () => {
+  const ret = (offset, extra = {}) => rec({ 申请状态: "已通过", "借出儀器/車輛": "甲Q1", 歸還日期: dayAt(offset), ...extra });
+  const o = outstandingLoans(
+    [
+      rec({ 日租ID: "Q1", 借出日期: dayAt(-10) }), // 已被 -8 的歸還單歸還
+      rec({ 日租ID: "Q1", 借出日期: dayAt(-3) }), // 再借一次，-8 的歸還單比它早 → 未歸還
+      rec({ 日租ID: "Q1", 借出日期: dayAt(-1) }), // 再借，沒有更晚的歸還 → 未歸還
+      rec({ 日租ID: "Q1" }), // 沒借出日期 → 退回識別比對，算已歸還
+    ],
+    [ret(-8), rec({ 申请状态: "已撤回", "借出儀器/車輛": "甲Q1", 歸還日期: dayAt(0) })],
+    now,
+  );
+  assert.equal(o.matched, 2);
+  assert.deepEqual(o.rows.map((r) => r.days).sort(), [1, 3]);
+  // 借出當天歸還算已歸還；歸還單沒填歸還日期 → 無法判斷先後，視為已歸還
+  const same = outstandingLoans([rec({ 日租ID: "Q1", 借出日期: dayAt(-2) })], [ret(-2)], now);
+  assert.equal(same.matched, 1);
+  const noDate = outstandingLoans([rec({ 日租ID: "Q1", 借出日期: dayAt(-2) })], [rec({ 申请状态: "已通过", "借出儀器/車輛": "甲Q1" })], now);
+  assert.equal(noDate.matched, 1);
+});

@@ -180,10 +180,12 @@ export function bookingStats(bookings: Rec[], returns: Rec[], start: number, end
 
 // 借出未歸還：「儀器借單明細」vs 已通過的「儀器管理歸還單」（業主同事 2026-10-13 指定的對照）。
 // 實際格式（2026-10-13 唯讀實測）：
-//  - 借單明細的識別欄分散在 借出儀器/車輛（30 筆只有 2 筆有值）、日租ID、月租ID、車牌；依序取第一個有值的。
-//  - 歸還單「借出儀器/車輛」＝ 申請人姓名＋（設備類別）＋編號／車牌，前面多了人名，所以不能用相等比對。
-//  - 比對規則：去掉空白後完全相同，或歸還值以借單識別值「結尾」且結尾前一字不是英數字／連字號（避免 T1 對到 XT1）。
-// 只算審批狀態「已通过」的歸還單（撤回、拒絕、審批中都不算）。同一儀器借多次時，只要有一張已通過歸還單就視為已歸還（粗略口徑）。
+//  - 借單明細的識別欄分散在 借出儀器/車輛（30 筆只有 1～2 筆有值）、日租ID、月租ID、車牌；依序取第一個有值的。
+//  - 歸還單「借出儀器/車輛」有兩種：「{姓名}{設備類別}{ID}」（姓名緊貼在前），或「{姓名} {日期} {類別} {ID}    {12 碼申請編號}」（空白分隔、結尾多一串申請編號）。
+//  - 比對規則：先試原值、再試去掉結尾申請編號（8 碼以上的純數字，可帶括號）的值；去空白後完全相同，或以借單識別值「結尾」且結尾前一字不是英數字／連字號
+//    （避免 T1 對到 XT1）。前一字若是英數字但原值在該處有空白（例「GPS S901」），視為邊界成立。
+//  - 日期：借單有借出日期、歸還單有歸還日期時，歸還日期須在借出日期當天或之後（台北日曆日），舊的歸還單不能抵銷之後再借的借單；任一邊沒日期就只比對識別。
+// 只算審批狀態「已通过」的歸還單（撤回、拒絕、審批中都不算）。不使用借單明細的「是否已歸還」勾選。
 const compact = (s: string) => s.replace(/\s+/g, "");
 const LOAN_KEY_FIELDS = ["借出儀器/車輛", "日租ID", "月租ID", "車牌"];
 export function loanKey(r: Rec): string {
@@ -203,14 +205,35 @@ export function loanItemLabel(r: Rec): string {
   const m = v.match(/^\S+\s+\d{4}\/\d{1,2}\/\d{1,2}\s+(.*?)\s+\d{8,}$/);
   return (m ? m[1] : v).trim();
 }
-export function returnMatchesLoan(returnKey: string, loan: string) {
-  if (!returnKey || !loan) return false;
-  if (returnKey === loan) return true;
-  if (!returnKey.endsWith(loan)) return false;
-  return !/[A-Za-z0-9\-]/.test(returnKey[returnKey.length - loan.length - 1] ?? "");
+const APP_NO_TAIL = /[\s]*[(（]?\d{8,}[)）]?\s*$/;
+function endsWithLoan(raw: string, loan: string) {
+  const t = raw.trim();
+  const c = compact(t);
+  if (c === loan) return true;
+  if (!c.endsWith(loan)) return false;
+  const start = c.length - loan.length;
+  if (start === 0) return true;
+  if (!/[A-Za-z0-9\-]/.test(c[start - 1])) return true;
+  // 前一字是英數字：看原值在這個位置有沒有空白（「GPS S901」→ 邊界成立；「XT1」→ 不成立）
+  let seen = 0;
+  for (let i = t.length - 1; i >= 0; i--) {
+    if (/\s/.test(t[i])) continue;
+    if (++seen === loan.length) return i > 0 && /\s/.test(t[i - 1]);
+  }
+  return false;
 }
+export function returnMatchesLoan(returnValue: string, loan: string) {
+  if (!returnValue || !loan) return false;
+  if (endsWithLoan(returnValue, loan)) return true;
+  const stripped = returnValue.replace(APP_NO_TAIL, "");
+  return stripped !== returnValue && endsWithLoan(stripped, loan);
+}
+const dayOf = (t: number) => Math.floor((t + TZ) / DAY);
 export function outstandingLoans(loans: Rec[], returns: Rec[], now: number) {
-  const returnKeys = returns.filter((r) => str(r.fields["申请状态"]) === "已通过").map((r) => compact(str(r.fields["借出儀器/車輛"]))).filter(Boolean);
+  const okReturns = returns
+    .filter((r) => str(r.fields["申请状态"]) === "已通过")
+    .map((r) => ({ raw: str(r.fields["借出儀器/車輛"]), at: numOf(r.fields["歸還日期"]) }))
+    .filter((r) => r.raw);
   let noKey = 0;
   let matched = 0;
   const rows: { item: string; lentAt: number | null; days: number | null; group: string; category: string }[] = [];
@@ -220,11 +243,11 @@ export function outstandingLoans(loans: Rec[], returns: Rec[], now: number) {
       noKey++;
       continue;
     }
-    if (returnKeys.some((k) => returnMatchesLoan(k, key))) {
+    const lentAt = numOf(l.fields["借出日期"]);
+    if (okReturns.some((r) => returnMatchesLoan(r.raw, key) && (lentAt === null || r.at === null || dayOf(r.at) >= dayOf(lentAt)))) {
       matched++;
       continue;
     }
-    const lentAt = numOf(l.fields["借出日期"]);
     rows.push({
       item: loanItemLabel(l) || key,
       lentAt,
