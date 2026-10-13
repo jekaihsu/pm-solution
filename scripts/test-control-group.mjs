@@ -192,3 +192,31 @@ test("主表列出全部組；營業額含全部，差異只算有預排的組",
   assert.equal(p.n, 1);
   assert.equal(rows.find((r) => r.group === "B").planned, undefined);
 });
+
+// ---- R01 依 field id 讀預排（日期與預估營業額點數）----
+const fid = (id, name, kind) => ({ id, name, kind, primary: false });
+const v3Fields = (startName, endName) => [
+  fid("fldrENe4H6", "業別", "select"),
+  fid("fldNDUy2XP", "組別", "select"),
+  fid("fldMXOggGP", startName, "date"), // 真起日
+  fid("fldjWv1xST", endName, "date"), // 真訖日
+  fid("fld5lTSN1r", "預估營業額點數", "number"),
+];
+
+test("預排欄叫「預估營業額點數」(fld5lTSN1r) 有值 → R01 用該值而非每天 1 點", () => {
+  const s = table(v3Fields("開始日期", "結束日期"), [
+    { 業別: "外業", 組別: "水深A組", 開始日期: at(0), 結束日期: at(1), 預估營業額點數: 5 },
+  ]);
+  const planned = plannedPoints(s, resolveScheduleFields(s.fields), weekStart, weekEnd);
+  assert.equal(planned.get("水深A組").points, 5);
+  assert.equal(planned.get("水深A組").defaulted, 0);
+});
+
+test("欄名對調（真起日 fldMXOggGP 叫「結束日期」）→ 仍依 id 判斷起訖", () => {
+  const s = table(v3Fields("結束日期", "開始日期"), [
+    // fldMXOggGP=真起日 週一，fldjWv1xST=真訖日 週二；欄名反的
+    { 業別: "外業", 組別: "水深A組", 結束日期: at(0), 開始日期: at(1) },
+  ]);
+  const planned = plannedPoints(s, resolveScheduleFields(s.fields), weekStart, weekEnd);
+  assert.equal(planned.get("水深A組").points, 2); // 2 天 × 1 點；照欄名會變成 1 天
+});

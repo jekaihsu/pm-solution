@@ -153,13 +153,16 @@ export interface ScheduleFields {
   job?: FieldMeta;
 }
 
+// 先認 field id（真起日／真訖日／點數，欄名會被 UI 改）；找不到 id（例如 V4 預排表 id 不同）才退回欄名。
+// SCHEDULE_FIDS 在檔案下方定義，函式執行時已初始化。
 export function resolveScheduleFields(fields: FieldMeta[]): ScheduleFields {
+  const byId = (id: string) => fields.find((f) => f.id === id);
   return {
-    trade: pickField(fields, ["業別"]),
-    group: pickField(fields, ["組別"]),
-    start: pickField(fields, ["開始日期", "日期", "預排開始日", "預排日期"], ["date"]),
-    end: pickField(fields, ["結束日期", "預排結束日"], ["date"]),
-    points: pickField(fields, ["預排點數", "預排營業額點數", "營業額點數", "點數"], ["number"]),
+    trade: byId(SCHEDULE_FIDS.trade) ?? pickField(fields, ["業別"]),
+    group: byId(SCHEDULE_FIDS.group) ?? pickField(fields, ["組別"]),
+    start: byId(SCHEDULE_FIDS.start) ?? pickField(fields, ["開始日期", "日期", "預排開始日", "預排日期"], ["date"]),
+    end: byId(SCHEDULE_FIDS.end) ?? pickField(fields, ["結束日期", "預排結束日"], ["date"]),
+    points: byId(SCHEDULE_FIDS.points) ?? pickField(fields, ["預估營業額點數", "預排點數", "預排營業額點數", "營業額點數", "點數"], ["number"]),
     job: pickField(fields, ["案件", "案件編號", "工程編號"]),
   };
 }
@@ -619,4 +622,6 @@ export const SCHEDULE_FIELDS = [
   "預排點數", "預排營業額點數", "營業額點數", "點數", "案件", "案件編號", "工程編號", "@dates",
   // R02 以人為單位：人員（link，要 record_id）、條類型、預估營業額點數
   "人員", "條類型", "預估營業額點數",
+  // 依 field id 取欄（日期／點數不看欄名）：真起日、真訖日、組別、業別、預估營業額點數
+  `#${SCHEDULE_FIDS.start}`, `#${SCHEDULE_FIDS.end}`, `#${SCHEDULE_FIDS.group}`, `#${SCHEDULE_FIDS.trade}`, `#${SCHEDULE_FIDS.points}`,
 ];
