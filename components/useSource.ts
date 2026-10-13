@@ -15,12 +15,14 @@ export interface SourceState {
 export interface SourceOptions {
   only?: "dates" | "meta"; // just the date fields (overview trends) / just the field list
   fields?: string[]; // just these field names, if present (dashboards)
+  links?: boolean; // also return link fields' record_ids (record.links)
   enabled?: boolean; // false → don't fetch (e.g. a collapsed section)
 }
 
 export function useSource(key: string, opts: SourceOptions = {}): SourceState {
   const { demo, tick, manual } = useShell();
-  const projection = opts.only ? `only=${opts.only}` : opts.fields ? new URLSearchParams({ fields: opts.fields.join(",") }).toString() : "";
+  const base = opts.only ? `only=${opts.only}` : opts.fields ? new URLSearchParams({ fields: opts.fields.join(",") }).toString() : "";
+  const projection = opts.links ? `${base}${base ? "&" : ""}links=1` : base;
   const enabled = opts.enabled !== false;
   // Tag each result with the source + mode + projection it belongs to, so a switch never
   // shows the previous table's data while the new one loads.

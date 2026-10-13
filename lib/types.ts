@@ -19,7 +19,9 @@ export interface TableMeta {
 export interface TableData {
   table: TableMeta;
   fields: FieldMeta[];
-  records: { id: string; fields: Record<string, CellValue> }[];
+  // links: link 欄位 → 被關聯記錄的 record_id（fields 裡是轉成主欄位文字後的名稱）。
+  // 只在 /api/sources?links=1 時回傳，且只含被投影的欄位。
+  records: { id: string; fields: Record<string, CellValue>; links?: Record<string, string[]> }[];
   fetchedAt: number;
   source: "lark" | "demo";
   complete: boolean; // false when paging stopped early

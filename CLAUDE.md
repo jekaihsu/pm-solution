@@ -39,10 +39,13 @@
 | `lib/controlGroup.ts` | R01／R02 口徑：失誤率、預排點數、出錯（被修改）、違反 SOP、內業成本單 join |
 | `lib/sopStore.ts` / `app/api/sop` | SOP 勾選存檔（`DATA_DIR/sop.json` + `sop-log.jsonl`） |
 | `lib/roles.ts` | `sopPermission`（預設所有登入者可勾）、`hrPermission`（`HR_VIEWERS`） |
-| `app/api/sources/[key]` | 讀單一來源；`fields=` 投影（`x*` 前綴、`~x` 包含、`@dates`）、`only=meta|dates`、`demo=1` |
+| `app/api/sources/[key]` | 讀單一來源；`fields=` 投影（`x*` 前綴、`~x` 包含、`#fld…` 依 field id、`@dates`）、`only=meta|dates`、`links=1`（附 link 欄的 record_id，預設不回）、`demo=1` |
 | `app/api/health` | 版本、硬碟、各來源預熱結果、含「SOP」欄位的位置 |
 | `components/GroupBoard.tsx` | R01／R02 看板：簡表、詳細、單組單週、每日出錯、失誤率明細、SOP |
 | `components/OwnerProgress.tsx` | R02 業主進度（進度 % 先只顯示「待定義」） |
+| `lib/adminBoard.ts` | R11 行政口徑（純函式）：成本單帶人與日期、預排以人員 record_id＋日期展開、與預排差異分區 |
+| `components/AdminBoard.tsx` | R11 行政看板：一列一人、合計列、沒預排的人收合區、點人展開工作單明細 |
+| `scripts/test-admin-board.mjs` | R11 邏輯測試（`node --test`，不連 Lark） |
 | `components/HrBoard.tsx` | R04 人事：招聘暫無、出勤／出差待權限、加班取自薪水總表 |
 | `lib/demo.ts` | 示範資料（右下角「示範資料」開關） |
 | `lib/version.ts` | `APP_VERSION`，每次改版都要更新，用來確認部署是否生效 |
@@ -117,6 +120,15 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 **R02 內業檢查**：同 R01 六項＋業主進度；失誤率用「雅雯檢核」；預排取業別＝內業；組別與工作日期由「所屬成本單」帶入；只顯示所選週；進度 % 先不算，只顯示；天數＝距交期天數（交期欄位未定位）。
 
 **R07 儀器車輛管理詳情**（`components/EquipmentBoard.tsx`）：三塊——儀器管理系統（清單、可用、送修／停用、月租型）；月租型儀器＋車輛在所選週有沒有檢查（未檢查＝紅，檢查結果異常另計）；TAF 與自校驗（TAF 依最近一次有效期限：逾期紅、30 天內黃；自校顯示最近一次日期與結果）。來源 `equipment-system`／`equipment-inspection`／`equipment-calibration` 尚未定位；清單未接入前暫用 V3 儀器費率。欄位用名稱自動辨識（見檔案內 `masterFields` 等）。
+
+**R11 行政數據**（`components/AdminBoard.tsx`、`lib/adminBoard.ts`；業主裁示 2026-10-13）
+- 一列一個人＝行政成本單（V3 `tbliyB0wgDhgUQbA`）的「填表人」，加合計列。工作單（V3 `tbl2c5CLgwPZ3Pl2`）沒有日期與人員，經「所屬成本單」帶入：先用 link record_id，其次成本單「工作單列」對工作單號，成本單標題只在唯一時備援（標題常重複）。
+- 欄位：工作單張數、出勤天數（所選週該人成本單的不重複日期）、營業額點數（最終營業額點數合計）、預排點數、與預排差異、⚠異常張數、加班時數；點人展開該週工作單明細（日期、單號、行政工項、件數、點數、異常、備註）。工項標準點數空白照實顯示。
+- 預排取業別＝行政；比對主鍵＝人員 record_id＋日期（組別不參與）；日期一律用 field id（真起日 `fldMXOggGP`、真訖日 `fldjWv1xST`），不照欄名。人員欄可多人，一條對每人展開。點數：有填就用（按起訖天數平均分攤，多人時各自全額）；沒填則每人每天 1 點，同人同日多條只算一次、該人該日已有填點數的條就不再補。
+- 與預排差異比照 R01：主表與合計只含有預排點數的人；沒預排的人收在下方可展開區塊（預排與差異顯示「—」，不進合計差異）；預排表讀不到就不分區。
+- 失誤率／已檢核／不通過：行政沒有檢核欄，**待定義、看板不顯示**。
+- link 的 record_id：`getSourceData` 另存 `record.links`（欄名→ids），`/api/sources/...?links=1` 才回傳且只含被投影的欄位；其他報表不帶此參數，回應與以前相同。
+- V4 行政表以表名自動找（V4 應用目前讀不到 1254302），頁面顯示失敗原因；V3、V4 不相加。
 
 **R04 人事**：招聘暫無；出勤、出差需開通 Lark 假勤／審批權限；加班取自薪水總表（以月為單位）。
 

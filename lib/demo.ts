@@ -37,6 +37,8 @@ const groups = ["外業一組", "外業二組", "外業三組", "外業四組"];
 const projects = ["P-2601", "P-2602", "P-2603", "P-2604", "P-2605", "P-2606"];
 const items = ["地形測量", "控制測量", "放樣", "地籍調查"];
 const innerGroups = ["圖資A", "圖資B", "報告組"];
+const adminPeople = ["陳怡君", "林雅婷", "張雅惠", "黃淑芬"]; // 虛構
+const adminItems = ["公文收發", "請款作業", "採購對帳", "文件歸檔", "出差申請"];
 const innerItems = ["數值地形圖", "縱橫斷面", "成果報告", "點位清冊"];
 
 const SPECS: Record<string, { n: number; spec: Spec }> = {
@@ -65,8 +67,10 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
     n: 120,
     spec: [
       ["工程編號", "select", (r) => pick(r, projects)],
-      ["業別", "select", (_, i) => (i % 3 === 0 ? "內業" : "外業")],
-      ["組別", "select", (r, i) => pick(r, i % 3 === 0 ? innerGroups : groups)],
+      ["業別", "select", (_, i) => (i % 7 === 0 ? "行政" : i % 3 === 0 ? "內業" : "外業")],
+      ["組別", "select", (r, i) => (i % 7 === 0 ? "行政" : pick(r, i % 3 === 0 ? innerGroups : groups))],
+      ["人員", "multiselect", (r, i) => (i % 7 === 0 ? (r() > 0.7 ? [pick(r, adminPeople), pick(r, adminPeople)] : [pick(r, adminPeople)]) : null)],
+      ["預估營業額點數", "number", () => null],
       ["工作項目", "select", (r) => pick(r, items)],
       ["開始日期", "date", (r) => inWeeks(r)],
       ["結束日期", "date", () => null],
@@ -110,6 +114,29 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["營業額點數", "number", (r) => Math.round(r() * 3 * 10) / 10],
       ["雅雯檢核", "select", (r) => pick(r, ["通過", "通過", "通過", "不通過", null])],
       ["⚠負值", "checkbox", (r) => r() > 0.95],
+    ],
+  },
+  "admin-cost": {
+    n: 30,
+    spec: [
+      ["單號", "text", (_, i) => `AC-${i}`],
+      ["工作日期", "date", (r) => inWeeks(r)],
+      ["填表人", "multiselect", (r) => [pick(r, adminPeople)]],
+      ["工作單列", "multiselect", () => null],
+      ["是否加班", "checkbox", (r) => r() > 0.8],
+      ["加班時數", "number", (r) => (r() > 0.8 ? Math.round(r() * 3 * 2) / 2 : null)],
+    ],
+  },
+  "admin-work": {
+    n: 90,
+    spec: [
+      ["工作單號", "text", (_, i) => `AW-${3000 + i}`],
+      ["所屬成本單", "multiselect", (r) => [`AC-${Math.floor(r() * 30)}`]],
+      ["行政工項", "multiselect", (r) => [pick(r, adminItems)]],
+      ["件數", "number", (r) => Math.ceil(r() * 5)],
+      ["最終營業額點數", "number", (r) => Math.round(r() * 0.4 * 100) / 100],
+      ["備註", "text", (r) => (r() > 0.85 ? "示範備註" : null)],
+      ["⚠工項與件數", "text", (r) => (r() > 0.93 ? "件數異常" : "")],
     ],
   },
   receivables: {
@@ -193,6 +220,8 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
   },
 };
 
+// R11 reads the schedule by field id; give the demo schedule the same ids.
+const DEMO_FID: Record<string, string> = { 人員: "fld7KNCsVe", 業別: "fldrENe4H6", 開始日期: "fldMXOggGP", 結束日期: "fldjWv1xST", 預估營業額點數: "fld5lTSN1r" };
 const specKey = (key: string) => key.replace(/^v[34]-/, "");
 
 export function hasDemo(key: string) {
@@ -212,7 +241,7 @@ export function demoSourceData(src: SourceDef): TableData {
   }));
   return {
     table: { id: `demo_${src.key}`, name: `${src.name}（示範）` },
-    fields: def.spec.map(([name, kind], i) => ({ id: `f${i}`, name, kind, primary: i === 0 })),
+    fields: def.spec.map(([name, kind], i) => ({ id: DEMO_FID[name] && specKey(src.key) === "schedule" ? DEMO_FID[name] : `f${i}`, name, kind, primary: i === 0 })),
     records,
     fetchedAt: Date.now(),
     source: "demo",
