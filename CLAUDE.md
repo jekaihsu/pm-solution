@@ -121,3 +121,7 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 - [ ] 用真實 V3 資料驗收 R01（兩組對 Lark 原表）；確認 V3 外業工作單是否有 `修改後數量`。
 - [ ] R02 交期欄位位置；進度 % 口徑（使用者之後說明）。
 - [ ] 圖文說明書補 R01／R02／R04。
+- [ ] **工作單聊天串（記錄留言）**：使用者要在明細看到 Lark 記錄右側的留言串。官方「分頁獲取文檔評論」API（`GET /drive/v1/files/{token}/comments`）文件只列 doc/sheet/file/docx，未保證支援多維表格，也未說明如何對應到記錄。先跑 `node --env-file=.env.local scripts/probe-comments.mjs`（唯讀，只印結構不印內容）：
+  - 若回權限錯誤：需在 PM週報 應用開通讀取評論權限並發布新版本（先問使用者）。
+  - 若 code=0 且能對應到 record：在 `lib/lark.ts` 加讀取、快取，`OrderDetail` 加「留言」欄。
+  - 若無法對應記錄：回報使用者，替代方案是請他們把要給 PM 看的內容寫在工作單的「備註」欄（網站已顯示）。
