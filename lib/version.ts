@@ -1,2 +1,2 @@
 // Bumped with each change so /api/health shows which build is deployed.
-export const APP_VERSION = "2026-10-13.24 r02-team-summary";
+export const APP_VERSION = "2026-10-13.25 hr-all-viewers";

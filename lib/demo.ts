@@ -40,6 +40,12 @@ const innerGroups = ["圖資A", "圖資B", "報告組"];
 const adminPeople = ["陳怡君", "林雅婷", "張雅惠", "黃淑芬"]; // 虛構
 const adminItems = ["公文收發", "請款作業", "採購對帳", "文件歸檔", "出差申請"];
 const innerItems = ["數值地形圖", "縱橫斷面", "成果報告", "點位清冊"];
+// R04 加班示範：人員名單（組織架構）與加班人要能對上，也要有對不到的情形。全部虛構。
+const otPeople = ["王小明", "陳大文", "林志強", "張家豪", "李俊傑", "黃建宏"];
+const otPeopleGroups = [groups[0], groups[1], groups[2], groups[3], "圖資A", "報告組"];
+const otPerson = (i: number) => (i % 7 === 6 ? "周小華" : otPeople[i % 7]); // 周小華不在名單 → 未對應組別
+// Person (人員) cells carry an open_id in real data; the demo derives a stable fake one from the name.
+const demoOpenId = (name: string) => `ou_demo_${name}`;
 
 const SPECS: Record<string, { n: number; spec: Spec }> = {
   "field-work": {
@@ -247,11 +253,19 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["狀態", "select", (r) => pick(r, ["報價中", "已回傳", "已成交", "未成交"])],
     ],
   },
+  people: {
+    n: 6,
+    spec: [
+      ["姓名", "text", (_, i) => otPeople[i]],
+      ["Lark帳號", "person", (_, i) => (i === 4 ? null : [otPeople[i]])], // 李俊傑沒填帳號 → 只能用姓名對
+      ["所屬組別", "select", (_, i) => otPeopleGroups[i]],
+      ["在職", "checkbox", (_, i) => i !== 5],
+    ],
+  },
   "salary-overtime": {
     n: 36,
     spec: [
-      ["加班人", "text", (_, i) => ["王小明", "陳大文", "林志強", "張家豪", "李俊傑", "黃建宏"][i % 6]],
-      ["发起人部门", "select", (_, i) => groups[i % 4]],
+      ["加班人", "person", (_, i) => [otPerson(i)]],
       ["开始时间", "date", (_, i) => { const d = new Date(); d.setDate(10); d.setMonth(d.getMonth() - Math.floor(i / 12)); return d.getTime(); }],
       ["加班类型", "select", (r) => pick(r, ["平日", "平日", "平日", "休息日(六)", "例假日(日)", "國定假日"])],
       ["申请状态", "select", (r) => pick(r, ["已通过", "已通过", "已通过", "审批中", "已撤回"])],
@@ -283,10 +297,17 @@ export function demoSourceData(src: SourceDef): TableData {
     seed = (seed * 1664525 + 1013904223) % 4294967296;
     return seed / 4294967296;
   };
-  const records = Array.from({ length: def.n }, (_, i) => ({
-    id: `demo_${src.key}_${i}`,
-    fields: Object.fromEntries(def.spec.map(([name, , gen]) => [name, gen(r, i)])),
-  }));
+  const personFields = def.spec.filter(([, kind]) => kind === "person").map(([name]) => name);
+  const records = Array.from({ length: def.n }, (_, i) => {
+    const fields = Object.fromEntries(def.spec.map(([name, , gen]) => [name, gen(r, i)]));
+    const people = Object.fromEntries(
+      personFields.flatMap((name) => {
+        const v = fields[name];
+        return Array.isArray(v) && v.length ? [[name, v.map((n) => ({ id: demoOpenId(n), name: n }))]] : [];
+      }),
+    );
+    return { id: `demo_${src.key}_${i}`, fields, ...(Object.keys(people).length ? { people } : {}) };
+  });
   return {
     table: { id: `demo_${src.key}`, name: `${src.name}（示範）` },
     fields: def.spec.map(([name, kind], i) => ({ id: DEMO_FID[name] && specKey(src.key) === "schedule" ? DEMO_FID[name] : `f${i}`, name, kind, primary: i === 0 })),

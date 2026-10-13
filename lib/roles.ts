@@ -13,11 +13,15 @@ export function sopPermission(session: Session | null): { canEdit: boolean; reas
   return editors.includes(session.openId) ? { canEdit: true } : { canEdit: false, reason: "此帳號不在可勾選名單（SOP_EDITORS）。" };
 }
 
-// Salary-derived data (薪水總表加班): only open_ids in HR_VIEWERS. Unset = nobody.
+// 人事資料（薪水總表加班）：HR_VIEWERS 控制誰能看。
+//   未設定／留空 ＝ 沒有人能看（安全預設）。
+//   *（或清單裡含 *）＝ 所有登入的組織成員都能看（業主 2026-10-13 裁示：全部人都可以看人事頁面）。
+//   open_id 清單（逗號或空白分隔）＝ 只有清單內的人能看。
 export function hrPermission(session: Session | null): { canView: boolean; reason?: string } {
   if (process.env.AUTH_DISABLED === "1") return { canView: true };
   if (!session) return { canView: false, reason: "尚未登入。" };
   const viewers = list(process.env.HR_VIEWERS);
   if (!viewers.length) return { canView: false, reason: "管理員尚未設定可查看人事資料的名單（HR_VIEWERS）。" };
+  if (viewers.includes("*")) return { canView: true };
   return viewers.includes(session.openId) ? { canView: true } : { canView: false, reason: "此帳號不在人事資料查看名單（HR_VIEWERS）。" };
 }
