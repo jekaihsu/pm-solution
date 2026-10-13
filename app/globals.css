@@ -512,3 +512,52 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
   .facts dd { margin-bottom: 6px; }
   .pop-body { width: min(290px, calc(100vw - 32px)); }
 }
+
+/* ============================================================
+   R01 control-group board
+   ============================================================ */
+.cg { display: grid; gap: 14px; margin-bottom: 20px; }
+.cg-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.cg-head h2 { font-size: 16px; font-weight: 600; margin: 0; }
+.cg-head p { margin: 2px 0 0; }
+.cg-notes { list-style: none; margin: 0; padding: 10px 14px; display: grid; gap: 4px; font-size: 12.5px; color: var(--text-2); background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.cg-notes li { display: flex; align-items: center; gap: 6px; }
+.cg-table { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow-x: auto; }
+.cg-table > table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.cg-table > table > thead th { text-align: left; font-weight: 500; font-size: 12.5px; color: var(--text-2); background: var(--bg); padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.cg-table > table > tbody > tr > td { padding: 12px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; white-space: nowrap; }
+.cg-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.cg-table .strong { font-weight: 600; }
+.cg-row { cursor: pointer; }
+.cg-row:hover > td { background: var(--bg); }
+.cg-row.open > td { background: var(--bg); border-bottom-color: transparent; }
+.cg-caret { width: 28px; color: var(--muted); padding-right: 0 !important; }
+.cg-group { font-weight: 600; }
+.cg-items { max-width: 220px; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+.cg-diff { display: inline-flex; align-items: center; gap: 2px; font-variant-numeric: tabular-nums; font-weight: 500; }
+.cg-diff.neg { color: var(--warn); }
+.cg-sop { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; }
+.cg-sop input { width: 16px; height: 16px; }
+.cg-sop-by { font-size: 11.5px; color: var(--muted); }
+.cg-detail-row > td { padding: 0 12px 14px 40px !important; background: var(--bg); }
+.cg-detail { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.cg-detail table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.cg-detail th { text-align: left; font-weight: 500; color: var(--text-2); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.cg-detail td { padding: 7px 10px; border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
+.cg-detail tr:last-child td { border-bottom: none; }
+.cg-detail .num { text-align: right; font-variant-numeric: tabular-nums; }
+.cg-foot { margin: 0; font-size: 12px; color: var(--muted); max-width: 900px; }
+.cg-cards { display: grid; gap: 10px; }
+.cg-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; display: grid; gap: 10px; }
+.cg-card-head { all: unset; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.cg-card-head svg { margin-left: auto; color: var(--muted); }
+.cg-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin: 0; }
+.cg-metrics dt { font-size: 11.5px; color: var(--muted); }
+.cg-metrics dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cg-card .cg-detail { margin-top: 2px; }
+.raw-data { margin-top: 8px; }
+.raw-data > summary { cursor: pointer; font-size: 13px; color: var(--text-2); padding: 8px 0; }
+.raw-data-body { margin-top: 8px; }
+@media (max-width: 700px) {
+  .cg-head { flex-wrap: wrap; }
+}

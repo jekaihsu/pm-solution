@@ -3,6 +3,7 @@ import { Info } from "lucide-react";
 import { useEffect, useState } from "react";
 import { sourceByKey, type ReportDef } from "@/lib/reports";
 import { showSource, useShell } from "./AppShell";
+import ControlGroupBoard from "./ControlGroupBoard";
 import EmptyState from "./EmptyState";
 import SourcePanel from "./SourcePanel";
 
@@ -56,6 +57,12 @@ export default function ReportView({ report }: { report: ReportDef }) {
         </div>
       )}
 
+      {report.id === "R01" ? (
+        <>
+          <ControlGroupBoard />
+          <details className="raw-data">
+            <summary>查看原始工作單</summary>
+            <div className="raw-data-body">
       {sources.length > 1 && (
         <nav className="tabs" role="tablist" aria-label="資料表">
           {sources.map((s) => (
@@ -73,6 +80,31 @@ export default function ReportView({ report }: { report: ReportDef }) {
         <EmptyState kind="empty" title="此版本沒有資料來源">
           切換上方「全部／V3／V4」看看其他版本。
         </EmptyState>
+      )}
+            </div>
+          </details>
+        </>
+      ) : (
+        <>
+      {sources.length > 1 && (
+        <nav className="tabs" role="tablist" aria-label="資料表">
+          {sources.map((s) => (
+            <button key={s.key} role="tab" aria-selected={s.key === current?.key} className={s.key === current?.key ? "active" : ""} onClick={() => setActive(s.key)}>
+              {s.name}
+              {s.version && <span className={`ver ver-${s.version}`}>{s.version.toUpperCase()}</span>}
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {current ? (
+        <SourcePanel key={current.key} reportId={report.id} source={current} />
+      ) : (
+        <EmptyState kind="empty" title="此版本沒有資料來源">
+          切換上方「全部／V3／V4」看看其他版本。
+        </EmptyState>
+      )}
+        </>
       )}
     </div>
   );

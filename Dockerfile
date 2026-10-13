@@ -19,6 +19,8 @@ ENV NODE_ENV=production \
     PORT=8080
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
-USER node
+# R01 SOP sign-offs are stored here; mount a persistent volume at /app/data and set DATA_DIR=/app/data.
+# Runs as root so a freshly mounted (root-owned) volume is writable.
+RUN mkdir -p /app/data
 EXPOSE 8080
 CMD ["node", "server.js"]

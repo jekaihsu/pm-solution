@@ -33,16 +33,19 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["數量", "number", (r) => Math.round(r() * 20 * 10) / 10],
       ["點數", "number", (r) => Math.round(r() * 8 * 10) / 10],
       ["檢核狀態", "select", (r) => pick(r, ["已檢核", "已檢核", "待檢核", "退回"])],
+      ["控制組檢核", "select", (r) => pick(r, ["通過", "通過", "通過", "不通過", null])],
+      ["⚠營業額異常", "checkbox", (r) => r() > 0.92],
     ],
   },
   schedule: {
-    n: 30,
+    n: 120,
     spec: [
       ["工程編號", "select", (r) => pick(r, projects)],
       ["組別", "select", (r) => pick(r, groups)],
       ["工作項目", "select", (r) => pick(r, items)],
-      ["預排開始日", "date", (r) => inWeeks(r)],
-      ["預排點數", "number", (r) => Math.round(r() * 10 * 10) / 10],
+      ["開始日期", "date", (r) => inWeeks(r)],
+      ["結束日期", "date", () => null],
+      ["預排點數", "number", (r) => (r() > 0.5 ? Math.round(r() * 3 * 10) / 10 : null)],
     ],
   },
   receivables: {
