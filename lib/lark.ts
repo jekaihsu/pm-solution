@@ -115,7 +115,16 @@ export function lastGood<T>(key: string): T | undefined {
   return cache.get(key)?.value as T | undefined;
 }
 
-export const sourceCacheKey = (src: SourceDef) => `source:${src.baseToken}:${src.tableId}:${src.viewId ?? ""}`;
+export const sourceCacheKey = (src: SourceDef) => `source:${src.baseToken}:${src.tableId ?? src.key}:${src.viewId ?? ""}`;
+
+async function resolveTableId(src: SourceDef): Promise<string> {
+  if (src.tableId) return src.tableId;
+  if (!src.baseToken || !src.tableName) throw new Error(`Source ${src.key} has no Base/table configured`);
+  const tables = await listTables(src.baseToken);
+  const t = tables.find((x) => src.tableName!.test(x.name));
+  if (!t) throw new Error(`在這個 Base 找不到名稱符合「${src.tableName.source}」的資料表（共 ${tables.length} 張表）`);
+  return t.id;
+}
 
 // ---------- tables & fields ----------
 
@@ -329,12 +338,15 @@ async function linkTitles(baseToken: string, tableId: string, ids: string[]): Pr
 }
 
 export async function getSourceData(src: SourceDef, force = false): Promise<TableData> {
-  const { baseToken, tableId, viewId } = src;
-  if (!baseToken || !tableId) throw new Error(`Source ${src.key} has no Base/table configured`);
+  const { baseToken, viewId } = src;
+  if (!baseToken || !(src.tableId || src.tableName)) throw new Error(`Source ${src.key} has no Base/table configured`);
   return cached(
     sourceCacheKey(src),
     async () => {
-      const fields = await listFields(baseToken, tableId);
+      const tableId = await resolveTableId(src);
+      const all = await listFields(baseToken, tableId);
+      const fields = src.allowField ? all.filter((f) => src.allowField!(f.name)) : all;
+      if (src.allowField && !fields.length) throw new Error(`資料表沒有可讀取的欄位（${all.length} 個欄位都不在允許清單內）`);
       const records: TableData["records"] = [];
       let total: number | undefined;
       let excluded = 0;
@@ -349,7 +361,12 @@ export async function getSourceData(src: SourceDef, force = false): Promise<Tabl
           total?: number;
         }>(`/bitable/v1/apps/${baseToken}/tables/${tableId}/records/search?${qs}`, {
           method: "POST",
-          body: JSON.stringify({ automatic_fields: true, ...(viewId ? { view_id: viewId } : {}) }),
+          body: JSON.stringify({
+            automatic_fields: true,
+            ...(viewId ? { view_id: viewId } : {}),
+            // Sensitive tables: ask Lark for the allowed fields only.
+            ...(src.allowField ? { field_names: fields.map((f) => f.name) } : {}),
+          }),
         });
         total = data.total ?? total;
         for (const item of data.items ?? []) {

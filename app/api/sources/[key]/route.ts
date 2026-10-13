@@ -3,6 +3,8 @@ import { getSourceData, isLarkConfigured, lastGood, sourceCacheKey } from "@/lib
 import { demoSourceData, hasDemo } from "@/lib/demo";
 import { isLocated, sourceByKey } from "@/lib/reports";
 import type { TableData } from "@/lib/types";
+import { hrPermission } from "@/lib/roles";
+import { SESSION_COOKIE, readSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +42,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ key:
   if (req.nextUrl.searchParams.get("demo") === "1") {
     if (!hasDemo(key)) return NextResponse.json({ status: "no-demo" });
     return NextResponse.json({ status: "ok", data: project(demoSourceData(src), req) });
+  }
+  if (src.restricted === "hr") {
+    const session = await readSession(req.cookies.get(SESSION_COOKIE)?.value);
+    const perm = hrPermission(session);
+    if (!perm.canView) return NextResponse.json({ status: "forbidden", error: perm.reason, openId: session?.openId }, { status: 403 });
   }
   if (!isLocated(src)) return NextResponse.json({ status: "not-located" });
   if (!isLarkConfigured()) return NextResponse.json({ status: "not-connected" });

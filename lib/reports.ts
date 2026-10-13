@@ -19,11 +19,22 @@ export interface SourceDef {
   dims?: string[]; // category fields the dashboard groups by
   url?: string;
   note?: string;
+  tableName?: RegExp; // find the table by name when tableId is not known
+  allowField?: (name: string) => boolean; // read ONLY these fields from Lark (sensitive tables)
+  restricted?: "hr"; // only HR_VIEWERS may load it
 }
+
+// 薪水總表: only overtime hours/days plus who/when. Pay amounts, base salary,
+// totals, deductions and IDs are never requested from Lark.
+const SALARY_DENY = /費|金額|薪|資|扣|保|獎|津貼|補助|帳|身分|身份|電話|地址|銀行|稅|實領|應發|合計|總額/;
+const SALARY_ALLOW = /加班|姓名|員工|人員|名字|組別|部門|月份|年月|期間|日期|年度|月/;
+export const salaryField = (name: string) =>
+  /^(薪資|計薪)月份$/.test(name) || (SALARY_ALLOW.test(name) && !SALARY_DENY.test(name.replace(/加班(時數|天數|小時)(合計)?/, "")));
 
 const V3 = "Sdw1bG1djaHsVGsRPvmjyVWipgg"; // 詠翔日報系統 v3
 const V4 = "H7W6b0PFWaVF1BsgqXJj3pQ9pXb"; // 詠翔日報系統 V4
 const SALES_BASE = "JoOqbggsVar0ATsVgbcjh6IIp1g";
+const SALARY_BASE = "VwAsbezz9app3YsramgjduLYp2U"; // 薪水總表
 const LARK_WEB = "https://yong-xiang-survey.jp.larksuite.com";
 
 // V4 service inclusion baseline: 2026-10-07 20:10:44.122 Asia/Taipei. Records created
@@ -116,6 +127,16 @@ export const SOURCES: SourceDef[] = [
     note: "招聘候選人池含個人資料，可見範圍（D-09）核定前不接入；出勤／出差在 Lark 差勤與審批，不是多維表格。",
   },
   {
+    key: "salary-overtime",
+    name: "薪水總表（加班）",
+    baseToken: SALARY_BASE,
+    tableName: /薪水總表|薪資總表|薪水|薪資/,
+    allowField: (n) => salaryField(n),
+    restricted: "hr",
+    url: `${LARK_WEB}/base/${SALARY_BASE}`,
+    note: "只讀加班時數／天數與人員、組別、月份欄位；底薪、總薪資等其他欄位一律不讀。僅 HR_VIEWERS 名單可看。",
+  },
+  {
     key: "contact-log",
     name: "業主聯繫紀錄",
     note: "尚未找到正式使用中的資料表。候選：CRM 雛型「跟進與拜訪紀錄」（測試資料）、舊版 v2「⑬業主聯繫紀錄表」（目前 0 筆），皆未接入。",
@@ -126,7 +147,7 @@ export const VERSION_LABEL: Record<DataVersion, string> = { v3: "V3", v4: "V4" }
 export const sourceLabel = (s: SourceDef) => (s.version ? `${s.name}（${VERSION_LABEL[s.version]}）` : s.name);
 
 export const sourceByKey = (key: string) => SOURCES.find((s) => s.key === key);
-export const isLocated = (s: SourceDef) => Boolean(s.baseToken && s.tableId);
+export const isLocated = (s: SourceDef) => Boolean(s.baseToken && (s.tableId || s.tableName));
 
 export interface ReportDef {
   id: string; // R01..R10
@@ -171,7 +192,7 @@ export const REPORTS: ReportDef[] = [
     slug: "r04",
     name: "人事數據",
     purpose: "讓授權主管掌握招聘、出勤、出差與加班的營運狀態與待處理事項。",
-    sources: ["hr", "v3-internal-cost", "v4-field-cost", "v4-internal-cost"],
+    sources: ["hr", "salary-overtime"],
     mustHave: ["招聘（暫無）", "出勤紀錄", "出差紀錄", "加班紀錄"],
     pending: ["出勤、出差需開通 Lark 假勤／審批 API 權限", "可見範圍與敏感欄位（D-09）", "加班時數是成本單層級，非每人實際時數"],
   },

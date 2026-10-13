@@ -3,12 +3,13 @@ import { useEffect, useState } from "react";
 import type { TableData } from "@/lib/types";
 import { useShell } from "./AppShell";
 
-export type SourceStatus = "loading" | "ok" | "not-located" | "not-connected" | "no-demo" | "error";
+export type SourceStatus = "loading" | "ok" | "not-located" | "not-connected" | "no-demo" | "forbidden" | "error";
 
 export interface SourceState {
   status: SourceStatus;
   data?: TableData;
   error?: string;
+  openId?: string; // set with "forbidden" so the viewer can ask for access
 }
 
 export interface SourceOptions {
@@ -34,7 +35,7 @@ export function useSource(key: string, opts: SourceOptions = {}): SourceState {
     if (tick > 0 && manual) qs.set("refresh", "1");
     fetch(`/api/sources/${key}?${qs}`)
       .then((r) => r.json())
-      .then((j) => !cancelled && setState({ status: j.status, data: j.data, error: j.error, tag }))
+      .then((j) => !cancelled && setState({ status: j.status, data: j.data, error: j.error, openId: j.openId, tag }))
       .catch((e) => !cancelled && setState((prev) => (prev.tag === tag ? { ...prev, status: prev.data ? "ok" : "error", error: String(e) } : { status: "error", error: String(e), tag })));
     return () => {
       cancelled = true;
@@ -50,5 +51,6 @@ export const STATUS_TEXT: Record<SourceStatus, string> = {
   "not-located": "來源尚未定位",
   "not-connected": "尚未連接 Lark（伺服器未設定應用憑證）",
   "no-demo": "此來源沒有示範資料",
+  forbidden: "沒有查看權限",
   error: "讀取失敗",
 };

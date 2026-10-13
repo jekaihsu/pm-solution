@@ -1,2 +1,2 @@
 // Bumped with each change so /api/health shows which build is deployed.
-export const APP_VERSION = "2026-10-13.7 daily-errors";
+export const APP_VERSION = "2026-10-13.8 salary-overtime";

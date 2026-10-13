@@ -122,6 +122,16 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["狀態", "select", (r) => pick(r, ["報價中", "已回傳", "已成交", "未成交"])],
     ],
   },
+  "salary-overtime": {
+    n: 36,
+    spec: [
+      ["姓名", "text", (_, i) => ["王小明", "陳大文", "林志強", "張家豪", "李俊傑", "黃建宏"][i % 6]],
+      ["組別", "select", (_, i) => groups[i % 4]],
+      ["月份", "text", (_, i) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - Math.floor(i / 6)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }],
+      ["平日加班時數", "number", (r) => Math.round(r() * 16 * 2) / 2],
+      ["假日加班時數", "number", (r) => (r() > 0.5 ? Math.round(r() * 12 * 2) / 2 : 0)],
+    ],
+  },
   "owner-contacts": {
     n: 10,
     spec: [
