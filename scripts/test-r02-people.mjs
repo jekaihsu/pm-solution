@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 // 人員版邏輯放在 controlGroup.ts 的「R02 以人為單位」區段（Node 直跑 .ts 時模組間不能省副檔名，所以不另開檔）。
-import { groupRows, joinInternal, planDiffTotals, plannedPoints, resolveScheduleFields, resolveWorkFields, JOINED_GROUP, JOINED_PERSON, keepInternalSchedule, plannedByPerson, personRows, resolvePersonScheduleFields, teamSections } from "../lib/controlGroup.ts";
+import { groupRows, joinInternal, planDiffTotals, plannedPoints, resolveScheduleFields, resolveWorkFields, JOINED_GROUP, JOINED_PERSON, keepInternalSchedule, plannedByPerson, personRows, resolvePersonScheduleFields, teamSections, teamSummary, filterByTeam, REPORT_MERGED } from "../lib/controlGroup.ts";
 
 const DAY = 86400000;
 const TZ = 8 * 3600000;
@@ -190,4 +190,85 @@ test("回歸：R01 的 groupRows／plannedPoints 仍以組為單位", () => {
   assert.equal(rows.length, 1);
   assert.equal(rows[0].group, "水深A");
   assert.equal(rows[0].personId, undefined);
+});
+
+// ---- 組別總結（R02 最上方）----
+// 甲跨三組：控制 2 張、圖報A 1 張、圖報B 1 張；乙只在控制；丙只在圖報B。
+// 去重後全部 3 人，但各組人數加起來是 5（控制 2＋圖報A 1＋圖報B 2）。
+const cost3 = table(cFields, [
+  { 單號: "甲 d0", 工作日期: at(0), 內業組別: "控制", 填報人: ["甲"], links: { 填報人: ["pA"] } },
+  { 單號: "甲 d1", 工作日期: at(1), 內業組別: "圖報A", 填報人: ["甲"], links: { 填報人: ["pA"] } },
+  { 單號: "甲 d2", 工作日期: at(2), 內業組別: "圖報B", 填報人: ["甲"], links: { 填報人: ["pA"] } },
+  { 單號: "乙 d0", 工作日期: at(0), 內業組別: "控制", 填報人: ["乙"], links: { 填報人: ["pB"] } },
+  { 單號: "丙 d0", 工作日期: at(0), 內業組別: "圖報B", 填報人: ["丙"], links: { 填報人: ["pC"] } },
+]);
+const work3 = table(wFields, [
+  { 工作單號: "x1", 所屬成本單: ["甲 d0"], 最終營業額點數: 1, 雅雯檢核: true },
+  { 工作單號: "x2", 所屬成本單: ["甲 d0"], 最終營業額點數: 2, 雅雯檢核: false },
+  { 工作單號: "x3", 所屬成本單: ["甲 d1"], 最終營業額點數: 4, 雅雯檢核: true },
+  { 工作單號: "x4", 所屬成本單: ["甲 d2"], 最終營業額點數: 0.25, 雅雯檢核: true },
+  { 工作單號: "x5", 所屬成本單: ["乙 d0"], 最終營業額點數: 0.5, 雅雯檢核: true },
+  { 工作單號: "x6", 所屬成本單: ["丙 d0"], 最終營業額點數: 3, 雅雯檢核: true },
+]);
+const joined3 = joinInternal(work3, cost3).data;
+const wf3 = resolveWorkFields(joined3.fields, ["雅雯檢核"]);
+// 甲預排 d1、d2 各 1 點（d1 掛圖報A、d2 掛圖報B）；乙預排 d0 1 點
+const plan3 = plan([row({ s: 1, e: 2, ppl: [A] }), row({ s: 0, e: 0, ppl: [B] })]);
+const rows3 = personRows(joined3.records, wf3, DATE, plan3);
+const line = (lines, key) => lines.find((l) => l.key === key);
+
+test("組別總結：每組一列、人數各自正確；全部合計的人數去重", () => {
+  const lines = teamSummary(rows3);
+  assert.equal(line(lines, "控制").people, 2);
+  assert.equal(line(lines, "圖報A").people, 1);
+  assert.equal(line(lines, "圖報B").people, 2);
+  assert.equal(lines.at(-1).kind, "all");
+  assert.equal(lines.at(-1).people, 3); // 甲跨三組只算一次（rows 有 5 列）
+  assert.equal(rows3.length, 5);
+  assert.equal(line(lines, "控制").total.orders.length, 3);
+  assert.equal(line(lines, "控制").total.revenue, 3.5);
+  assert.equal(lines.at(-1).total.orders.length, 6);
+  assert.equal(lines.at(-1).total.revenue, 10.75);
+});
+
+test("組別總結：圖報合計＝圖報A＋圖報B，人數去重（甲同在 A、B 只算一次）", () => {
+  const lines = teamSummary(rows3);
+  const a = line(lines, "圖報A"), b = line(lines, "圖報B"), m = line(lines, REPORT_MERGED);
+  assert.ok(m);
+  assert.equal(m.kind, "merged");
+  assert.deepEqual(m.teams, ["圖報A", "圖報B"]);
+  assert.equal(m.people, 2); // 甲、丙；A 的 1 人＋B 的 2 人＝3，去重後 2
+  assert.equal(m.total.orders.length, a.total.orders.length + b.total.orders.length);
+  assert.equal(m.total.revenue, a.total.revenue + b.total.revenue);
+  assert.equal(m.total.pass, a.total.pass + b.total.pass);
+  assert.equal(m.total.fail, a.total.fail + b.total.fail);
+  assert.equal(lines.indexOf(m), lines.length - 2); // 圖報合計在全部合計之前
+});
+
+test("組別總結：預排與差異只算有預排的人，人數去重", () => {
+  const lines = teamSummary(rows3);
+  const m = line(lines, REPORT_MERGED), all = lines.at(-1);
+  assert.equal(m.plan.points, 2); // 甲 d1（圖報A）＋d2（圖報B）
+  assert.equal(m.plan.people, 1); // 甲跨兩組，預排人數只算 1
+  assert.equal(m.plan.diff, 4.25 - 2); // 只算有預排的列（甲|圖報A 4、甲|圖報B 0.25）
+  assert.equal(all.plan.people, 2); // 甲、乙（丙沒預排）
+  assert.equal(all.plan.points, 3);
+  assert.equal(line(lines, "控制").plan.people, 1); // 乙
+});
+
+test("組別總結：沒有圖報A／B 就沒有圖報合計；只有其中一組也顯示", () => {
+  const onlyCtl = rows3.filter((r) => r.team === "控制");
+  assert.deepEqual(teamSummary(onlyCtl).map((l) => l.key), ["控制", "全部合計"]);
+  const onlyB = rows3.filter((r) => r.team === "圖報B");
+  const lb = teamSummary(onlyB);
+  assert.equal(line(lb, REPORT_MERGED).people, line(lb, "圖報B").people);
+  assert.deepEqual(teamSummary([]).map((l) => l.key), ["全部合計"]);
+});
+
+test("組別篩選：單組、圖報合計（A＋B）、不選＝全部", () => {
+  assert.equal(filterByTeam(rows3, null).length, 5);
+  assert.deepEqual(filterByTeam(rows3, "控制").map((r) => r.team), ["控制", "控制"]);
+  assert.deepEqual([...new Set(filterByTeam(rows3, REPORT_MERGED).map((r) => r.team))].sort(), ["圖報A", "圖報B"]);
+  assert.equal(filterByTeam(rows3, REPORT_MERGED).length, 3);
+  assert.equal(filterByTeam(rows3, "經理").length, 0);
 });

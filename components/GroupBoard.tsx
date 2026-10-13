@@ -2,7 +2,7 @@
 import { ArrowDownRight, ArrowUpRight, CheckCheck, ChevronDown, ChevronRight, CircleAlert, CircleCheck, Minus } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
-import { COST_FIELDS, FIELD_COST_FIELDS, JOINED_DATE, keepFieldSchedule, keepInternalSchedule, planDiffTotals, personRows, plannedByPerson, resolvePersonScheduleFields, splitCrews, sumRows, teamSections, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, dayOfWeek, errorRate, fixDiffs, groupRows, orderNotes, violatesSop, joinInternal, plannedPoints, resolveFixFields, resolveScheduleFields, resolveWorkFields, type FixFields, type GroupRow, type ScheduleFields, type WorkFields } from "@/lib/controlGroup";
+import { COST_FIELDS, FIELD_COST_FIELDS, JOINED_DATE, keepFieldSchedule, keepInternalSchedule, planDiffTotals, personRows, plannedByPerson, resolvePersonScheduleFields, splitCrews, sumRows, teamSections, teamSummary, filterByTeam, REPORT_MERGED, REPORT_MERGED_LABEL, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, dayOfWeek, errorRate, fixDiffs, groupRows, orderNotes, violatesSop, joinInternal, plannedPoints, resolveFixFields, resolveScheduleFields, resolveWorkFields, type FixFields, type GroupRow, type ScheduleFields, type TeamSummaryLine, type WorkFields } from "@/lib/controlGroup";
 import { inRange, resolveDateField } from "@/lib/metrics";
 import { sourceByKey, type DataVersion } from "@/lib/reports";
 import type { CellValue, TableData } from "@/lib/types";
@@ -566,7 +566,7 @@ function SheetTable({ rows, planOn, wf, ff, hasCheck, hasFix, onPick }: { rows: 
     fixed: all.reduce((s, d) => s + d.fixed, 0),
     viol: all.reduce((s, d) => s + (d.viol ?? 0), 0),
   };
-  const n = (v: number | null, bad = false) => (v === null ? <span className="muted">—</span> : <span className={bad && v > 0 ? "bad-text strong" : undefined}>{formatNumber(Math.round(v * 10) / 10)}</span>);
+  const n = num1;
   const renderRow = (d: (typeof data)[number], kind: "group" | "team" | "person" = "group") => (
               <Fragment key={rk(d.r)}>
                 <tr onClick={kind === "team" ? undefined : () => onPick(rk(d.r))} className={kind === "team" ? "cg-team" : kind === "person" ? "cg-link cg-person" : "cg-link"}>
@@ -632,7 +632,7 @@ function SheetTable({ rows, planOn, wf, ff, hasCheck, hasFix, onPick }: { rows: 
           </tbody>
           <tfoot>
             <tr>
-              <td className="cg-sheet-name">合計（全部 {rows.length} {byPerson ? "人" : "組"}）</td>
+              <td className="cg-sheet-name">合計（全部 {byPerson ? new Set(rows.map((r) => r.personId)).size : rows.length} {byPerson ? "人" : "組"}）</td>
               <td>{t.orders}</td>
               <td>{hasCheck ? t.checked : "—"}</td>
               <td>{hasCheck ? n(t.fail, true) : "—"}</td>
@@ -643,7 +643,7 @@ function SheetTable({ rows, planOn, wf, ff, hasCheck, hasFix, onPick }: { rows: 
               <td>{t.hasPlan ? n(t.planned) : "—"}</td>
               <td>
                 <Diff value={t.hasPlan && wf.revenue ? pd.diff : null} />
-                {planOn && <div className="muted small">只算有預排的 {pd.n} {byPerson ? "人" : "組"}</div>}
+                {planOn && <div className="muted small">只算有預排的 {byPerson ? new Set(rows.filter((r) => r.planned && r.planned.points > 0).map((r) => r.personId)).size : pd.n} {byPerson ? "人" : "組"}</div>}
               </td>
             </tr>
           </tfoot>
@@ -659,6 +659,82 @@ function SheetTable({ rows, planOn, wf, ff, hasCheck, hasFix, onPick }: { rows: 
           <tr><td>違反 SOP</td><td>{wf.sopViolation ? n(A.viol, true) : "—"}</td></tr>
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// 數字格：null＝「—」；bad＝大於 0 時標紅。
+const num1 = (v: number | null, bad = false) => (v === null ? <span className="muted">—</span> : <span className={bad && v > 0 ? "bad-text strong" : undefined}>{formatNumber(Math.round(v * 10) / 10)}</span>);
+
+// R02 組別總結：每個內業組別一列、圖報合計（圖報A＋圖報B）、最後全部合計。
+// 人數同一人跨組只算一次（圖報合計、全部合計去重）；張數、點數直接加總。永遠顯示全部組別，點一組＝只看該組的人。
+function TeamSummary({ lines, selected, planOn, wf, ff, hasCheck, hasFix, onPick }: { lines: TeamSummaryLine[]; selected: string | null; planOn: boolean; wf: WorkFields; ff: FixFields; hasCheck: boolean; hasFix: boolean; onPick: (team: string | null) => void }) {
+  const cells = (l: TeamSummaryLine) => {
+    const r = l.total;
+    const fixed = r.orders.filter((o) => fixDiffs(o, ff).length).length;
+    const viol = wf.sopViolation ? sopSummary(r, wf).viol : null;
+    const hasPlan = l.plan.people > 0;
+    return (
+      <>
+        <td>{l.people}</td>
+        <td>{r.orders.length}</td>
+        <td>{hasCheck ? r.pass + r.fail : "—"}</td>
+        <td>{hasCheck ? num1(r.fail, true) : "—"}</td>
+        <td>{pct(errorRate(r))}</td>
+        <td>{hasFix ? num1(fixed, true) : "—"}</td>
+        <td>{num1(viol, true)}</td>
+        <td>{wf.revenue ? num1(r.revenue) : "—"}</td>
+        <td>{hasPlan ? num1(l.plan.points) : planOn ? "未排" : "—"}</td>
+        <td>
+          <Diff value={hasPlan && wf.revenue ? l.plan.diff : null} />
+          {planOn && l.kind !== "team" && <div className="muted small">只算有預排的 {l.plan.people} 人</div>}
+        </td>
+      </>
+    );
+  };
+  const body = lines.filter((l) => l.kind !== "all");
+  const all = lines.find((l) => l.kind === "all");
+  return (
+    <div className="cg-teamsum">
+      <div className="cg-days-head">
+        <h3>組別總結</h3>
+        <span className="muted small">點一組只看該組的人；圖報合計＝圖報A＋圖報B，人數同一人跨組只算一次</span>
+      </div>
+      <div className="cg-sheet">
+        <table>
+          <thead>
+            <tr>
+              <th>組別</th>
+              <th>人數</th>
+              <th>工作單</th>
+              <th>已檢核</th>
+              <th>不通過</th>
+              <th>失誤率</th>
+              <th>被修改</th>
+              <th>違反 SOP</th>
+              <th>營業額點數</th>
+              <th>預排點數</th>
+              <th>與預排差異</th>
+            </tr>
+          </thead>
+          <tbody>
+            {body.map((l) => (
+              <tr key={l.key} className={`cg-link ${l.kind === "merged" ? "cg-team" : ""} ${selected === l.key ? "cg-on" : ""}`} onClick={() => onPick(l.key)}>
+                <td className="cg-sheet-name">{l.label}</td>
+                {cells(l)}
+              </tr>
+            ))}
+          </tbody>
+          {all && (
+            <tfoot>
+              <tr>
+                <td className="cg-sheet-name">{all.label}</td>
+                {cells(all)}
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
     </div>
   );
 }
@@ -799,6 +875,11 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   // weeks) and lives in the URL (?group=) so the view can be shared.
   const [focus, setFocus] = useState<string | null>(null);
   useEffect(() => setFocus(new URLSearchParams(window.location.search).get("group")), []);
+  // R02：依內業組別篩人（?team=控制／圖報A／…／圖報合計），也放在網址上可分享。
+  const [team, setTeam] = useState<string | null>(null);
+  useEffect(() => {
+    if (cfg.unit === "person") setTeam(new URLSearchParams(window.location.search).get("team"));
+  }, [cfg.unit]);
   const [day, setDay] = useState<number | null>(null);
   const [failOpen, setFailOpen] = useState(false);
   const [layout, setLayout] = useState<"sheet" | "detail">("sheet");
@@ -810,6 +891,16 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
     const u = new URL(window.location.href);
     if (g) u.searchParams.set("group", g);
     else u.searchParams.delete("group");
+    window.history.replaceState(null, "", u);
+  };
+  const pickTeam = (t: string | null) => {
+    setTeam(t);
+    setFocus(null);
+    setDay(null);
+    const u = new URL(window.location.href);
+    if (t) u.searchParams.set("team", t);
+    else u.searchParams.delete("team");
+    u.searchParams.delete("group"); // 換組別就回到人員列表
     window.history.replaceState(null, "", u);
   };
   useEffect(() => setOpen(new Set()), [version, week.start]);
@@ -835,12 +926,8 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
     const all = cfg.crewKey && crew.status === "ok" ? splitCrews(grouped, wf, data.fields, crew.data, dateField) : grouped;
     const rows = cfg.keepGroup ? all.filter((r) => cfg.keepGroup!(r.group)) : all;
     const hidden = all.filter((r) => !rows.includes(r)).map((r) => ({ group: r.group, orders: r.orders.length }));
-    const totals = rows.reduce(
-      (t, r) => ({ orders: t.orders + r.orders.length, revenue: t.revenue + r.revenue, pass: t.pass + r.pass, fail: t.fail + r.fail, anomaly: t.anomaly + r.anomalyCount }),
-      { orders: 0, revenue: 0, pass: 0, fail: 0, anomaly: 0 },
-    );
     const ff = resolveFixFields(data.fields);
-    return { dateField, wf, ff, sf, rows, hidden, totals, records, data, join };
+    return { dateField, wf, ff, sf, rows, hidden, records, data, join };
   }, [work.data, cost.data, cost.status, crew.data, crew.status, sched.data, version, week.start, week.end, cfg]);
 
   const toggleOpen = (g: string) =>
@@ -891,13 +978,21 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
     );
   }
 
-  const { wf, ff, sf, rows, hidden, totals, join, dateField } = view;
+  const { wf, ff, sf, rows: allRows, hidden, join, dateField } = view;
+  const byPerson = cfg.unit === "person";
+  // R02 選了內業組別（或圖報合計）：下方人員表、每日出錯、失誤率明細都只看該組的人；組別總結仍列全部組別。
+  const rows = byPerson ? filterByTeam(allRows, team) : allRows;
+  const totals = rows.reduce(
+    (t, r) => ({ orders: t.orders + r.orders.length, revenue: t.revenue + r.revenue, pass: t.pass + r.pass, fail: t.fail + r.fail, anomaly: t.anomaly + r.anomalyCount }),
+    { orders: 0, revenue: 0, pass: 0, fail: 0, anomaly: 0 },
+  );
+  const summary = byPerson ? teamSummary(allRows) : [];
+  const teamKeys = summary.filter((l) => l.kind !== "all").map((l) => l.key);
   // 排程表讀得到才分「有預排／沒預排」；讀不到時全部留在主表。
   const planOn = sched.status === "ok" && Boolean(sf.group && sf.start);
   const part = planDiffTotals(rows);
-  const dupNames = new Set(rows.map((r) => r.group).filter((g, i, a) => a.indexOf(g) !== i));
+  const dupNames = new Set(allRows.map((r) => r.group).filter((g, i, a) => a.indexOf(g) !== i));
   const sopViol = wf.sopViolation ? rows.flatMap((r) => r.orders.filter((o) => violatesSop(o, wf)).map((o) => ({ key: rk(r), group: rowLabel(r), order: o }))) : [];
-  const byPerson = cfg.unit === "person";
   const unit = byPerson ? "人" : "組";
   const hasFix = Boolean((ff.qtyOrig && ff.qtyFixed) || (ff.revOrig && ff.revFixed && ff.revOrig !== ff.revFixed));
   const missing = [
@@ -1158,10 +1253,22 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
         </ul>
       )}
 
+      {byPerson && (allRows.length > 0 || focus || team) && (
+        <div className="cg-picker" role="group" aria-label="選擇內業組別">
+          <button className={`cg-chip ${!team ? "on" : ""}`} onClick={() => pickTeam(null)} aria-pressed={!team}>
+            全部組別
+          </button>
+          {[...teamKeys, ...(team && !teamKeys.includes(team) ? [team] : [])].map((t) => (
+            <button key={t} className={`cg-chip ${team === t ? "on" : ""}`} onClick={() => pickTeam(t)} aria-pressed={team === t}>
+              {t}
+            </button>
+          ))}
+        </div>
+      )}
       {byPerson && (rows.length > 0 || focus) && (
         <div className="cg-layout">
           <select className="cg-select" aria-label="選擇人員" value={focus ?? ""} onChange={(e) => pick(e.target.value || null)}>
-            <option value="">全部人員</option>
+            <option value="">{team ? `${team}全部人員` : "全部人員"}</option>
             {teamSections(rows).map((sec) => (
               <optgroup key={sec.team} label={sec.team}>
                 {sec.rows.map((r) => (
@@ -1169,7 +1276,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
                 ))}
               </optgroup>
             ))}
-            {focus && !rows.some((r) => rk(r) === focus) && <option value={focus}>（這位人員這週沒有資料）</option>}
+            {focus && !rows.some((r) => rk(r) === focus) && <option value={focus}>{(() => { const f = allRows.find((r) => rk(r) === focus); return f ? rowLabel(f) : "（這位人員這週沒有資料）"; })()}</option>}
           </select>
         </div>
       )}
@@ -1187,9 +1294,9 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
       )}
 
       {focus ? (
-        <GroupFocus row={rows.find((r) => rk(r) === focus)} group={focus} wf={wf} cfg={cfg} sop={sop} disabled={sopLocked} hasCheck={hasCheck} hasFlags={hasFlags} ff={ff} hasFix={hasFix} dateField={dateField} weekStart={week.start} day={day} setDay={setDay} />
+        <GroupFocus row={allRows.find((r) => rk(r) === focus)} group={focus} wf={wf} cfg={cfg} sop={sop} disabled={sopLocked} hasCheck={hasCheck} hasFlags={hasFlags} ff={ff} hasFix={hasFix} dateField={dateField} weekStart={week.start} day={day} setDay={setDay} />
       ) : rows.length === 0 ? (
-        <EmptyState kind="empty" title={`${weekName(week.offset)}沒有${cfg.workLabel}`} />
+        <EmptyState kind="empty" title={`${weekName(week.offset)}${byPerson && team ? `「${team}」` : ""}沒有${cfg.workLabel}`} />
       ) : null}
 
       {!focus && rows.length > 0 && (
@@ -1206,6 +1313,8 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
         </div>
       )}
 
+      {!focus && byPerson && allRows.length > 0 && <TeamSummary lines={summary} selected={team} planOn={planOn} wf={wf} ff={ff} hasCheck={hasCheck} hasFix={hasFix} onPick={(t) => pickTeam(t)} />}
+
       {!focus && rows.length > 0 && layout === "sheet" && <SheetTable rows={rows} planOn={planOn} wf={wf} ff={ff} hasCheck={hasCheck} hasFix={hasFix} onPick={(g) => pick(g)} />}
 
       {!(focus || rows.length === 0 || layout === "sheet") && (
@@ -1218,7 +1327,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
 
       <p className="cg-foot">
         失誤率＝{cfg.checkLabel}「不通過」÷ 已檢核（未檢核不計）。{byPerson ? `一列一個人（內業成本單的填報人），依成本單的內業組別分段，每組一列小計；同一人在不同內業組別填單時，每組各一列。預排點數＝預排表${cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}依「人員＋日期」比對（組別不參與，預排「人員」欄多人逐人展開，休假條不算），有填「預估營業額點數」就分攤到每天，未填以每人每天 1 點計（同人同日多條只算一次，標 *）；預排日期認欄位 id，不看欄名。` : `預排點數＝預排表${cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}點數欄，未填以每組每天 1 點計（標 *）。`}差異＝營業額點數（原值）− 預排點數。
-        {cfg.keepWorkTrade && view.wf.trade && ` 只計${cfg.workLabel}中業別不是內業的工作單。`}{hidden.length > 0 && ` 不列入：${hidden.map((h) => `${/^rec/.test(h.group) ? "未對應組別" : h.group}（${h.orders} 張）`).join("、")}。`}{cfg.costKey && " 組別與工作日期取自所屬內業成本單。"}{" 主表列出全部組與人（沒預排的預排顯示「未排」）；工作單、營業額等合計含全部，與預排差異只算有預排的組／人。"}{cfg.crewKey && " 拆組判定：所選週內，同一組別、同一工作日期，工作單所屬外業成本單的「組長」有 2 個以上不同的人，該組視為拆組出工，依組長分列子隊（組長空白歸「未填組長」）；預排表沒有分隊，預排點數只掛在組別合計列；子列不重複計入合計；讀不到成本單時不拆組。"}出錯＝工作單的{[ff.qtyFixed && `「${ff.qtyFixed.name}」≠「${ff.qtyOrig?.name ?? "數量"}」`, ff.revFixed && ff.revOrig && ff.revFixed !== ff.revOrig && `「${ff.revFixed.name}」≠「${ff.revOrig.name}」`].filter(Boolean).join(" 或 ") || "修改後數值與原填不同"}（兩邊都有值才比較）。{wf.sopViolation ? `SOP 取自日報「${wf.sopViolation.name}」：有任一張違反顯示紅色，全部填寫且沒有違反顯示綠色「SOP 完成」。` : "SOP 由控制組成員在每張工作單上勾選（展開組別），整組都勾完才顯示綠色「SOP 完成」；記錄勾選人與時間，不寫回 Lark。"}
+        {cfg.keepWorkTrade && view.wf.trade && ` 只計${cfg.workLabel}中業別不是內業的工作單。`}{hidden.length > 0 && ` 不列入：${hidden.map((h) => `${/^rec/.test(h.group) ? "未對應組別" : h.group}（${h.orders} 張）`).join("、")}。`}{cfg.costKey && " 組別與工作日期取自所屬內業成本單。"}{byPerson && ` 組別總結＝每個內業組別一列（口徑同下方人員表），「${REPORT_MERGED_LABEL}」＝圖報A＋圖報B，最後是全部合計；人數同一人跨組只算一次（圖報合計與全部合計去重），工作單、點數等直接加總（每張工作單只屬於一個組）；與預排差異只算有預排的人。點組別列或上方組別按鈕，下方人員表、每日出錯、失誤率明細只看該組（${REPORT_MERGED}＝圖報A＋圖報B），網址帶 ?team= 可分享。`}{" 主表列出全部組與人（沒預排的預排顯示「未排」）；工作單、營業額等合計含全部，與預排差異只算有預排的組／人。"}{cfg.crewKey && " 拆組判定：所選週內，同一組別、同一工作日期，工作單所屬外業成本單的「組長」有 2 個以上不同的人，該組視為拆組出工，依組長分列子隊（組長空白歸「未填組長」）；預排表沒有分隊，預排點數只掛在組別合計列；子列不重複計入合計；讀不到成本單時不拆組。"}出錯＝工作單的{[ff.qtyFixed && `「${ff.qtyFixed.name}」≠「${ff.qtyOrig?.name ?? "數量"}」`, ff.revFixed && ff.revOrig && ff.revFixed !== ff.revOrig && `「${ff.revFixed.name}」≠「${ff.revOrig.name}」`].filter(Boolean).join(" 或 ") || "修改後數值與原填不同"}（兩邊都有值才比較）。{wf.sopViolation ? `SOP 取自日報「${wf.sopViolation.name}」：有任一張違反顯示紅色，全部填寫且沒有違反顯示綠色「SOP 完成」。` : "SOP 由控制組成員在每張工作單上勾選（展開組別），整組都勾完才顯示綠色「SOP 完成」；記錄勾選人與時間，不寫回 Lark。"}
         {view.records.length > 0 && ` 資料至 ${formatDate(Math.max(...view.records.map((r) => (r.fields[view.dateField] as number) ?? 0)))}。`}
       </p>
 

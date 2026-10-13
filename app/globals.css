@@ -678,3 +678,6 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
 .cg-notes-cell { white-space: normal; min-width: 160px; max-width: 280px; line-height: 1.45; }
 .cg-unplanned { margin-top: 12px; } .cg-unplanned > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
 .cg-unplanned { margin-top: 12px; } .cg-unplanned > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+/* R02 組別總結 */
+.cg-teamsum { display: grid; gap: 8px; min-width: 0; }
+.cg-sheet tr.cg-on td { background: var(--hover); box-shadow: inset 0 -2px 0 var(--primary); }
