@@ -55,7 +55,7 @@ function SourceRow({ src, state, offset }: { src: SourceDef; state: SourceState;
 export default function Overview() {
   const { week, version } = useShell();
   // SOURCES is a fixed list, so calling the hook per entry keeps hook order stable.
-  const states = Object.fromEntries(SOURCES.map((s) => [s.key, useSource(s.key)]));
+  const states = Object.fromEntries(SOURCES.map((s) => [s.key, useSource(s.key, { only: "dates" })]));
   const located = SOURCES.filter(isLocated);
   const ok = located.filter((s) => states[s.key].status === "ok").length;
   const failed = located.filter((s) => states[s.key].status === "error").length;

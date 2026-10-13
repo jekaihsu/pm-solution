@@ -2,7 +2,7 @@
 import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, CircleAlert, Minus } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
-import { JOINED_DATE, anomalies, classifyCheck, errorRate, groupRows, joinInternal, plannedPoints, resolveScheduleFields, resolveWorkFields, type GroupRow, type WorkFields } from "@/lib/controlGroup";
+import { COST_FIELDS, JOINED_DATE, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, errorRate, groupRows, joinInternal, plannedPoints, resolveScheduleFields, resolveWorkFields, type GroupRow, type WorkFields } from "@/lib/controlGroup";
 import { inRange, resolveDateField } from "@/lib/metrics";
 import { sourceByKey, type DataVersion } from "@/lib/reports";
 import type { CellValue, TableData } from "@/lib/types";
@@ -210,10 +210,10 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const { week, version: globalVersion, demo } = useShell();
   const [localVersion, setLocalVersion] = useState<DataVersion>("v3");
   const version: DataVersion = globalVersion === "all" ? localVersion : globalVersion;
-  const work = useSource(cfg.workKey(version));
+  const work = useSource(cfg.workKey(version), { fields: WORK_FIELDS });
   // Hooks run unconditionally; boards without a cost sheet reuse the work key (cached).
-  const cost = useSource(cfg.costKey ? cfg.costKey(version) : cfg.workKey(version));
-  const sched = useSource(cfg.scheduleKey(version));
+  const cost = useSource(cfg.costKey ? cfg.costKey(version) : cfg.workKey(version), { fields: cfg.costKey ? COST_FIELDS : WORK_FIELDS });
+  const sched = useSource(cfg.scheduleKey(version), { fields: SCHEDULE_FIELDS });
   const isMobile = useMedia(MOBILE);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const sop = useSop(cfg.report, version, week.start);

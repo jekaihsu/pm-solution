@@ -3,12 +3,24 @@
 import { getSourceData, isLarkConfigured } from "./lark";
 import { SOURCES, isLocated } from "./reports";
 
-let running = false;
+const g = globalThis as typeof globalThis & { __pmWarm?: { running: boolean; status: WarmStatus } };
+
+export interface WarmStatus {
+  lastStart?: number;
+  lastEnd?: number;
+  ok: number;
+  total: number;
+  sources: Record<string, { ok: boolean; ms: number; at: number; records?: number; error?: string }>;
+}
+// Shared across Next.js module copies (startup hook vs. API routes).
+const shared = (g.__pmWarm ??= { running: false, status: { ok: 0, total: 0, sources: {} } });
+export const warmStatus = shared.status;
 
 export async function warmAll() {
-  if (running || !isLarkConfigured()) return;
-  running = true;
+  if (shared.running || !isLarkConfigured()) return;
+  shared.running = true;
   const started = Date.now();
+  warmStatus.lastStart = started;
   let ok = 0;
   try {
     const sources = SOURCES.filter(isLocated);
@@ -17,17 +29,24 @@ export async function warmAll() {
       Array.from({ length: 3 }, async () => {
         while (next < sources.length) {
           const src = sources[next++];
+          const t = Date.now();
           try {
-            await getSourceData(src, true);
+            const d = await getSourceData(src, true);
             ok++;
+            warmStatus.sources[src.key] = { ok: true, ms: Date.now() - t, at: Date.now(), records: d.total };
           } catch (err) {
-            console.error(`[warm ${src.key}]`, (err as Error).message);
+            const message = (err as Error).message;
+            warmStatus.sources[src.key] = { ok: false, ms: Date.now() - t, at: Date.now(), error: message.slice(0, 200) };
+            console.error(`[warm ${src.key}]`, message);
           }
         }
       }),
     );
+    warmStatus.ok = ok;
+    warmStatus.total = sources.length;
+    warmStatus.lastEnd = Date.now();
     console.log(`[warm] ${ok}/${sources.length} sources in ${Date.now() - started}ms`);
   } finally {
-    running = false;
+    shared.running = false;
   }
 }

@@ -222,3 +222,17 @@ export function joinInternal(work: TableData, cost: TableData | undefined): { da
   if (!hasGroup && cGroup) extra.push({ id: "__joined_group", name: JOINED_GROUP, kind: "select", primary: false });
   return { data: { ...work, fields: [...work.fields, ...extra], records }, joined, costLink: link.name };
 }
+
+// Field names the dashboards request from the server (see /api/sources projection).
+export const WORK_FIELDS = [
+  "組別", "工作單號", "案件編號", "工程編號", "工作編號", "可能確認單工作編號", "可能的確認單工編(若暫無確認單才需填寫)",
+  "合約工項", "內業工項", "工作項目", "工項", "完成數量", "計價數量", "對外計價數量", "數量",
+  "最終營業額點數", "營業額點數", "點數", "控制組檢核", "雅雯檢核", "檢核狀態", "所屬成本單",
+  "所屬案件", "案件", "工程名稱", "交期", "合約交期", "預定完成日", "完工期限", "到期日", "⚠*", "@dates",
+];
+export const COST_FIELDS = ["工作日期", "內業組別", "所屬組別", "組別", "@dates"];
+export const SCHEDULE_FIELDS = [
+  "業別", "組別", "開始日期", "日期", "預排開始日", "預排日期", "結束日期", "預排結束日",
+  "預排點數", "預排營業額點數", "營業額點數", "點數", "案件", "案件編號", "工程編號", "@dates",
+];
+export const OVERTIME_FIELDS = ["是否加班", "加班時數", "加班類型", "內業組別", "所屬組別", "組別", "填報人", "組長", "姓名", "@dates"];

@@ -14,7 +14,7 @@ const KIND_TEXT: Record<string, string> = {
 };
 
 function SourceRow({ src }: { src: SourceDef }) {
-  const s = useSource(src.key);
+  const s = useSource(src.key, { only: "meta" });
   const usedBy = REPORTS.filter((r) => r.sources.includes(src.key)).map((r) => r.id);
   const status =
     s.status === "ok" && s.data ? (

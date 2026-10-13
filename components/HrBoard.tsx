@@ -2,7 +2,7 @@
 import { CalendarCheck, ChevronDown, ChevronRight, CircleAlert, Clock, Plane, UserPlus } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
-import { pickField } from "@/lib/controlGroup";
+import { OVERTIME_FIELDS, pickField } from "@/lib/controlGroup";
 import { inRange, resolveDateField } from "@/lib/metrics";
 import { sourceByKey, sourceLabel } from "@/lib/reports";
 import type { CellValue, TableData } from "@/lib/types";
@@ -178,7 +178,7 @@ function Pending({ icon, title, children }: { icon: React.ReactNode; title: stri
 export default function HrBoard() {
   const { week, version } = useShell();
   // Fixed list → stable hook order.
-  const states = OVERTIME_SOURCES.map((k) => [k, useSource(k)] as const);
+  const states = OVERTIME_SOURCES.map((k) => [k, useSource(k, { fields: OVERTIME_FIELDS })] as const);
   const visible = states.filter(([k]) => showSource(sourceByKey(k)!, version));
 
   return (

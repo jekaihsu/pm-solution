@@ -11,16 +11,25 @@ export interface SourceState {
   error?: string;
 }
 
-export function useSource(key: string): SourceState {
+export interface SourceOptions {
+  only?: "dates" | "meta"; // just the date fields (overview trends) / just the field list
+  fields?: string[]; // just these field names, if present (dashboards)
+  enabled?: boolean; // false → don't fetch (e.g. a collapsed section)
+}
+
+export function useSource(key: string, opts: SourceOptions = {}): SourceState {
   const { demo, tick, manual } = useShell();
-  // Tag each result with the source + mode it belongs to, so a switch never shows the
-  // previous table's data while the new one loads.
-  const tag = `${key}|${demo ? "demo" : "live"}`;
+  const projection = opts.only ? `only=${opts.only}` : opts.fields ? new URLSearchParams({ fields: opts.fields.join(",") }).toString() : "";
+  const enabled = opts.enabled !== false;
+  // Tag each result with the source + mode + projection it belongs to, so a switch never
+  // shows the previous table's data while the new one loads.
+  const tag = `${key}|${demo ? "demo" : "live"}|${projection}`;
   const [state, setState] = useState<SourceState & { tag?: string }>({ status: "loading" });
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
-    const qs = new URLSearchParams();
+    const qs = new URLSearchParams(projection);
     if (demo) qs.set("demo", "1");
     if (tick > 0 && manual) qs.set("refresh", "1");
     fetch(`/api/sources/${key}?${qs}`)
@@ -30,7 +39,7 @@ export function useSource(key: string): SourceState {
     return () => {
       cancelled = true;
     };
-  }, [key, demo, tick, tag, manual]);
+  }, [key, demo, tick, tag, manual, enabled, projection]);
 
   return state.tag === tag ? state : { status: "loading" };
 }

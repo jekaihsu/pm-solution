@@ -12,10 +12,20 @@ export function isLarkConfigured(): boolean {
 
 // ---------- auth ----------
 
-let cachedToken: { value: string; expiresAt: number } | null = null;
+// Next.js bundles the startup hook (instrumentation) and the API routes as separate
+// module copies, so shared state lives on globalThis — otherwise the startup warm-up
+// would fill a cache the pages never read.
+const shared = globalThis as typeof globalThis & {
+  __pmLark?: {
+    token: { value: string; expiresAt: number } | null;
+    cache: Map<string, { value: unknown; expiresAt: number }>;
+    inflight: Map<string, Promise<unknown>>;
+  };
+};
+const store = (shared.__pmLark ??= { token: null, cache: new Map(), inflight: new Map() });
 
 async function getTenantAccessToken(): Promise<string> {
-  if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.value;
+  if (store.token && store.token.expiresAt > Date.now()) return store.token.value;
 
   const res = await fetch(`${API_BASE}/open-apis/auth/v3/tenant_access_token/internal`, {
     method: "POST",
@@ -27,8 +37,8 @@ async function getTenantAccessToken(): Promise<string> {
   if (json.code !== 0) throw new Error(`Lark auth failed: ${json.code} ${json.msg}`);
 
   // Refresh 5 minutes before the token actually expires.
-  cachedToken = { value: json.tenant_access_token, expiresAt: Date.now() + (json.expire - 300) * 1000 };
-  return cachedToken.value;
+  store.token = { value: json.tenant_access_token, expiresAt: Date.now() + (json.expire - 300) * 1000 };
+  return store.token.value;
 }
 
 // Plain-language explanations for the errors people actually hit.
@@ -59,9 +69,9 @@ async function larkFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 // ---------- simple in-memory cache ----------
 
-const cache = new Map<string, { value: unknown; expiresAt: number }>();
+const cache = store.cache;
 
-const inflight = new Map<string, Promise<unknown>>();
+const inflight = store.inflight;
 
 // Fresh hit → served. Stale hit → served immediately while one background refresh
 // runs (stale-while-revalidate). No hit or force → waits for the fetch. Concurrent

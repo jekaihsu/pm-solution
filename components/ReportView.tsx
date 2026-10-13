@@ -16,6 +16,7 @@ export default function ReportView({ report }: { report: ReportDef }) {
     .filter((s) => showSource(s, version));
   const [active, setActive] = useState(sources[0]?.key);
   const [showSpec, setShowSpec] = useState(false);
+  const [rawOpen, setRawOpen] = useState(false); // raw tables load only when opened
   const current = sources.find((s) => s.key === active) ?? sources[0];
 
   useEffect(() => {
@@ -61,8 +62,9 @@ export default function ReportView({ report }: { report: ReportDef }) {
       {report.id === "R01" || report.id === "R02" || report.id === "R04" ? (
         <>
           {report.id === "R04" ? <HrBoard /> : <GroupBoard key={report.id} cfg={report.id === "R01" ? BOARDS.r01 : BOARDS.r02} />}
-          <details className="raw-data">
+          <details className="raw-data" onToggle={(e) => setRawOpen((e.target as HTMLDetailsElement).open)}>
             <summary>查看原始資料表</summary>
+            {rawOpen && (
             <div className="raw-data-body">
       {sources.length > 1 && (
         <nav className="tabs" role="tablist" aria-label="資料表">
@@ -83,6 +85,7 @@ export default function ReportView({ report }: { report: ReportDef }) {
         </EmptyState>
       )}
             </div>
+            )}
           </details>
         </>
       ) : (
