@@ -39,7 +39,6 @@ const items = ["地形測量", "控制測量", "放樣", "地籍調查"];
 const innerGroups = ["圖資A", "圖資B", "報告組"];
 const adminPeople = ["陳怡君", "林雅婷", "張雅惠", "黃淑芬"]; // 虛構
 const innerPeople = ["王小明", "李小華", "陳大文", "林美玲"]; // 虛構；內業成本單的填報人與預排的人員用同一批名字，R09 才對得上
-const projectNames = ["新北地形案", "桃園地籍案", "台中放樣案", "高雄控制案", "台南測量案", "新竹水深案"]; // 虛構，與 projects 同序
 const adminItems = ["公文收發", "請款作業", "採購對帳", "文件歸檔", "出差申請"];
 const innerItems = ["數值地形圖", "縱橫斷面", "成果報告", "點位清冊"];
 const caseNames = ["新北地形測量案", "桃園地籍調查案", "台中放樣案", "高雄控制測量案", "彰化水深測量案", "雲林管線調查案"]; // 虛構，與 projects 一一對應
@@ -70,13 +69,6 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["案件編號", "text", (_, i) => caseOf(i)],
       ["突發狀況", "text", (r) => (r() > 0.9 ? pick(r, ["下雨停工", "儀器故障，改日補測", "業主臨時要求改測點"]) : null)],
       ["外業經理檢核", "checkbox", (r) => r() > 0.5],
-    ],
-  },
-  cases: {
-    n: 6,
-    spec: [
-      ["案件編號", "text", (_, i) => projects[i]],
-      ["案件名稱", "text", (_, i) => caseNames[i]],
     ],
   },
   schedule: {
@@ -165,12 +157,12 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["⚠工項與件數", "text", (r) => (r() > 0.93 ? "件數異常" : "")],
     ],
   },
-  // R09 用：案件編號（主欄）與案件名稱（虛構）
+  // R09／R10 用：案件編號（主欄）與案件名稱（虛構）
   cases: {
     n: 6,
     spec: [
       ["案件編號", "text", (_, i) => projects[i]],
-      ["案件名稱", "text", (_, i) => projectNames[i]],
+      ["案件名稱", "text", (_, i) => caseNames[i]],
       ["業主", "text", (_, i) => `示範業主 ${String.fromCharCode(65 + i)}`],
       ["狀態", "select", () => "進行中"],
     ],
