@@ -561,3 +561,5 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
 @media (max-width: 700px) {
   .cg-head { flex-wrap: wrap; }
 }
+.cg-sop.readonly { cursor: default; color: var(--text-2); }
+.cg-notes code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; user-select: all; }

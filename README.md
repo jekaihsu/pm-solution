@@ -75,6 +75,7 @@ V3 與 V4 是不同系統的原始資料，分開顯示、不相加也不去重�
 | `LARK_TENANT_KEY` | | 只允許此組織的帳號登入 |
 | `SESSION_SECRET` | | 登入 cookie 簽章密鑰，未設時由 App Secret 衍生 |
 | `AUTH_DISABLED` | | 設為 `1` 可暫時關閉登入（本機開發用） |
+| `SOP_EDITORS` | | 可勾選 R01「是否符合 SOP」的主管 Lark open_id，以逗號分隔；未設定時沒有人能勾選。主管在 R01 頁面可看到自己的 Lark ID |
 | `DATA_DIR` | | R01「是否符合 SOP」勾選紀錄的儲存位置；在 Zeabur「硬碟」掛載 `/app/data` 並設 `DATA_DIR=/app/data`，未設定時重新部署會遺失 |
 
 ## 本機開發

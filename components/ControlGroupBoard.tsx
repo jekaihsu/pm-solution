@@ -1,6 +1,6 @@
 "use client";
 import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, CircleAlert, Minus } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
 import { anomalies, classifyCheck, errorRate, groupRows, plannedPoints, resolveScheduleFields, resolveWorkFields, type GroupRow, type WorkFields } from "@/lib/controlGroup";
 import { inRange, resolveDateField } from "@/lib/metrics";
@@ -18,6 +18,7 @@ interface SopEntry {
   at: number;
 }
 
+const round1 = (n: number) => formatNumber(Math.round(n * 10) / 10);
 const pct = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)}%`);
 const text = (v: CellValue) => (v === null || v === undefined ? "" : Array.isArray(v) ? v.join("、") : typeof v === "number" ? formatNumber(v) : String(v));
 
@@ -35,55 +36,85 @@ function Diff({ value }: { value: number | null }) {
 }
 
 function useSop(version: DataVersion, weekStart: number) {
-  const [entries, setEntries] = useState<Record<string, SopEntry>>({});
-  const [persistent, setPersistent] = useState(true);
+  // Everything is tagged with the version + week it belongs to: a switch shows
+  // nothing (and allows no ticks) until that week's sign-offs are loaded, and a
+  // late response for another week is dropped.
+  const tag = `${version}|${weekStart}`;
+  const current = useRef(tag);
+  current.current = tag;
+  const [state, setState] = useState<{
+    tag: string;
+    entries: Record<string, SopEntry>;
+    persistent: boolean;
+    perm: { canEdit: boolean; reason?: string; openId?: string };
+  } | null>(null);
   const [error, setError] = useState("");
+
   useEffect(() => {
     let cancelled = false;
+    setError("");
     fetch(`/api/sop?version=${version}&week=${weekStart}`)
       .then((r) => r.json())
       .then((j) => {
         if (cancelled) return;
         if (j.error) setError(j.error);
-        setEntries(j.entries ?? {});
-        setPersistent(j.persistent !== false);
+        setState({ tag, entries: j.entries ?? {}, persistent: j.persistent !== false, perm: { canEdit: Boolean(j.canEdit), reason: j.reason, openId: j.openId } });
       })
       .catch((e) => !cancelled && setError(String(e)));
     return () => {
       cancelled = true;
     };
-  }, [version, weekStart]);
+  }, [version, weekStart, tag]);
+
+  const ready = state?.tag === tag ? state : null;
 
   const toggle = useCallback(
     async (group: string, ok: boolean) => {
-      const prev = entries[group];
-      setEntries((e) => ({ ...e, [group]: { ok, by: "儲存中…", at: Date.now() } }));
+      const sent = tag;
+      const update = (fn: (e: Record<string, SopEntry>) => Record<string, SopEntry>) =>
+        setState((s) => (s && s.tag === sent ? { ...s, entries: fn(s.entries) } : s));
+      let prev: SopEntry | undefined;
+      update((e) => {
+        prev = e[group];
+        return { ...e, [group]: { ok, by: "儲存中…", at: Date.now() } };
+      });
       try {
         const r = await fetch("/api/sop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version, weekStart, group, ok }) });
         const j = await r.json();
         if (!r.ok) throw new Error(j.error ?? r.statusText);
-        setEntries((e) => ({ ...e, [group]: j.entry }));
-        setPersistent(j.persistent !== false);
-        setError("");
+        update((e) => ({ ...e, [group]: j.entry }));
+        if (current.current === sent) setError("");
       } catch (err) {
-        setEntries((e) => {
+        update((e) => {
           const next = { ...e };
           if (prev) next[group] = prev;
           else delete next[group];
           return next;
         });
-        setError(String((err as Error).message ?? err));
+        if (current.current === sent) setError(String((err as Error).message ?? err));
       }
     },
-    [entries, version, weekStart],
+    [tag, version, weekStart],
   );
-  return { entries, persistent, error, toggle };
+
+  return {
+    loaded: Boolean(ready),
+    entries: ready?.entries ?? {},
+    persistent: ready?.persistent ?? true,
+    perm: ready?.perm ?? { canEdit: false },
+    error,
+    toggle,
+  };
 }
 
-function SopBox({ group, entry, onToggle, demo }: { group: string; entry?: SopEntry; onToggle: (g: string, ok: boolean) => void; demo: boolean }) {
+function SopBox({ group, entry, onToggle, disabled }: { group: string; entry?: SopEntry; onToggle: (g: string, ok: boolean) => void; disabled: boolean }) {
   return (
-    <label className="cg-sop" title={entry ? `${entry.ok ? "符合" : "取消"}：${entry.by}・${new Date(entry.at).toLocaleString("zh-TW")}` : "主管確認後勾選"} onClick={(e) => e.stopPropagation()}>
-      <input type="checkbox" checked={Boolean(entry?.ok)} disabled={demo} onChange={(e) => onToggle(group, e.target.checked)} aria-label={`${group} 符合 SOP`} />
+    <label
+      className={`cg-sop ${disabled ? "readonly" : ""}`}
+      title={entry ? `${entry.ok ? "符合" : "取消"}：${entry.by}・${new Date(entry.at).toLocaleString("zh-TW")}` : disabled ? "僅授權主管可勾選" : "主管確認後勾選"}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <input type="checkbox" checked={Boolean(entry?.ok)} disabled={disabled} onChange={(e) => onToggle(group, e.target.checked)} aria-label={`${group} 符合 SOP`} />
       <span>{entry?.ok ? "符合" : "未確認"}</span>
       {entry?.ok && <span className="cg-sop-by">{entry.by}</span>}
     </label>
@@ -117,9 +148,13 @@ function OrderDetail({ row, wf }: { row: GroupRow; wf: WorkFields }) {
                 <td className="num">{wf.qty ? text(r.fields[wf.qty.name]) || "—" : "—"}</td>
                 <td className="num">{wf.revenue ? text(r.fields[wf.revenue.name]) || "—" : "—"}</td>
                 <td>
-                  <span className={`pill ${check === "pass" ? "pill-good" : check === "fail" ? "pill-bad" : ""}`}>{check === "pass" ? "通過" : check === "fail" ? "不通過" : "未檢核"}</span>
+                  {wf.check || wf.status ? (
+                    <span className={`pill ${check === "pass" ? "pill-good" : check === "fail" ? "pill-bad" : ""}`}>{check === "pass" ? "通過" : check === "fail" ? "不通過" : "未檢核"}</span>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
                 </td>
-                <td>{an.length ? an.map((a) => <span key={a} className="tag">{a}</span>) : <span className="muted">—</span>}</td>
+                <td>{!wf.flags.length ? <span className="muted">—</span> : an.length ? an.map((a) => <span key={a} className="tag">{a}</span>) : <span className="muted">無</span>}</td>
               </tr>
             );
           })}
@@ -138,6 +173,7 @@ export default function ControlGroupBoard() {
   const isMobile = useMedia(MOBILE);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const sop = useSop(version, week.start);
+  useEffect(() => setOpen(new Set()), [version, week.start]);
 
   const view = useMemo(() => {
     const data = work.data;
@@ -219,6 +255,8 @@ export default function ControlGroupBoard() {
         ? "預排表找不到組別或日期欄位，預排差異無法計算"
         : null;
   const overallRate = errorRate(totals);
+  const hasCheck = Boolean(wf.check || wf.status);
+  const hasFlags = wf.flags.length > 0;
 
   return (
     <section className="cg">
@@ -234,24 +272,22 @@ export default function ControlGroupBoard() {
           <div className="kpi-label">
             營業額點數 <span className="kpi-tag">原值</span>
           </div>
-          <div className="kpi-value">{formatNumber(Math.round(totals.revenue * 10) / 10)}</div>
-          <div className="kpi-sub">取自「{wf.revenue?.name ?? "—"}」</div>
+          <div className="kpi-value">{wf.revenue ? round1(totals.revenue) : "—"}</div>
+          <div className="kpi-sub">{wf.revenue ? `取自「${wf.revenue.name}」` : "找不到營業額點數欄位"}</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">失誤率</div>
           <div className="kpi-value">{pct(overallRate)}</div>
-          <div className="kpi-sub">
-            不通過 {totals.fail} ÷ 已檢核 {totals.pass + totals.fail}
-          </div>
+          <div className="kpi-sub">{hasCheck ? `不通過 ${totals.fail} ÷ 已檢核 ${totals.pass + totals.fail}` : "找不到控制組檢核欄位"}</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">異常工作單</div>
-          <div className="kpi-value">{formatNumber(totals.anomaly)}</div>
-          <div className="kpi-sub">任一 ⚠ 欄位有標記</div>
+          <div className="kpi-value">{hasFlags ? formatNumber(totals.anomaly) : "—"}</div>
+          <div className="kpi-sub">{hasFlags ? `任一 ⚠ 欄位有標記（${wf.flags.length} 個欄位）` : "找不到 ⚠ 異常欄位"}</div>
         </div>
       </div>
 
-      {(missing.length > 0 || schedNote || sop.error || !sop.persistent) && (
+      {(missing.length > 0 || schedNote || sop.error || !sop.persistent || (sop.loaded && !sop.perm.canEdit && !demo)) && (
         <ul className="cg-notes">
           {missing.length > 0 && (
             <li>
@@ -266,6 +302,16 @@ export default function ControlGroupBoard() {
           {sop.error && (
             <li className="bad-text">
               <CircleAlert size={14} /> SOP 勾選：{sop.error}
+            </li>
+          )}
+          {sop.loaded && !sop.perm.canEdit && !demo && (
+            <li>
+              <CircleAlert size={14} /> 你可以查看 SOP 勾選，但只有授權主管能勾選。{sop.perm.reason}
+              {sop.perm.openId && (
+                <>
+                  {" "}你的 Lark ID：<code className="mono">{sop.perm.openId}</code>（如需勾選權限，請提供給管理員）
+                </>
+              )}
             </li>
           )}
           {!sop.persistent && (
@@ -293,7 +339,7 @@ export default function ControlGroupBoard() {
                 <dl className="cg-metrics">
                   <div>
                     <dt>營業額點數</dt>
-                    <dd>{formatNumber(Math.round(r.revenue * 10) / 10)}</dd>
+                    <dd>{wf.revenue ? round1(r.revenue) : "—"}</dd>
                   </div>
                   <div>
                     <dt>與預排差異</dt>
@@ -304,15 +350,15 @@ export default function ControlGroupBoard() {
                   <div>
                     <dt>失誤率</dt>
                     <dd>
-                      {pct(errorRate(r))} <span className="muted small">{r.fail}/{r.pass + r.fail}</span>
+                      {pct(errorRate(r))} {hasCheck && <span className="muted small">{r.fail}/{r.pass + r.fail}</span>}
                     </dd>
                   </div>
                   <div>
                     <dt>異常</dt>
-                    <dd>{r.anomalyCount ? `${r.anomalyCount} 張` : "無"}</dd>
+                    <dd>{!hasFlags ? "—" : r.anomalyCount ? `${r.anomalyCount} 張` : "無"}</dd>
                   </div>
                 </dl>
-                <SopBox group={r.group} entry={sop.entries[r.group]} onToggle={sop.toggle} demo={demo} />
+                <SopBox group={r.group} entry={sop.entries[r.group]} onToggle={sop.toggle} disabled={demo || !sop.loaded || !sop.perm.canEdit} />
                 {expanded && <OrderDetail row={r} wf={wf} />}
               </article>
             );
@@ -348,8 +394,8 @@ export default function ControlGroupBoard() {
                         <span className="muted small"> {r.orders.length} 張</span>
                       </td>
                       <td className="num strong">
-                        {formatNumber(Math.round(r.revenue * 10) / 10)}
-                        {r.revenueBlank > 0 && <span className="muted small"> ({r.revenueBlank} 空白)</span>}
+                        {wf.revenue ? round1(r.revenue) : "—"}
+                        {wf.revenue && r.revenueBlank > 0 && <span className="muted small"> ({r.revenueBlank} 空白)</span>}
                       </td>
                       <td className="num" title={r.planned?.defaulted ? `${r.planned.defaulted} 天未填點數，以每天 1 點計` : undefined}>
                         {r.planned ? formatNumber(Math.round(r.planned.points * 10) / 10) : "—"}
@@ -360,17 +406,19 @@ export default function ControlGroupBoard() {
                       </td>
                       <td className="num">
                         {pct(errorRate(r))}
-                        <span className="muted small"> {r.fail}/{r.pass + r.fail}</span>
+                        {hasCheck && <span className="muted small"> {r.fail}/{r.pass + r.fail}</span>}
                       </td>
                       <td>
-                        {r.anomalyCount ? (
+                        {!hasFlags ? (
+                          <span className="muted">—</span>
+                        ) : r.anomalyCount ? (
                           <span className="pill pill-warn">
                             <CircleAlert size={12} /> {r.anomalyCount} 張
                           </span>
                         ) : (
-                          <span className="pill">正常</span>
+                          <span className="pill">無異常</span>
                         )}
-                        {r.unchecked > 0 && <span className="muted small"> 未檢核 {r.unchecked}</span>}
+                        {hasCheck && r.unchecked > 0 && <span className="muted small"> 未檢核 {r.unchecked}</span>}
                       </td>
                       <td className="cg-items" title={r.items.join("、")}>
                         {r.items.slice(0, 2).join("、") || "—"}
@@ -378,7 +426,7 @@ export default function ControlGroupBoard() {
                       </td>
                       <td className="num">{wf.qty ? formatNumber(Math.round(r.qty * 10) / 10) : "—"}</td>
                       <td>
-                        <SopBox group={r.group} entry={sop.entries[r.group]} onToggle={sop.toggle} demo={demo} />
+                        <SopBox group={r.group} entry={sop.entries[r.group]} onToggle={sop.toggle} disabled={demo || !sop.loaded || !sop.perm.canEdit} />
                       </td>
                     </tr>
                     {expanded && (

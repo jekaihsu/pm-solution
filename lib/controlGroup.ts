@@ -1,7 +1,7 @@
 // R01 控制組檢查後數據 — per-group weekly summary built from the field-work and
 // schedule tables. Definitions agreed with the PM (2026-10-13):
 //  - 失誤率 = 控制組檢核「不通過」÷ 已檢核（通過＋不通過）；未檢核不計入。
-//  - 預排點數 = 預排表的點數欄；沒填則每組每天 1 點（同組同日同案件只算一次）。
+//  - 預排點數 = 預排表的點數欄；沒填則每組每天 1 點（同組同日不論幾個案件只算一次）。
 //  - 營業額差異 = 實際營業額點數（原值）− 預排點數。
 //  - 是否符合 SOP 由主管在網站上勾選（另存，不寫回 Lark）。
 import type { CellValue, FieldMeta, TableData } from "./types";
@@ -78,43 +78,55 @@ export function resolveScheduleFields(fields: FieldMeta[]): ScheduleFields {
   };
 }
 
-// Planned points per group inside [start, end): explicit points when filled,
-// otherwise 1 per group-day (same group, day and job counted once).
+// Planned points per group inside [start, end). A schedule row with points
+// spreads them over its days; a group-day with no filled points anywhere counts
+// as 1 point — once per group per day, however many jobs or people are booked.
 export function plannedPoints(data: TableData | undefined, sf: ScheduleFields, start: number, end: number) {
   const out = new Map<string, { points: number; days: number; defaulted: number }>();
   if (!data || !sf.group || !sf.start) return out;
-  const seen = new Set<string>();
+  const TZ = 8 * 3600000; // business days are Asia/Taipei dates
+  const filledDays = new Set<string>();
+  const allDays = new Set<string>();
+  const unfilled: { g: string; day: number }[] = [];
+  const bucket = (g: string) => {
+    let cur = out.get(g);
+    if (!cur) out.set(g, (cur = { points: 0, days: 0, defaulted: 0 }));
+    return cur;
+  };
+
   for (const r of data.records) {
     const s = r.fields[sf.start.name];
     if (typeof s !== "number") continue;
     const e0 = sf.end ? r.fields[sf.end.name] : null;
     const e = typeof e0 === "number" && e0 >= s ? e0 : s;
-    const from = Math.max(s, start);
-    const to = Math.min(e + DAY, end);
-    if (to <= from) continue;
-    const days = Math.max(1, Math.round((to - from) / DAY));
-    const totalDays = Math.max(1, Math.round((e + DAY - s) / DAY));
+    const first = Math.floor((s + TZ) / DAY);
+    const last = Math.floor((e + TZ) / DAY);
+    const winFirst = Math.floor((start + TZ) / DAY);
+    const winLast = Math.floor((end - 1 + TZ) / DAY);
+    const from = Math.max(first, winFirst);
+    const to = Math.min(last, winLast);
+    if (to < from) continue;
     const groups = (Array.isArray(r.fields[sf.group.name]) ? (r.fields[sf.group.name] as string[]) : [text(r.fields[sf.group.name])]).filter(Boolean);
-    const job = sf.job ? text(r.fields[sf.job.name]) : r.id;
     const filled = sf.points ? r.fields[sf.points.name] : null;
     for (const g of groups) {
-      const cur = out.get(g) ?? { points: 0, days: 0, defaulted: 0 };
-      if (typeof filled === "number") {
-        cur.points += (filled * days) / totalDays; // spread a multi-day entry across its days
-        cur.days += days;
-      } else {
-        for (let d = 0; d < days; d++) {
-          const key = `${g}|${Math.floor((from + d * DAY) / DAY)}|${job}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          cur.points += 1;
-          cur.days += 1;
-          cur.defaulted += 1;
-        }
+      for (let d = from; d <= to; d++) {
+        if (typeof filled === "number") {
+          bucket(g).points += filled / (last - first + 1);
+          filledDays.add(`${g}|${d}`);
+        } else unfilled.push({ g, day: d });
+        allDays.add(`${g}|${d}`);
       }
-      out.set(g, cur);
     }
   }
+  for (const { g, day } of unfilled) {
+    const key = `${g}|${day}`;
+    if (filledDays.has(key)) continue; // a filled entry already covers this group-day
+    filledDays.add(key);
+    const cur = bucket(g);
+    cur.points += 1;
+    cur.defaulted += 1;
+  }
+  for (const key of allDays) bucket(key.slice(0, key.lastIndexOf("|"))).days += 1;
   return out;
 }
 

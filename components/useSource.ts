@@ -13,7 +13,10 @@ export interface SourceState {
 
 export function useSource(key: string): SourceState {
   const { demo, tick } = useShell();
-  const [state, setState] = useState<SourceState>({ status: "loading" });
+  // Tag each result with the source + mode it belongs to, so a switch never shows the
+  // previous table's data while the new one loads.
+  const tag = `${key}|${demo ? "demo" : "live"}`;
+  const [state, setState] = useState<SourceState & { tag?: string }>({ status: "loading" });
 
   useEffect(() => {
     let cancelled = false;
@@ -22,14 +25,14 @@ export function useSource(key: string): SourceState {
     if (tick > 0) qs.set("refresh", "1");
     fetch(`/api/sources/${key}?${qs}`)
       .then((r) => r.json())
-      .then((j) => !cancelled && setState({ status: j.status, data: j.data, error: j.error }))
-      .catch((e) => !cancelled && setState((prev) => ({ ...prev, status: prev.data ? "ok" : "error", error: String(e) })));
+      .then((j) => !cancelled && setState({ status: j.status, data: j.data, error: j.error, tag }))
+      .catch((e) => !cancelled && setState((prev) => (prev.tag === tag ? { ...prev, status: prev.data ? "ok" : "error", error: String(e) } : { status: "error", error: String(e), tag })));
     return () => {
       cancelled = true;
     };
-  }, [key, demo, tick]);
+  }, [key, demo, tick, tag]);
 
-  return state;
+  return state.tag === tag ? state : { status: "loading" };
 }
 
 export const STATUS_TEXT: Record<SourceStatus, string> = {
