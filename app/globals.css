@@ -586,3 +586,22 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
 .cg-sop-done { font-weight: 600; }
 .cg-sop.ok span:first-of-type { color: var(--good); font-weight: 500; }
 .cg-card-sop { display: flex; align-items: center; justify-content: space-between; }
+
+/* One group, one week */
+.cg-picker { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.cg-picker::-webkit-scrollbar { display: none; }
+.cg-chip { flex: none; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.cg-chip:hover { color: var(--text); background: var(--surface-2); }
+.cg-chip.on { background: var(--primary); border-color: var(--primary); color: var(--primary-ink); }
+.cg-focus { display: flex; flex-direction: column; gap: 14px; }
+.cg-focus-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.cg-focus-head h3 { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
+.cg-focus-sop { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+.cg-focus-sop .pill { font-size: 13px; padding: 4px 10px; }
+.cg-focus-items { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cg-focus-qty { margin-left: auto; }
+.cg-focus .kpi-value .cg-diff { font-size: inherit; }
+@media (max-width: 640px) {
+  .cg-focus-sop, .cg-focus-qty { margin-left: 0; }
+}
+.cg-focus, .cg-focus > * { min-width: 0; max-width: 100%; }

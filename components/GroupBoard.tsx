@@ -257,6 +257,56 @@ function OrderDetail({ row, wf, checkLabel, sop, disabled }: { row: GroupRow; wf
   );
 }
 
+// One group, one week: every R01 item for that group on a single screen.
+function GroupFocus({ row, group, wf, cfg, sop, disabled, hasCheck, hasFlags }: { row?: GroupRow; group: string; wf: WorkFields; cfg: BoardConfig; sop: Sop; disabled: boolean; hasCheck: boolean; hasFlags: boolean }) {
+  if (!row) return <EmptyState kind="empty" title={`${group} 這週沒有${cfg.workLabel}`} />;
+  const diff = row.planned && wf.revenue ? row.revenue - row.planned.points : null;
+  return (
+    <div className="cg-focus">
+      <div className="cg-focus-head">
+        <h3>{row.group}</h3>
+        <span className="muted small">{row.orders.length} 張工作單</span>
+        <span className="cg-focus-sop">
+          <span className="muted small">符合 SOP（可派新工作）</span>
+          <SopStatus done={sopCount(row, sop.entries)} total={row.orders.length} />
+        </span>
+      </div>
+      <div className="kpis">
+        <div className="kpi">
+          <div className="kpi-label">營業額點數</div>
+          <div className="kpi-value">{wf.revenue ? round1(row.revenue) : "—"}</div>
+          <div className="kpi-sub">{row.revenueBlank ? `${row.revenueBlank} 張未填點數` : "原值加總"}</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">與預排差異</div>
+          <div className="kpi-value">
+            <Diff value={diff} />
+          </div>
+          <div className="kpi-sub">
+            預排 {row.planned ? round1(row.planned.points) : "—"} 點{row.planned?.defaulted ? `（${row.planned.defaulted} 天以 1 點計）` : ""}
+          </div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">失誤率</div>
+          <div className="kpi-value">{pct(errorRate(row))}</div>
+          <div className="kpi-sub">{hasCheck ? `不通過 ${row.fail} ÷ 已檢核 ${row.pass + row.fail}・未檢核 ${row.unchecked}` : `找不到${cfg.checkLabel}欄位`}</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">異常狀態</div>
+          <div className="kpi-value">{hasFlags ? `${row.anomalyCount} 張` : "—"}</div>
+          <div className="kpi-sub">{hasFlags ? ([...row.anomalyKinds].map(([k, n]) => `${k.replace(/^⚠/, "")} ${n}`).join("、") || "無異常") : "找不到 ⚠ 異常欄位"}</div>
+        </div>
+      </div>
+      <div className="cg-focus-items">
+        <span className="muted small">工作項目</span>
+        {row.items.length ? row.items.map((i) => <span key={i} className="tag">{i}</span>) : <span className="muted">—</span>}
+        <span className="muted small cg-focus-qty">工作數量合計 {wf.qty ? round1(row.qty) : "—"}</span>
+      </div>
+      <OrderDetail row={row} wf={wf} checkLabel={cfg.checkLabel} sop={sop} disabled={disabled} />
+    </div>
+  );
+}
+
 export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const { week, version: globalVersion, demo } = useShell();
   const [localVersion, setLocalVersion] = useState<DataVersion>("v3");
@@ -268,6 +318,17 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const isMobile = useMedia(MOBILE);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const sop = useSop(cfg.report, version, week.start);
+  // Selected group stays put across weeks (so you can step through one group's
+  // weeks) and lives in the URL (?group=) so the view can be shared.
+  const [focus, setFocus] = useState<string | null>(null);
+  useEffect(() => setFocus(new URLSearchParams(window.location.search).get("group")), []);
+  const pick = (g: string | null) => {
+    setFocus(g);
+    const u = new URL(window.location.href);
+    if (g) u.searchParams.set("group", g);
+    else u.searchParams.delete("group");
+    window.history.replaceState(null, "", u);
+  };
   useEffect(() => setOpen(new Set()), [version, week.start]);
 
   const view = useMemo(() => {
@@ -373,30 +434,32 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
     <section className="cg">
       {header}
 
-      <div className="kpis">
-        <div className="kpi">
-          <div className="kpi-label">工作單數</div>
-          <div className="kpi-value">{formatNumber(totals.orders)}</div>
-          <div className="kpi-sub">{rows.length} 組</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">
-            營業額點數 <span className="kpi-tag">原值</span>
+      {!focus && (
+        <div className="kpis">
+          <div className="kpi">
+            <div className="kpi-label">工作單數</div>
+            <div className="kpi-value">{formatNumber(totals.orders)}</div>
+            <div className="kpi-sub">{rows.length} 組</div>
           </div>
-          <div className="kpi-value">{wf.revenue ? round1(totals.revenue) : "—"}</div>
-          <div className="kpi-sub">{wf.revenue ? `取自「${wf.revenue.name}」` : "找不到營業額點數欄位"}</div>
+          <div className="kpi">
+            <div className="kpi-label">
+              營業額點數 <span className="kpi-tag">原值</span>
+            </div>
+            <div className="kpi-value">{wf.revenue ? round1(totals.revenue) : "—"}</div>
+            <div className="kpi-sub">{wf.revenue ? `取自「${wf.revenue.name}」` : "找不到營業額點數欄位"}</div>
+          </div>
+          <div className="kpi">
+            <div className="kpi-label">失誤率</div>
+            <div className="kpi-value">{pct(overallRate)}</div>
+            <div className="kpi-sub">{hasCheck ? `不通過 ${totals.fail} ÷ 已檢核 ${totals.pass + totals.fail}` : `找不到${cfg.checkLabel}欄位`}</div>
+          </div>
+          <div className="kpi">
+            <div className="kpi-label">異常工作單</div>
+            <div className="kpi-value">{hasFlags ? formatNumber(totals.anomaly) : "—"}</div>
+            <div className="kpi-sub">{hasFlags ? `任一 ⚠ 欄位有標記（${wf.flags.length} 個欄位）` : "找不到 ⚠ 異常欄位"}</div>
+          </div>
         </div>
-        <div className="kpi">
-          <div className="kpi-label">失誤率</div>
-          <div className="kpi-value">{pct(overallRate)}</div>
-          <div className="kpi-sub">{hasCheck ? `不通過 ${totals.fail} ÷ 已檢核 ${totals.pass + totals.fail}` : `找不到${cfg.checkLabel}欄位`}</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">異常工作單</div>
-          <div className="kpi-value">{hasFlags ? formatNumber(totals.anomaly) : "—"}</div>
-          <div className="kpi-sub">{hasFlags ? `任一 ⚠ 欄位有標記（${wf.flags.length} 個欄位）` : "找不到 ⚠ 異常欄位"}</div>
-        </div>
-      </div>
+      )}
 
       {(missing.length > 0 || schedNote || joinNote || sop.error || !sop.persistent || (sop.loaded && !sop.perm.canEdit && !demo)) && (
         <ul className="cg-notes">
@@ -438,7 +501,22 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
         </ul>
       )}
 
-      {rows.length === 0 ? (
+      {(rows.length > 0 || focus) && (
+        <div className="cg-picker" role="group" aria-label="選擇組別">
+          <button className={`cg-chip ${!focus ? "on" : ""}`} onClick={() => pick(null)} aria-pressed={!focus}>
+            全部組別
+          </button>
+          {[...rows.map((r) => r.group), ...(focus && !rows.some((r) => r.group === focus) ? [focus] : [])].map((g) => (
+            <button key={g} className={`cg-chip ${focus === g ? "on" : ""}`} onClick={() => pick(g)} aria-pressed={focus === g}>
+              {g}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {focus ? (
+        <GroupFocus row={rows.find((r) => r.group === focus)} group={focus} wf={wf} cfg={cfg} sop={sop} disabled={sopLocked} hasCheck={hasCheck} hasFlags={hasFlags} />
+      ) : rows.length === 0 ? (
         <EmptyState kind="empty" title={`${weekName(week.offset)}沒有${cfg.workLabel}`} />
       ) : isMobile ? (
         <div className="cg-cards">

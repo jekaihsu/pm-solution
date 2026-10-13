@@ -1,2 +1,2 @@
 // Bumped with each change so /api/health shows which build is deployed.
-export const APP_VERSION = "2026-10-13.5 sop-per-order";
+export const APP_VERSION = "2026-10-13.6 group-week";
