@@ -56,10 +56,11 @@ const SALES_BASE = "JoOqbggsVar0ATsVgbcjh6IIp1g";
 const SALARY_BASE = "VwAsbezz9app3YsramgjduLYp2U"; // 薪水計算 Base
 const LARK_WEB = "https://yong-xiang-survey.jp.larksuite.com";
 
-// V4 service inclusion baseline: 2026-10-07 20:10:44.122 Asia/Taipei. Records created
-// earlier (the 535 legacy test rows) are permanently excluded.
-const V4_BASELINE = Date.UTC(2026, 9, 7, 12, 10, 44, 122);
-const V4_RULE = { createdAfter: V4_BASELINE, createdAfterLabel: "2026-10-07 20:10:44（台北）" };
+// V4 inclusion baseline (PM decision 2026-10-13): V4 counts only from 2026-10-13
+// 00:00 Asia/Taipei — rows filled in from today on. Everything created earlier
+// (tests and trial entries) and rows without a creation time are excluded.
+const V4_BASELINE = Date.UTC(2026, 9, 12, 16, 0, 0, 0);
+const V4_RULE = { createdAfter: V4_BASELINE, createdAfterLabel: "2026-10-13 00:00（台北）" };
 
 // Default visible columns, matched by field name; V3 and V4 share most names.
 const COLS = {
