@@ -46,6 +46,9 @@
 | `lib/adminBoard.ts` | R11 行政口徑（純函式）：成本單帶人與日期、預排以人員 record_id＋日期展開、與預排差異分區 |
 | `components/AdminBoard.tsx` | R11 行政看板：一列一人（全部人）、合計列、點人展開工作單明細 |
 | `scripts/test-admin-board.mjs` | R11 邏輯測試（`node --test`，不連 Lark） |
+| `lib/internalReport.ts` | R09 內業報告口徑（純函式）：成本單 record_id 帶人與日期、預排以人員 record_id＋日期展開、人日吻合／有排未填／未排有填、案件結果、異常與人工確認列 |
+| `components/InternalReport.tsx` | R09 內業報告頁：人日表、案件表、異常與人工確認表、待定義區塊（讀 `v3-internal-work`／`v3-internal-cost`／`v3-schedule`／`v3-cases`） |
+| `scripts/test-internal-report.mjs` | R09 邏輯測試（`node --test`，不連 Lark） |
 | `components/HrBoard.tsx` | R04 人事：招聘暫無、出勤／出差待權限、加班取自詠翔加班（純函式在 `lib/overtime.ts`） |
 | `lib/demo.ts` | 示範資料（右下角「示範資料」開關） |
 | `lib/version.ts` | `APP_VERSION`，每次改版都要更新，用來確認部署是否生效 |
@@ -74,7 +77,7 @@ npm ci
 cp .env.example .env.local   # 填入 LARK_APP_ID / LARK_APP_SECRET（不要提交）
 AUTH_DISABLED=1 DATA_DIR=./data npm run dev     # http://localhost:3000
 npm run typecheck && npm run build              # 推送前必跑
-node --test scripts/test-control-group.mjs scripts/test-r02-people.mjs   # R01／R02 邏輯測試（不連 Lark）
+node --test scripts/test-*.mjs   # 全部邏輯測試（不連 Lark）：R01／R02、R04、R07、R09、R11
 node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄位
 ```
 
@@ -126,6 +129,15 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 - 主表列出全部人（不分區）；沒預排的人預排「未排」、差異「—」。組小計與合計的工作單、營業額等含全部人（`teamSections`／`sumRows`）；與預排差異只算有預排的人並標「只算有預排的 n 人」（`planDiffTotals`）；人員下拉同名跨組時顯示「名字・組別」。
 - record_id 保留：`lib/lark.ts` 讀表時 link 欄的 record_id 另存在 `TableData.records[].links[欄名]`（與 `fields` 內標題文字 index 對齊），`/api/sources` 投影時一併帶出；`fields` 的行為不變，其他報表不受影響。
 - 其餘：進度 % 先不算，只顯示；天數＝距交期天數（交期欄位未定位）。上週（2026-10-05～10-11）實測以人拆開後各組加總＝以組計算（控制 86 張／已檢核 61／營業額 28.25／被修改 19；圖報A 8／5／2.94／1；圖報B 2／2／1／1）。測試：`node --test scripts/test-r02-people.mjs`。
+
+**R09 內業報告**（`components/InternalReport.tsx`、`lib/internalReport.ts`；業主裁示 2026-10-13，測試 `scripts/test-internal-report.mjs`）：內業經理看上週「預排及實際完成檢討」，只做不需要新口徑的部分。
+- 內業**以人為單位**；人員一律用人員名單 record_id。**實際人日**＝所選週內內業成本單（V3 `tbl8JdWLLwlPFuoF`）的不重複（填報人，工作日期）——沒有工作單的成本單也算；**預排人日**＝工作預排（業別含「內業」、ROV 一律算外業排除、條類型＝休假不算）「人員」欄（可多人）逐人展開後的不重複（人員，日期），同人同日多條只算 1。比對主鍵＝人員 record_id＋日期，**組別不參與 join**，只顯示成本單的「內業組別」（同週在兩個組別填單的人一人一列，名字後接「・控制／圖報A」，組別欄顯示「跨組」）。預排日期一律用 field id（`fldMXOggGP`／`fldjWv1xST`）。
+- 吻合＝預排與實際都有的（人，日）；有排未填＝預排了沒成本單；未排有填＝有成本單沒預排；**人日達成率＝吻合 ÷ 預排人日**（人日口徑，不混用營業額或案件）。上週（2026-10-05～10-11）實測：預排 34 人日（9 人）、實際 42 人日（12 人）、吻合 32、有排未填 2、未排有填 10、達成率 94.1%。
+- 內業工作單（`tblTP5Naz52FBpFg`）沒有組別與日期，經「所屬成本單」link 的 **record_id** 接成本單（成本單單號有 9 組重複，不用單號文字；link 完全讀不到〔示範資料〕才用唯一標題備援，標題不唯一不猜）；成本單對不到才用工作單自己的「工作日期-營業額明細」備援日期。週篩選的來源設定 `v3-internal-work.dateField = "工作日期-營業額明細"`（原本預設「填報時間」會把補填的單排除：上週 84 張，應為 96 張／32.185 點）。
+- 案件表：以**案件記錄 record_id** 為單位（案件編號＝案件表主欄，工程名稱＝案件名稱，來源 `v3-cases`＝`tblWsSaOcy4nKuGI` 不套視圖，頁面只投影這兩欄）。「工程編號是否取案件編號前 7 碼」業主未回覆，先不裁。結果：有排有做／有排未做／未排有做（只看案件有沒有工作單，不看人與日）。預排或工作單沒填案件的不列入案件比對，只在註腳計數。同人同日排／做多案時各案各算 1 天，所以案件人日合計可大於人日。
+- 「上週異常與人工確認案件」：未排有填、有排未填的人日，加上 ⚠組別權重=0／⚠案件不符／⚠工項不符亮燈與檢核狀態＝已退回的工作單（其他 ⚠ 欄不列）。同人同案同類別、日曆連續的日期合併成 起～迄；「說明」顯示工作單備註原文（有排未填顯示預排備註）。檢核說明要在 Lark 填寫，網站唯讀。
+- **待定義（不算）**：圖資／報告節點期限（n+2、N+2、N+1）、節點狀態（未逾期／預計逾期／已逾期／無工作）、確認單營業額與執行比例——口徑待業主說明，確認單營業額來源為工程確認單，V4／報價 Base 尚未開放讀取，頁面只留標示區塊。
+- 敏感欄位：成本單只向伺服器要 單號、工作日期、填報人、內業組別（組別）；出工成本、人力成本、方案日成本、加班費、雜支金額一律不要、不顯示（測試會檢查輸出不含這些字）。V4 讀不到時顯示原因、不報錯；V3、V4 不相加。
 
 **R07 儀器車輛管理詳情**（`components/EquipmentBoard.tsx`，純函式在 `lib/equipment.ts`，測試 `scripts/test-equipment.mjs`）：五塊來自「儀器管理系統」Base（與 V3／V4 的儀器費率、車輛分開，不相加、不去重），另保留檢查與校驗兩塊。
 - 儀器總表（`equipment-system`，138 筆）＝借用台帳：狀態是借用狀態（可借用／已借出）、`rent_type` 月租型／日租型、`系統封存` 勾選＝已下架，不列入清單與數量。

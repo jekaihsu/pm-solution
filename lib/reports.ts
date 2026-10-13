@@ -89,12 +89,15 @@ export const SOURCES: SourceDef[] = [
   raw("v4-field-work", "外業工作單", "v4", "tbl5zPLS0ExWNEty", { dateField: "工作日期-薪資", columns: COLS.fieldWork, ...DASH.fieldWork, note: "R01 與 R10 共用；欄名含「最終」不代表已核定。" }),
   raw("v4-field-cost", "外業成本單", "v4", "tbl8wRYCUCvbSoJG", { dateField: "工作日期", columns: COLS.fieldCost, ...DASH.fieldCost }),
   raw("v3-field-cost", "外業成本單", "v3", "tblQCy3eU0wsUj1I", { dateField: "工作日期", columns: COLS.fieldCost, ...DASH.fieldCost, note: "R01 用來判定一組拆成多組出工（同組同日組長不同）。" }),
-  raw("v3-internal-work", "內業工作單", "v3", "tblTP5Naz52FBpFg", { columns: COLS.internalWork, ...DASH.internalWork, note: "R02 與 R09 共用；「最終營業額點數」欄名含「最終」不代表已核定。" }),
+  // 週篩選依「工作日期-營業額明細」（與成本單工作日期一致）；預設的「填報時間」是填單當下時間，會漏掉補填的單（上週 84 張而非 96 張）。
+  raw("v3-internal-work", "內業工作單", "v3", "tblTP5Naz52FBpFg", { dateField: "工作日期-營業額明細", columns: COLS.internalWork, ...DASH.internalWork, note: "R02 與 R09 共用；「最終營業額點數」欄名含「最終」不代表已核定。" }),
   raw("v4-internal-work", "內業工作單", "v4", "tblrCo8KeZiuJUNh", { columns: COLS.internalWork, ...DASH.internalWork, note: "R02、R03、R09 共用；含品管檢核、業主數量覆寫欄位。" }),
   raw("v3-internal-cost", "內業成本單", "v3", "tbl8JdWLLwlPFuoF", { dateField: "工作日期", columns: COLS.internalCost, ...DASH.internalCost }),
   raw("v4-internal-cost", "內業成本單", "v4", "tblKwSDRg6WaGHYr", { dateField: "工作日期", columns: COLS.internalCost, ...DASH.internalCost }),
   raw("v3-schedule", "工作預排", "v3", "tblN8c3WN44233aG", { columns: COLS.schedule, ...DASH.schedule }),
   raw("v4-schedule", "工作預排", "v4", "tblZz6Mkhv9gHrB2", { dateField: "開始日期", columns: COLS.schedule, ...DASH.schedule }),
+  // R09 內業報告用：案件編號（主欄）與案件名稱。整張表讀進伺服器，頁面只投影這兩欄（請款、成本等欄位不外送）；V4 沒有對應表。
+  raw("v3-cases", "案件", "v3", "tblWsSaOcy4nKuGI", { columns: ["案件編號", "案件名稱", "業主", "狀態"], note: "R09 用來顯示工程名稱；與「案件應收未收」同一張表，不套視圖篩選。" }),
   raw("v3-admin-work", "行政工作單", "v3", "tbl2c5CLgwPZ3Pl2", { note: "R11 用；沒有日期與人員，從「所屬成本單」帶入。" }),
   raw("v3-admin-cost", "行政成本單", "v3", "tbliyB0wgDhgUQbA", { dateField: "工作日期", note: "R11 用；填表人＝看板的一列。" }),
   // V4 行政表的 table id 未知，用表名自動找；應用目前讀不到（1254302），頁面會顯示失敗原因。
@@ -258,10 +261,14 @@ export const REPORTS: ReportDef[] = [
     id: "R09",
     slug: "r09",
     name: "內業報告",
-    purpose: "內業部門看預排與實際執行對照，以及所有進行中工作的剩餘營業額。",
+    purpose: "內業經理看上週預排與實際完成的對照：誰排了沒填、誰沒排卻填了，哪些案件排了沒做，以及要人工確認的異常單。",
     sources: ["v3-schedule", "v3-internal-work", "v3-internal-cost", "v4-schedule", "v4-internal-work", "v4-internal-cost"],
-    mustHave: ["預排達成率（以工程編號為主）", "進行中工作營業額剩餘"],
-    pending: ["達成率粒度、基準版本、改排及例外（D-03）", "剩餘點數與內外業分攤（D-06）"],
+    mustHave: ["預排 vs 實際（人日，內業以人為單位，人員＋日期比對）", "預排 vs 實際（案件）", "上週異常與人工確認案件（未排有填、有排未填、⚠亮燈、已退回）", "進行中工作營業額剩餘"],
+    pending: [
+      "圖資／報告節點的期限（n+2、N+2、N+1）、節點狀態（未逾期／預計逾期／已逾期／無工作）、確認單營業額與執行比例：口徑待業主說明（確認單營業額來源為工程確認單，目前 V4／報價 Base 尚未開放讀取）",
+      "工程編號是否取案件編號前 7 碼：業主未回覆，先以案件記錄為單位",
+      "剩餘點數與內外業分攤（D-06）",
+    ],
   },
   {
     id: "R10",
