@@ -48,7 +48,9 @@ const HINTS: Record<number, string> = {
   91402: "找不到此 Base 或資料表",
   1254040: "找不到此 Base（app_token 錯誤或已刪除）",
   1254041: "找不到此資料表",
-  99991672: "應用缺少 bitable:app:readonly 權限，或新版本尚未發布",
+  99991672: "應用缺少所需權限（多維表格／假勤／通訊錄），請在 PM週報 後台開通並發布新版本",
+  41050: "通訊錄權限範圍不足，請在 PM週報 後台把通訊錄權限範圍設為全部成員",
+  40004: "通訊錄權限範圍不足，請在 PM週報 後台把通訊錄權限範圍設為全部成員",
   91403: "應用沒有此 Base 的存取權，請在 Base 的「新增文件應用」加入 PM週報",
 };
 
@@ -58,8 +60,22 @@ const HINTS: Record<number, string> = {
 const RATE_LIMITED = 99991400;
 const RETRY_DELAYS_MS = [500, 1500, 3000, 6000];
 
+// Carries the Lark error code so callers can tell "missing permission" from other failures.
+export class LarkApiError extends Error {
+  code: number;
+  larkMsg: string;
+  violations: string[];
+  constructor(message: string, code: number, larkMsg: string, violations: string[]) {
+    super(message);
+    this.name = "LarkApiError";
+    this.code = code;
+    this.larkMsg = larkMsg;
+    this.violations = violations;
+  }
+}
+
 async function larkFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  let json: { code: number; msg: string; data?: unknown };
+  let json: { code: number; msg: string; data?: unknown; error?: { permission_violations?: { subject?: string }[] } };
   for (let attempt = 0; ; attempt++) {
     const token = await getTenantAccessToken();
     const res = await fetch(`${API_BASE}/open-apis${path}`, {
@@ -75,8 +91,30 @@ async function larkFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (json.code !== RATE_LIMITED || attempt >= RETRY_DELAYS_MS.length) break;
     await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt] + Math.random() * 300));
   }
-  if (json.code !== 0) throw new Error(`${HINTS[json.code] ? `${HINTS[json.code]}｜` : ""}Lark API ${path.split("?")[0]} failed: ${json.code} ${json.msg}`);
+  if (json.code !== 0) {
+    const violations = (json.error?.permission_violations ?? []).map((v) => v.subject ?? "").filter(Boolean);
+    throw new LarkApiError(`${HINTS[json.code] ? `${HINTS[json.code]}｜` : ""}Lark API ${path.split("?")[0]} failed: ${json.code} ${json.msg}`, json.code, String(json.msg ?? ""), violations);
+  }
   return json.data as T;
+}
+
+// 唯讀白名單：網站只讀 Lark。要多讀一種 API，在這裡明確加一行（方法＋路徑），不開放任意路徑。
+const READ_ONLY_CALLS: [method: "GET" | "POST", path: RegExp][] = [
+  ["GET", /^\/attendance\/v1\/groups(\/[^/?]+)?$/],
+  ["POST", /^\/attendance\/v1\/user_tasks\/query$/],
+  ["POST", /^\/attendance\/v1\/user_approvals\/query$/],
+  ["GET", /^\/contact\/v3\/users\/batch$/],
+  ["GET", /^\/contact\/v3\/users\/find_by_department$/],
+  ["GET", /^\/contact\/v3\/departments\/[^/?]+\/children$/],
+];
+
+// 通用唯讀 tenant API 呼叫（假勤、通訊錄的查詢）：沿用限流重試與 HINTS；陣列參數會重複帶 key。
+export async function larkReadApi<T>(method: "GET" | "POST", path: string, opts: { query?: Record<string, string | number | string[]>; body?: unknown } = {}): Promise<T> {
+  if (!READ_ONLY_CALLS.some(([m, re]) => m === method && re.test(path))) throw new Error(`不在唯讀白名單：${method} ${path}`);
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(opts.query ?? {})) for (const x of Array.isArray(v) ? v : [v]) qs.append(k, String(x));
+  const q = qs.toString();
+  return larkFetch<T>(`${path}${q ? `?${q}` : ""}`, { method, ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}) });
 }
 
 // ---------- simple in-memory cache ----------

@@ -47,7 +47,10 @@
 | `lib/adminBoard.ts` | R11 行政口徑（純函式）：成本單帶人與日期、預排以人員 record_id＋日期展開、與預排差異分區 |
 | `components/AdminBoard.tsx` | R11 行政看板：一列一人（全部人）、合計列、點人展開工作單明細 |
 | `scripts/test-admin-board.mjs` | R11 邏輯測試（`node --test`，不連 Lark） |
-| `components/HrBoard.tsx` | R04 人事：招聘暫無、出勤／出差待權限、加班取自詠翔加班（純函式在 `lib/overtime.ts`，組別來自 `lib/people.ts`） |
+| `lib/attendanceCore.ts` / `lib/attendance.ts` | R04 出勤／出差：純函式（狀態判定、成員、週摘要、出差清單、白名單輸出）／Lark 假勤抓取與記憶體快取（server-only） |
+| `app/api/attendance` | 出勤／出差 API（`week=`、`demo=1`、`refresh=1`），經 `hrPermission`，只回白名單欄位；權限未開回 `{status:"needs-permission",missing,hint}` |
+| `components/AttendanceCards.tsx` / `scripts/test-attendance.mjs` | 出勤卡＋出差卡／口徑測試 |
+| `components/HrBoard.tsx` | R04 人事：招聘暫無、出勤／出差（`AttendanceCards`）、加班取自詠翔加班（純函式在 `lib/overtime.ts`，組別來自 `lib/people.ts`） |
 | `lib/demo.ts` | 示範資料（右下角「示範資料」開關） |
 | `lib/version.ts` | `APP_VERSION`，每次改版都要更新，用來確認部署是否生效 |
 | `scripts/inspect-lark.mjs` | 唯讀列出 Base 的表、欄位與筆數 |
@@ -145,7 +148,7 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 - link 的 record_id：`getSourceData` 另存 `record.links`（欄名→ids），`/api/sources/...?links=1` 才回傳且只含被投影的欄位；其他報表不帶此參數，回應與以前相同。
 - V4 行政表以表名自動找（V4 應用目前讀不到 1254302），頁面顯示失敗原因；V3、V4 不相加。
 
-**R04 人事**：招聘暫無；出勤、出差需開通 Lark 假勤／審批權限；加班取自薪水計算 Base 的「詠翔加班」逐筆審批單（`lib/overtime.ts`，測試 `scripts/test-hr-overtime.mjs`）：只計申請狀態「已通过」（不信 approved 旗標），依「開始時間」台北月份彙總；時數＝「薪資計算加班時數」（原始＋人工補正，缺時用原始時數）；每人平日（類型＝平日）／假日（休息日、例假日、國定假日）分開，類型空白另列待定義；**組別依公司組織架構（業主裁示 2026-10-13「加班的各組直接參考組織架構」）**＝V3 人員名單（`v3-people`，`tblmlpA6nG5Ou7NQ`，`restricted:"hr"`，白名單只讀 `姓名` 文字／`Lark帳號` 人員欄／`所屬組別` 單選／`在職` 核取；職級、備註、各種成本單連結、`同步_OpenID` 等一律不讀）的「所屬組別」：加班人（人員欄，多值）的 open_id → 人員名單「Lark帳號」open_id → 所屬組別；對不到 open_id 時以姓名完全相同備援；同名多列時有在職就只看在職，組別仍不唯一就不猜；仍對不到歸「未對應組別」（排最後，註腳列張數）。名單沒填所屬組別的人視同對不到。離職者的過去加班仍歸他名單上的組別。加班人填多位的單整張算一列、時數不拆分，全部同組才歸該組，否則歸未對應組別（註腳列張數）。人員名單讀不到時組別顯示「—」並提示，不亂歸。不再讀「发起人部门」。`同步_OpenID` 與 `Lark帳號` 的 id 不同（另一個應用的 open_id），不能用。金額、薪資、身分等欄一律不讀。
+**R04 人事**：招聘暫無；出勤、出差取自 Lark 假勤（PM週報 需 `attendance:task:readonly`、`attendance:rule:readonly`、`contact:contact.base:readonly`、`contact:user.employee_id:readonly`，通訊錄範圍＝全部成員；2026-10-13 已開通）。**以下為預設口徑，待業主確認**：①分母＝考勤組成員（全部考勤組的綁定人員＋展開綁定部門含子部門－排除人員／部門）×應打卡日，外業不打卡不列入；②到班＝Normal／SystemCheck／Late／Early，補卡（CardReplacement／CardReplacementApplication／ManagerModification）救回 Lack，Lack 算缺卡，同日缺卡優先於遲到早退；③先看 supplement 再看 NoNeedCheck：Leave／Travel／GoOut 的日子（NoNeedCheck＋supplement 是常態）與 user_approvals 覆蓋的應打卡日從分母扣除、另列天數（半天也算 1 天），免打卡日（週末）不被審批誤算；審批覆蓋日以起訖區間為準（實測 entry 的 date 會多一天；結束時間為跨日 00:00:00 視為不含該日）；④出差只計已通過，以 approval_id 去重，範圍＝名冊在職且有 Lark帳號的全公司（不限考勤組），顯示姓名、組別、起訖日、天數、本週內天數、事由（截斷 40 字）；⑤在職沒有 Lark帳號者不計、只列人數；⑥週一～週日台北，本週只查到今天，未來日不算缺卡，今天的缺卡顯示「進行中」。員工 id＝名冊 Lark帳號 open_id 經 contact `users/batch` 換 `user_id`（attendance 只吃 employee_id）。輸出白名單：不含 employee_id、open_id、地點、GPS、照片、打卡時間。快取（記憶體）：對照與考勤組 24 小時、本週 5 分鐘、過去週 6 小時，權限未開／失敗只快取 1 分鐘，併發 ≤3。`lib/lark.ts` 的 `larkReadApi` 是唯讀白名單呼叫（要多讀一種 API 須在 `READ_ONLY_CALLS` 明確加一行）。測試 `scripts/test-attendance.mjs`。加班取自薪水計算 Base 的「詠翔加班」逐筆審批單（`lib/overtime.ts`，測試 `scripts/test-hr-overtime.mjs`）：只計申請狀態「已通过」（不信 approved 旗標），依「開始時間」台北月份彙總；時數＝「薪資計算加班時數」（原始＋人工補正，缺時用原始時數）；每人平日（類型＝平日）／假日（休息日、例假日、國定假日）分開，類型空白另列待定義；**組別依公司組織架構（業主裁示 2026-10-13「加班的各組直接參考組織架構」）**＝V3 人員名單（`v3-people`，`tblmlpA6nG5Ou7NQ`，`restricted:"hr"`，白名單只讀 `姓名` 文字／`Lark帳號` 人員欄／`所屬組別` 單選／`在職` 核取；職級、備註、各種成本單連結、`同步_OpenID` 等一律不讀）的「所屬組別」：加班人（人員欄，多值）的 open_id → 人員名單「Lark帳號」open_id → 所屬組別；對不到 open_id 時以姓名完全相同備援；同名多列時有在職就只看在職，組別仍不唯一就不猜；仍對不到歸「未對應組別」（排最後，註腳列張數）。名單沒填所屬組別的人視同對不到。離職者的過去加班仍歸他名單上的組別。加班人填多位的單整張算一列、時數不拆分，全部同組才歸該組，否則歸未對應組別（註腳列張數）。人員名單讀不到時組別顯示「—」並提示，不亂歸。不再讀「发起人部门」。`同步_OpenID` 與 `Lark帳號` 的 id 不同（另一個應用的 open_id），不能用。金額、薪資、身分等欄一律不讀。
 
 ## 9. 待辦（依順序）
 
@@ -163,6 +166,6 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 7. **R02 交期欄位**：找出案件交期所在的表與欄位，接到 `components/OwnerProgress.tsx` 的「距交期（天）」。進度 % 口徑等使用者說明，先維持「待定義」。
 8. **真實資料驗收 R01**（V3、上週）：挑兩組對 Lark 原表核對營業額點數、不通過、異常、被修改、張數；檢查註腳「不列入：…」是否合理（只應排除行政、業務、內業、IT、未對應組別）。對不上就修並附組別、工作單號。
 9. **手機版檢查**：用瀏覽器 390px 寬看 R01、R02、R04，不能有水平捲動整頁。
-10. **出勤、出差**：需要 Lark 假勤／審批權限與可看名單，等使用者決定。
+10. **出勤、出差**：程式與權限都已就緒（2026-10-13.29），等業主確認預設口徑（見第 8 節 R04）：外業是否納入分母、半天假算法、出差與外出是否都扣分母、今天缺卡的處理。
 12. **R07 儀器管理系統**：向使用者要「儀器管理系統」的 Base 連結（或看 `/api/health` 的 `equipmentFields` 找含 TAF／校正／校驗／點檢／月租 的表），在 `lib/reports.ts` 填入 `equipment-system`、`equipment-inspection`、`equipment-calibration` 的 `baseToken` 與 `tableId`；欄位名稱不同就改 `EquipmentBoard.tsx` 的候選名稱。PM週報 應用需能讀該 Base（權限先問使用者）。確認檢查頻率（每週或每月）與自校驗週期。
 11. ~~圖文說明書~~：已補 R01／R02／R04 與最上方操作動畫（2026-10-13）。之後功能有改，請同步更新說明書截圖。

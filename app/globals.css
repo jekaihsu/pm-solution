@@ -681,3 +681,17 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
 /* R02 組別總結 */
 .cg-teamsum { display: grid; gap: 8px; min-width: 0; }
 .cg-sheet tr.cg-on td { background: var(--hover); box-shadow: inset 0 -2px 0 var(--primary); }
+
+/* R04 出勤／出差 */
+.att-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 8px; }
+.att-kpi { display: grid; gap: 2px; padding: 8px 12px; background: var(--surface-2); border-radius: 10px; }
+.att-kpi span { font-size: 11.5px; color: var(--text-2); }
+.att-kpi b { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.att-tag { display: inline-block; min-width: 40px; padding: 2px 6px; border-radius: 6px; font-size: 12px; background: var(--surface-2); color: var(--text-2); }
+.att-tag.ok { background: var(--good-soft); color: var(--good); }
+.att-tag.warn { background: var(--warn-soft); color: var(--warn); }
+.att-tag.bad { background: var(--bad-soft); color: var(--bad); }
+.att-tag.dim { background: transparent; color: var(--muted); }
+.cg-sheet .att-name { text-align: left; font-weight: 600; background: var(--surface-2); }
+.cg-sheet th small { display: block; font-weight: 400; color: var(--text-2); }
+.att-reason { white-space: normal !important; min-width: 160px; max-width: 280px; }

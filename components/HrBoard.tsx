@@ -1,11 +1,12 @@
 "use client";
-import { CalendarCheck, CircleAlert, Clock, Plane, UserPlus } from "lucide-react";
+import { CircleAlert, Clock, UserPlus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
 import { OT_HOURS, OT_HOURS_RAW, OT_NAME, OT_START, OT_STATUS, OT_TYPE, summarizeOvertime, type OtRecord } from "@/lib/overtime";
 import { PEOPLE_GROUP, PEOPLE_NAME, buildPeopleDirectory, type PeopleRow } from "@/lib/people";
 import { weekName } from "@/lib/week";
 import { useShell } from "./AppShell";
+import AttendanceCards from "./AttendanceCards";
 import { STATUS_TEXT, useSource, type SourceState } from "./useSource";
 
 const round1 = (n: number) => formatNumber(Math.round(n * 10) / 10);
@@ -170,24 +171,7 @@ export default function HrBoard() {
         <p>暫無。</p>
       </Pending>
 
-      <Pending icon={<CalendarCheck size={16} />} title="出勤紀錄">
-        <p>出勤資料在 Lark「假勤」，不在多維表格。要顯示需由管理員：</p>
-        <ol>
-          <li>在 PM週報 應用開通假勤唯讀權限並發布新版本；</li>
-          <li>決定哪些人可以看出勤資料（個人資料，見 D-09）。</li>
-        </ol>
-        <p className="muted small">完成前不讀取、不顯示任何出勤資料。</p>
-      </Pending>
-
-      <Pending icon={<Plane size={16} />} title="出差紀錄">
-        <p>出差申請在 Lark「審批」，不在多維表格。要顯示需由管理員：</p>
-        <ol>
-          <li>確認出差使用哪一個審批表單；</li>
-          <li>在 PM週報 應用開通審批唯讀權限並發布新版本；</li>
-          <li>決定哪些人可以看出差資料。</li>
-        </ol>
-        <p className="muted small">外業成本單的「是否過夜／住宿」是住宿津貼用途，不等於出差紀錄，未拿來代替。</p>
-      </Pending>
+      <AttendanceCards />
 
       <section className="hr-card">
         <div className="hr-card-head">
