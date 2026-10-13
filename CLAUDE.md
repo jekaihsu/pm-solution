@@ -71,6 +71,7 @@ npm ci
 cp .env.example .env.local   # 填入 LARK_APP_ID / LARK_APP_SECRET（不要提交）
 AUTH_DISABLED=1 DATA_DIR=./data npm run dev     # http://localhost:3000
 npm run typecheck && npm run build              # 推送前必跑
+node --test scripts/test-control-group.mjs      # R01／R02 組別邏輯測試（不連 Lark）
 node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄位
 ```
 
@@ -103,7 +104,7 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 - 組別只列外業組：不列「行政」「業務」「內業」「IT／資訊」與未轉成名稱的記錄 ID（`BOARDS.r01.keepGroup`），註腳列出被排除的組別與張數。
 - 每組上週：營業額點數（原值）、預排點數與差異、失誤率、異常、工作項目／編號／數量、SOP。
 - 失誤率＝控制組檢核「不通過」÷ 已檢核（未檢核不計）。
-- 預排點數＝預排表（業別不是內業）點數；未填以每組每天 1 點計。
+- 預排點數＝預排表（業別＝外業）點數；未填以每組每天 1 點計。預排組名結尾的「組」比對時去掉（預排「水深A組」＝工作單「水深A」，`groupKey`）。
 - 出錯（被修改）＝`修改後數量` ≠ `完成數量`，或 `最終營業額點數`（若有 `修改後營業額` 優先）≠ `營業額點數`；兩邊都有值才比較。
 - SOP：日報有「是否違反SOP」欄位就用它（任一違反＝紅、全部填且無違反＝綠「SOP 完成」）；沒有欄位才用網站勾選，所有登入者可勾。
 - 備註：工作單明細與失誤明細顯示「備註／留言／退回原因／覆寫原因／重工原因」欄位。

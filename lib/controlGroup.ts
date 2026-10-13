@@ -15,6 +15,10 @@ const text = (v: CellValue): string => (v === null || v === undefined ? "" : Arr
 const truthy = (v: CellValue) =>
   v === true || (typeof v === "number" && v !== 0) || (Array.isArray(v) && v.length > 0) || (typeof v === "string" && v.trim() !== "" && !/^(否|false|0|無)$/i.test(v.trim()));
 
+// The schedule writes 組別 with a trailing「組」(水深A組) where the work orders
+// don't (水深A); both sides drop it when matching.
+export const groupKey = (g: string) => g.trim().replace(/組$/, "");
+
 export type CheckResult = "pass" | "fail" | "unchecked";
 
 export interface WorkFields {
@@ -164,6 +168,13 @@ export function plannedPoints(data: TableData | undefined, sf: ScheduleFields, s
   const filledDays = new Set<string>();
   const allDays = new Set<string>();
   const unfilled: { g: string; day: number }[] = [];
+  // One bucket per groupKey, named as the schedule first wrote it.
+  const names = new Map<string, string>();
+  const canon = (g: string) => {
+    const k = groupKey(g);
+    if (!names.has(k)) names.set(k, g);
+    return names.get(k)!;
+  };
   const bucket = (g: string) => {
     let cur = out.get(g);
     if (!cur) out.set(g, (cur = { points: 0, days: 0, defaulted: 0 }));
@@ -183,7 +194,7 @@ export function plannedPoints(data: TableData | undefined, sf: ScheduleFields, s
     const from = Math.max(first, winFirst);
     const to = Math.min(last, winLast);
     if (to < from) continue;
-    const groups = (Array.isArray(r.fields[sf.group.name]) ? (r.fields[sf.group.name] as string[]) : [text(r.fields[sf.group.name])]).filter(Boolean);
+    const groups = (Array.isArray(r.fields[sf.group.name]) ? (r.fields[sf.group.name] as string[]) : [text(r.fields[sf.group.name])]).filter(Boolean).map(canon);
     const filled = sf.points ? r.fields[sf.points.name] : null;
     for (const g of groups) {
       for (let d = from; d <= to; d++) {
@@ -252,8 +263,8 @@ export function groupRows(records: TableData["records"], wf: WorkFields, planned
     for (const a of an) row.anomalyKinds.set(a, (row.anomalyKinds.get(a) ?? 0) + 1);
   }
   // Groups that were scheduled but did no work still get a row.
-  for (const [g, p] of planned) get(g).planned = p;
-  for (const row of rows.values()) row.planned ??= planned.get(row.group);
+  const byKey = new Map([...rows.values()].map((row) => [groupKey(row.group), row]));
+  for (const [g, p] of planned) (byKey.get(groupKey(g)) ?? get(g)).planned = p;
   return [...rows.values()].sort((a, b) => b.revenue - a.revenue || a.group.localeCompare(b.group));
 }
 
