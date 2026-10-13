@@ -46,7 +46,7 @@
 | `lib/adminBoard.ts` | R11 行政口徑（純函式）：成本單帶人與日期、預排以人員 record_id＋日期展開、與預排差異分區 |
 | `components/AdminBoard.tsx` | R11 行政看板：一列一人（全部人）、合計列、點人展開工作單明細 |
 | `scripts/test-admin-board.mjs` | R11 邏輯測試（`node --test`，不連 Lark） |
-| `components/HrBoard.tsx` | R04 人事：招聘暫無、出勤／出差待權限、加班取自薪水總表 |
+| `components/HrBoard.tsx` | R04 人事：招聘暫無、出勤／出差待權限、加班取自詠翔加班（純函式在 `lib/overtime.ts`） |
 | `lib/demo.ts` | 示範資料（右下角「示範資料」開關） |
 | `lib/version.ts` | `APP_VERSION`，每次改版都要更新，用來確認部署是否生效 |
 | `scripts/inspect-lark.mjs` | 唯讀列出 Base 的表、欄位與筆數 |
@@ -95,7 +95,7 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 | 詠翔日報系統 V3 | `Sdw1bG1djaHsVGsRPvmjyVWipgg` | 可讀 |
 | 詠翔日報系統 V4 | `H7W6b0PFWaVF1BsgqXJj3pQ9pXb` | 1254302：進階權限「僅自訂角色可存取」，應用不在任何角色 |
 | 報價 | `JoOqbggsVar0ATsVgbcjh6IIp1g` | 1254302，同上 |
-| 薪水總表 | `VwAsbezz9app3YsramgjduLYp2U` | 新接入；需把 PM週報 應用加入（只給可閱讀），表名以 `/薪水總表|薪資總表|薪水|薪資/` 自動尋找 |
+| 薪水計算 | `VwAsbezz9app3YsramgjduLYp2U` | 只讀「詠翔加班」`tblomH0DXCzXgenE`（逐筆加班審批單，`salary-overtime`，直接指定 tableId，不再用表名找）。**需 PM週報 在該 Base 有只開「詠翔加班」的唯讀角色**（業主於 Lark UI 建立，未完成前讀不到）；其他表（含「每月薪水結算」）不讀。欄位白名單見 `salaryField()` |
 | 儀器管理系統 | `YHqcbb8MHa4VdGsA0UnjajNDpgd` | 可讀（2026-10-13 業主提供；已開進階權限，但 PM週報 應用實測可讀全部 5 張表）。R07 來源 `equipment-system`／`equipment-rates`／`equipment-vehicles`／`equipment-bookings`／`equipment-returns` |
 
 1254302 的處理方向：角色無法直接指派給應用，可建立一個群組、把 PM週報 機器人加入群組，再把群組指派到唯讀角色（需使用者同意）。
@@ -143,7 +143,7 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 - link 的 record_id：`getSourceData` 另存 `record.links`（欄名→ids），`/api/sources/...?links=1` 才回傳且只含被投影的欄位；其他報表不帶此參數，回應與以前相同。
 - V4 行政表以表名自動找（V4 應用目前讀不到 1254302），頁面顯示失敗原因；V3、V4 不相加。
 
-**R04 人事**：招聘暫無；出勤、出差需開通 Lark 假勤／審批權限；加班取自薪水總表（以月為單位）。
+**R04 人事**：招聘暫無；出勤、出差需開通 Lark 假勤／審批權限；加班取自薪水計算 Base 的「詠翔加班」逐筆審批單（`lib/overtime.ts`，測試 `scripts/test-hr-overtime.mjs`）：只計申請狀態「已通过」（不信 approved 旗標），依「開始時間」台北月份彙總；時數＝「薪資計算加班時數」（原始＋人工補正，缺時用原始時數）；每人平日（類型＝平日）／假日（休息日、例假日、國定假日）分開，類型空白另列待定義；組別欄用「發起人部門」，是否等同組別待確認；金額、薪資、身分等欄一律不讀。
 
 ## 9. 待辦（依順序）
 
@@ -156,7 +156,7 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
    - 需要新權限 → 問使用者。
    - 可讀且能對應記錄 → `lib/lark.ts` 加讀取與快取、`OrderDetail` 加「留言」欄。
    - 無法對應記錄 → 回報，替代方案是寫在「備註」欄（已顯示）。
-5. **薪水總表**（`VwAsbezz9app3YsramgjduLYp2U`）：確認 PM週報 應用能否讀取（不能 → 問使用者是否加入應用、只給可閱讀）；確認表名與加班欄位名，必要時調整 `salaryField()`（只能更嚴，不能放寬到薪資金額）；`HR_VIEWERS` 等使用者提供 open_id。
+5. **薪水計算 Base 的詠翔加班**（`VwAsbezz9app3YsramgjduLYp2U`／`tblomH0DXCzXgenE`）：等業主建好 PM週報 唯讀角色後確認能讀；必要時調整 `salaryField()`（只能更嚴，不能放寬到薪資金額）；`HR_VIEWERS` 等使用者提供 open_id。
 6. **V4 與報價 Base（1254302）**：盤點進階權限與角色，提出開通方案（群組＋唯讀角色）給使用者決定，不要自行修改。
 7. **R02 交期欄位**：找出案件交期所在的表與欄位，接到 `components/OwnerProgress.tsx` 的「距交期（天）」。進度 % 口徑等使用者說明，先維持「待定義」。
 8. **真實資料驗收 R01**（V3、上週）：挑兩組對 Lark 原表核對營業額點數、不通過、異常、被修改、張數；檢查註腳「不列入：…」是否合理（只應排除行政、業務、內業、IT、未對應組別）。對不上就修並附組別、工作單號。

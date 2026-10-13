@@ -250,11 +250,12 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
   "salary-overtime": {
     n: 36,
     spec: [
-      ["姓名", "text", (_, i) => ["王小明", "陳大文", "林志強", "張家豪", "李俊傑", "黃建宏"][i % 6]],
-      ["組別", "select", (_, i) => groups[i % 4]],
-      ["月份", "text", (_, i) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - Math.floor(i / 6)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }],
-      ["平日加班時數", "number", (r) => Math.round(r() * 16 * 2) / 2],
-      ["假日加班時數", "number", (r) => (r() > 0.5 ? Math.round(r() * 12 * 2) / 2 : 0)],
+      ["加班人", "text", (_, i) => ["王小明", "陳大文", "林志強", "張家豪", "李俊傑", "黃建宏"][i % 6]],
+      ["发起人部门", "select", (_, i) => groups[i % 4]],
+      ["开始时间", "date", (_, i) => { const d = new Date(); d.setDate(10); d.setMonth(d.getMonth() - Math.floor(i / 12)); return d.getTime(); }],
+      ["加班类型", "select", (r) => pick(r, ["平日", "平日", "平日", "休息日(六)", "例假日(日)", "國定假日"])],
+      ["申请状态", "select", (r) => pick(r, ["已通过", "已通过", "已通过", "审批中", "已撤回"])],
+      ["薪資計算加班時數", "number", (r) => Math.round((1 + r() * 7) * 2) / 2],
     ],
   },
   "owner-contacts": {
