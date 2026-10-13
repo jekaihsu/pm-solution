@@ -624,6 +624,10 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
 .cg-link { cursor: pointer; }
 .cg-link:hover td { background: var(--hover); }
 .cg-crew td { background: var(--hover); font-size: 0.92em; }
+/* R02 以人為單位：組小計列與其下的人 */
+.cg-team td { background: var(--hover); font-weight: 600; }
+.cg-person .cg-sheet-name { padding-left: 22px; }
+.cg-select { height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 14px; max-width: 100%; }
 
 /* 每日出錯 */
 .cg-days { display: grid; gap: 8px; min-width: 0; }

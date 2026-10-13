@@ -388,8 +388,15 @@ export async function getSourceData(src: SourceDef, force = false): Promise<Tabl
             continue;
           }
           const row: Record<string, CellValue> = {};
-          for (const f of fields) row[f.name] = f.linkTable ? linkIds(item.fields[f.name]) : normalizeValue(item.fields[f.name], f.kind);
-          records.push({ id: item.record_id, fields: row });
+          const links: Record<string, string[]> = {}; // record_ids of link cells, kept before resolveLinks swaps them for titles
+          for (const f of fields) {
+            if (f.linkTable) {
+              const ids = linkIds(item.fields[f.name]);
+              row[f.name] = ids;
+              if (ids) links[f.name] = [...ids];
+            } else row[f.name] = normalizeValue(item.fields[f.name], f.kind);
+          }
+          records.push({ id: item.record_id, fields: row, ...(Object.keys(links).length ? { links } : {}) });
         }
         pageToken = data.has_more ? data.page_token : undefined;
       } while (pageToken && records.length < MAX_RECORDS);

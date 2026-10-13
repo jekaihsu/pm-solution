@@ -241,20 +241,27 @@ export interface GroupRow {
   anomalyKinds: Map<string, number>;
   planned?: { points: number; days: number; defaulted: number };
   crews?: GroupRow[]; // 拆組出工時各組長一列（只用於顯示，合計不含）
+  // R02 以人為單位才有：group 是人名；personId＝人員名單的 record_id；team＝成本單的內業組別；key＝team|personId
+  personId?: string;
+  team?: string;
+  key?: string;
 }
 
-export function groupRows(records: TableData["records"], wf: WorkFields, planned: Map<string, { points: number; days: number; defaulted: number }>): GroupRow[] {
+export const blankRow = (g: string): GroupRow => ({ group: g, orders: [], revenue: 0, revenueBlank: 0, qty: 0, items: [], pass: 0, fail: 0, unchecked: 0, anomalyCount: 0, anomalyKinds: new Map() });
+
+// `keyOf` (R02 以人為單位) replaces the 組別 lookup: records are bucketed by whatever key it returns.
+export function groupRows(records: TableData["records"], wf: WorkFields, planned: Map<string, { points: number; days: number; defaulted: number }>, keyOf?: (r: TableData["records"][number]) => string): GroupRow[] {
   const rows = new Map<string, GroupRow>();
   const get = (g: string) => {
     let row = rows.get(g);
     if (!row) {
-      row = { group: g, orders: [], revenue: 0, revenueBlank: 0, qty: 0, items: [], pass: 0, fail: 0, unchecked: 0, anomalyCount: 0, anomalyKinds: new Map() };
+      row = blankRow(g);
       rows.set(g, row);
     }
     return row;
   };
   for (const r of records) {
-    const g = (wf.group ? text(r.fields[wf.group.name]) : "") || "（未填組別）";
+    const g = keyOf ? keyOf(r) : (wf.group ? text(r.fields[wf.group.name]) : "") || "（未填組別）";
     const row = get(g);
     row.orders.push(r);
     const rev = wf.revenue ? r.fields[wf.revenue.name] : null;
@@ -285,15 +292,18 @@ export const errorRate = (row: { pass: number; fail: number }) => (row.pass + ro
 // cost sheet, matched on the cost sheet's primary field (the link shows that text).
 export const JOINED_DATE = "工作日期";
 export const JOINED_GROUP = "組別";
+export const JOINED_PERSON = "填報人"; // R02 以人為單位：成本單的填報人（名稱在 fields、record_id 在 links）
 
 export function joinInternal(work: TableData, cost: TableData | undefined): { data: TableData; joined: number; costLink?: string } {
   const link = pickField(work.fields, ["所屬成本單"]);
   const hasDate = work.fields.some((f) => f.name === JOINED_DATE && f.kind === "date");
   const hasGroup = work.fields.some((f) => f.name === JOINED_GROUP);
-  if (!cost || !link || (hasDate && hasGroup)) return { data: work, joined: 0, costLink: link?.name };
+  const hasPerson = work.fields.some((f) => f.name === JOINED_PERSON);
+  if (!cost || !link || (hasDate && hasGroup && hasPerson)) return { data: work, joined: 0, costLink: link?.name };
   const primary = cost.fields.find((f) => f.primary) ?? cost.fields[0];
   const cDate = pickField(cost.fields, ["工作日期"], ["date"]);
   const cGroup = pickField(cost.fields, ["內業組別", "所屬組別", "組別"]);
+  const cPerson = pickField(cost.fields, [JOINED_PERSON]);
   const index = new Map<string, TableData["records"][number]>();
   for (const r of cost.records) {
     const key = text(r.fields[primary.name]);
@@ -310,11 +320,15 @@ export function joinInternal(work: TableData, cost: TableData | undefined): { da
     const fields = { ...r.fields };
     if (!hasDate && cDate) fields[JOINED_DATE] = c.fields[cDate.name] ?? null;
     if (!hasGroup && cGroup) fields[JOINED_GROUP] = c.fields[cGroup.name] ?? null;
-    return { ...r, fields };
+    if (!hasPerson && cPerson) fields[JOINED_PERSON] = c.fields[cPerson.name] ?? null;
+    // 填報人 record_id：只掛在 links，不影響其他報表讀 fields 的方式
+    const ids = !hasPerson && cPerson ? c.links?.[cPerson.name] : undefined;
+    return { ...r, fields, ...(ids ? { links: { ...r.links, [JOINED_PERSON]: ids } } : {}) };
   });
   const extra: FieldMeta[] = [];
   if (!hasDate && cDate) extra.push({ id: "__joined_date", name: JOINED_DATE, kind: "date", primary: false });
   if (!hasGroup && cGroup) extra.push({ id: "__joined_group", name: JOINED_GROUP, kind: "select", primary: false });
+  if (!hasPerson && cPerson) extra.push({ id: "__joined_person", name: JOINED_PERSON, kind: "multiselect", primary: false });
   return { data: { ...work, fields: [...work.fields, ...extra], records }, joined, costLink: link.name };
 }
 
@@ -388,6 +402,203 @@ export function partitionByPlan(rows: GroupRow[]) {
   return { planned, unplanned, revenue, points, diff: revenue - points, unplannedOrders: unplanned.reduce((s, r) => s + r.orders.length, 0) };
 }
 
+// =====================================================================================
+// R02 內業檢查「以人為單位」（業主裁示 2026-10-13）
+// 外業以組別排、填；內業一人填一張，但仍分組別，以人為單位計算。
+//  - 一列一個人＝內業成本單的「填報人」（人員名單 record_id）；組別＝該張成本單的「內業組別」。
+//    同一人在一週內填過不同組別的成本單時，每個組別各一列（工作單依成本單歸屬，不重複計算）。
+//  - 預排以「人員 record_id ＋ 日期」比對，組別不參與 join。預排「人員」欄可多人，逐人展開。
+//    有填「預估營業額點數」就分攤到每天；沒填的每人每天 1 點（同人同日多條只算一次）。
+//  - 預排日期一律用欄位 id（真起日 fldMXOggGP／真訖日 fldjWv1xST），不看欄名（UI 曾把欄名改反）。
+// =====================================================================================
+
+// V3 工作預排表 tblN8c3WN44233aG 的欄位 id（fid↔語意永遠不變，欄名會被 UI 改）。
+export const SCHEDULE_FIDS = {
+  start: "fldMXOggGP", // 真起日
+  end: "fldjWv1xST", // 真訖日
+  people: "fld7KNCsVe", // 人員（link → 人員名單，可多人）
+  trade: "fldrENe4H6",
+  group: "fldNDUy2XP",
+  kind: "fld78OmLVn", // 條類型（出工／休假）
+  points: "fld5lTSN1r", // 預估營業額點數
+} as const;
+
+export interface PersonScheduleFields extends ScheduleFields {
+  people?: FieldMeta;
+  kind?: FieldMeta;
+}
+
+// 先認 id；找不到 id（例如 V4 的預排表 id 不同）才退回欄名。V3 的日期欄一定走 id。
+export function resolvePersonScheduleFields(fields: FieldMeta[]): PersonScheduleFields {
+  const byId = (id: string) => fields.find((f) => f.id === id);
+  return {
+    start: byId(SCHEDULE_FIDS.start) ?? pickField(fields, ["開始日期", "日期", "預排開始日", "預排日期"], ["date"]),
+    end: byId(SCHEDULE_FIDS.end) ?? pickField(fields, ["結束日期", "預排結束日"], ["date"]),
+    people: byId(SCHEDULE_FIDS.people) ?? pickField(fields, ["人員"]),
+    trade: byId(SCHEDULE_FIDS.trade) ?? pickField(fields, ["業別"]),
+    group: byId(SCHEDULE_FIDS.group) ?? pickField(fields, ["組別"]),
+    kind: byId(SCHEDULE_FIDS.kind) ?? pickField(fields, ["條類型"]),
+    points: byId(SCHEDULE_FIDS.points) ?? pickField(fields, ["預估營業額點數", "預排點數", "預排營業額點數"], ["number"]),
+    job: pickField(fields, ["案件", "案件編號", "工程編號"]),
+  };
+}
+
+export interface PersonPlan {
+  name: string;
+  teamHint: string; // 預排上的組別（只供整週沒有工作單時決定顯示在哪一組，不參與 join）
+  days: Map<number, { points: number; defaulted: boolean }>; // Taipei 日序號 → 當天預排點數
+}
+
+// 預排點數：每人每天一格，落在 [start, end) 內。
+export function plannedByPerson(data: TableData | undefined, sf: PersonScheduleFields, start: number, end: number, keep?: (trade: string, group: string) => boolean): Map<string, PersonPlan> {
+  const out = new Map<string, PersonPlan>();
+  if (!data || !sf.people || !sf.start) return out;
+  const TZ = 8 * 3600000;
+  const winFirst = Math.floor((start + TZ) / DAY);
+  const winLast = Math.floor((end - 1 + TZ) / DAY);
+  const filled = new Map<string, number>(); // person|day → 已填的預估點數（分攤後）
+  const unfilled = new Set<string>();
+  const people = new Map<string, PersonPlan>();
+  for (const r of data.records) {
+    const s = r.fields[sf.start.name];
+    if (typeof s !== "number") continue;
+    if (sf.kind && /休假|請假/.test(text(r.fields[sf.kind.name]))) continue; // 休假不是預排出工
+    const e0 = sf.end ? r.fields[sf.end.name] : null;
+    const e = typeof e0 === "number" && e0 >= s ? e0 : s;
+    const first = Math.floor((s + TZ) / DAY);
+    const last = Math.floor((e + TZ) / DAY);
+    const from = Math.max(first, winFirst);
+    const to = Math.min(last, winLast);
+    if (to < from) continue;
+    const trade = sf.trade ? text(r.fields[sf.trade.name]) : "";
+    const groups = (sf.group ? (Array.isArray(r.fields[sf.group.name]) ? (r.fields[sf.group.name] as string[]) : [text(r.fields[sf.group.name])]) : []).filter(Boolean);
+    if (keep && !(groups.length ? groups.some((g) => keep(trade, g)) : keep(trade, ""))) continue;
+    // 人員：record_id 在 links，名稱在 fields（兩者一一對應）；沒有 links（示範資料）就用名稱當 id
+    const names = (Array.isArray(r.fields[sf.people.name]) ? (r.fields[sf.people.name] as string[]) : [text(r.fields[sf.people.name])]).filter(Boolean);
+    const ids = r.links?.[sf.people.name] ?? names;
+    const seen = new Set<string>();
+    const pts = sf.points ? r.fields[sf.points.name] : null;
+    ids.forEach((id, i) => {
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      let p = people.get(id);
+      if (!p) people.set(id, (p = { name: names[i] ?? id, teamHint: groupKey(groups[0] ?? ""), days: new Map() }));
+      for (let d = from; d <= to; d++) {
+        const k = `${id}|${d}`;
+        if (typeof pts === "number") filled.set(k, (filled.get(k) ?? 0) + pts / (last - first + 1));
+        else unfilled.add(k);
+      }
+    });
+  }
+  const put = (k: string, points: number, defaulted: boolean) => {
+    const cut = k.lastIndexOf("|");
+    people.get(k.slice(0, cut))!.days.set(Number(k.slice(cut + 1)), { points, defaulted });
+  };
+  for (const [k, v] of filled) put(k, v, false);
+  for (const k of unfilled) if (!filled.has(k)) put(k, 1, true); // 同人同日只補一次 1 點
+  for (const [id, p] of people) if (p.days.size) out.set(id, p);
+  return out;
+}
+
+const NO_TEAM = "（未填組別）";
+const NO_PERSON = "（未填填報人）";
+
+// 一人一列（同一人在不同內業組別各一列）。records 要先過 joinInternal（帶入組別、填報人）且已篩週。
+export function personRows(records: TableData["records"], wf: WorkFields, dateField: string, plan: Map<string, PersonPlan>): GroupRow[] {
+  const TZ = 8 * 3600000;
+  const who = (r: TableData["records"][number]) => {
+    const names = r.fields[JOINED_PERSON];
+    const list = Array.isArray(names) ? names : names ? [String(names)] : [];
+    const id = r.links?.[JOINED_PERSON]?.[0] ?? list[0] ?? "__none";
+    return { id, name: list[0] ?? NO_PERSON, team: text(r.fields[JOINED_GROUP]).trim() || NO_TEAM };
+  };
+  const info = new Map<string, { id: string; name: string; team: string }>();
+  const dayTeam = new Map<string, string>(); // person|day → team
+  const teamCount = new Map<string, Map<string, number>>(); // person → team → 張數
+  const keyOf = (r: TableData["records"][number]) => {
+    const w = who(r);
+    const key = `${w.team}|${w.id}`;
+    info.set(key, w);
+    const t = r.fields[dateField];
+    if (typeof t === "number") dayTeam.set(`${w.id}|${Math.floor((t + TZ) / DAY)}`, w.team);
+    const tc = teamCount.get(w.id) ?? new Map<string, number>();
+    tc.set(w.team, (tc.get(w.team) ?? 0) + 1);
+    teamCount.set(w.id, tc);
+    return key;
+  };
+  const rows = groupRows(records, wf, new Map(), keyOf);
+  const byKey = new Map<string, GroupRow>();
+  for (const row of rows) {
+    const w = info.get(row.group)!;
+    Object.assign(row, { key: row.group, group: w.name, personId: w.id, team: w.team });
+    byKey.set(row.key!, row);
+  }
+  // 預排：每人每天掛到「那天他填報的組」；那天沒填就掛到他張數最多的組；整週沒工作單才用預排上的組別。
+  const teams = [...new Set(rows.map((r) => r.team!))];
+  const primary = (id: string) => [...(teamCount.get(id) ?? [])].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0];
+  for (const [id, p] of plan) {
+    for (const [day, d] of p.days) {
+      const hint = teams.find((t) => groupKey(t) === p.teamHint) ?? (p.teamHint || NO_TEAM);
+      const team = dayTeam.get(`${id}|${day}`) ?? primary(id) ?? hint;
+      const key = `${team}|${id}`;
+      let row = byKey.get(key);
+      if (!row) {
+        row = Object.assign(blankRow(p.name), { key, personId: id, team });
+        byKey.set(key, row);
+        rows.push(row);
+      }
+      const cur = (row.planned ??= { points: 0, days: 0, defaulted: 0 });
+      cur.points += d.points;
+      cur.days += 1;
+      if (d.defaulted) cur.defaulted += 1;
+    }
+  }
+  return rows.sort((a, b) => b.revenue - a.revenue || a.group.localeCompare(b.group));
+}
+
+// 把多列合成一列（組小計、整體合計用）。planned 只有至少一人有預排時才有。
+export function sumRows(label: string, rows: GroupRow[]): GroupRow {
+  const out = blankRow(label);
+  for (const r of rows) {
+    out.orders.push(...r.orders);
+    out.revenue += r.revenue;
+    out.revenueBlank += r.revenueBlank;
+    out.qty += r.qty;
+    out.pass += r.pass;
+    out.fail += r.fail;
+    out.unchecked += r.unchecked;
+    out.anomalyCount += r.anomalyCount;
+    for (const i of r.items) if (!out.items.includes(i)) out.items.push(i);
+    for (const [k, n] of r.anomalyKinds) out.anomalyKinds.set(k, (out.anomalyKinds.get(k) ?? 0) + n);
+    if (r.planned) {
+      const p = (out.planned ??= { points: 0, days: 0, defaulted: 0 });
+      p.points += r.planned.points;
+      p.days += r.planned.days;
+      p.defaulted += r.planned.defaulted;
+    }
+  }
+  return out;
+}
+
+export interface TeamSection {
+  team: string;
+  total: GroupRow; // 組小計（group＝組別名）
+  rows: GroupRow[]; // 該組的人
+}
+
+// 依內業組別分段：每組一個小計列，下面是該組的人。組依營業額由大到小。
+export function teamSections(rows: GroupRow[]): TeamSection[] {
+  const by = new Map<string, GroupRow[]>();
+  for (const r of rows) {
+    const t = r.team ?? NO_TEAM;
+    if (!by.has(t)) by.set(t, []);
+    by.get(t)!.push(r);
+  }
+  return [...by.entries()]
+    .map(([team, list]) => ({ team, total: sumRows(team, list), rows: [...list].sort((a, b) => b.revenue - a.revenue || a.group.localeCompare(b.group)) }))
+    .sort((a, b) => b.total.revenue - a.total.revenue || a.team.localeCompare(b.team));
+}
+
 // Field names the dashboards request from the server (see /api/sources projection).
 export const WORK_FIELDS = [
   "組別", "工作單號", "案件編號", "工程編號", "工作編號", "可能確認單工作編號", "可能的確認單工編(若暫無確認單才需填寫)",
@@ -395,9 +606,11 @@ export const WORK_FIELDS = [
   "最終營業額點數", "營業額點數", "點數", "控制組檢核", "雅雯檢核", "檢核狀態", "所屬成本單", "業別", "工作類別", "修改後數量", "修改後營業額", "修改後營業額點數", "出工人", "組長", "填報人", "~SOP", "~備註", "~備注", "~留言", "~原因",
   "所屬案件", "案件", "工程名稱", "交期", "合約交期", "預定完成日", "完工期限", "到期日", "⚠*", "@dates",
 ];
-export const COST_FIELDS = ["工作日期", "內業組別", "所屬組別", "組別", "@dates"];
+export const COST_FIELDS = ["工作日期", "內業組別", "所屬組別", "組別", "填報人", "@dates"];
 export const FIELD_COST_FIELDS = ["工作日期", "組別", "組長", "工作單列", "@dates"];
 export const SCHEDULE_FIELDS = [
   "業別", "組別", "開始日期", "日期", "預排開始日", "預排日期", "結束日期", "預排結束日",
   "預排點數", "預排營業額點數", "營業額點數", "點數", "案件", "案件編號", "工程編號", "@dates",
+  // R02 以人為單位：人員（link，要 record_id）、條類型、預估營業額點數
+  "人員", "條類型", "預估營業額點數",
 ];

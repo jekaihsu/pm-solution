@@ -2,7 +2,7 @@
 import { ArrowDownRight, ArrowUpRight, CheckCheck, ChevronDown, ChevronRight, CircleAlert, CircleCheck, Minus } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
-import { COST_FIELDS, FIELD_COST_FIELDS, JOINED_DATE, keepFieldSchedule, keepInternalSchedule, partitionByPlan, splitCrews, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, dayOfWeek, errorRate, fixDiffs, groupRows, orderNotes, violatesSop, joinInternal, plannedPoints, resolveFixFields, resolveScheduleFields, resolveWorkFields, type FixFields, type GroupRow, type WorkFields } from "@/lib/controlGroup";
+import { COST_FIELDS, FIELD_COST_FIELDS, JOINED_DATE, keepFieldSchedule, keepInternalSchedule, partitionByPlan, personRows, plannedByPerson, resolvePersonScheduleFields, splitCrews, sumRows, teamSections, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, dayOfWeek, errorRate, fixDiffs, groupRows, orderNotes, violatesSop, joinInternal, plannedPoints, resolveFixFields, resolveScheduleFields, resolveWorkFields, type FixFields, type GroupRow, type ScheduleFields, type WorkFields } from "@/lib/controlGroup";
 import { inRange, resolveDateField } from "@/lib/metrics";
 import { sourceByKey, type DataVersion } from "@/lib/reports";
 import type { CellValue, TableData } from "@/lib/types";
@@ -28,6 +28,7 @@ export interface BoardConfig {
   checkNames: string[];
   checkLabel: string;
   ownerProgress?: boolean;
+  unit?: "person"; // R02：一列一個人（成本單填報人），依內業組別分段；沒設＝以組別為單位（R01）
 }
 
 export const BOARDS: Record<"r01" | "r02", BoardConfig> = {
@@ -58,6 +59,7 @@ export const BOARDS: Record<"r01" | "r02", BoardConfig> = {
     checkNames: ["雅雯檢核"],
     checkLabel: "雅雯檢核（數量檢查）",
     ownerProgress: true,
+    unit: "person",
   },
 };
 
@@ -323,6 +325,10 @@ function OrderDetail({ row, wf, checkLabel, sop, disabled, ff, dateField, onlyDa
 
 const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
 
+// 列的唯一鍵與顯示名：以組為單位＝組別名；以人為單位＝「內業組別|人員 record_id」與「人名（組別）」。
+const rk = (r: GroupRow) => r.key ?? r.group;
+const rowLabel = (r: GroupRow) => (r.personId ? `${r.group}（${r.team}）` : r.group);
+
 interface DayCell {
   orders: number;
   errors: number;
@@ -372,17 +378,18 @@ function dayHead(i: number, weekStart: number) {
 
 // 每組每天有沒有出錯：rows = groups, columns = Mon–Sun.
 function DayGrid({ rows, ff, dateField, weekStart, onPick }: { rows: GroupRow[]; ff: FixFields; dateField: string; weekStart: number; onPick: (g: string, day: number) => void }) {
+  const people = rows.some((r) => r.personId);
   return (
     <div className="cg-days">
       <div className="cg-days-head">
         <h3>每日出錯</h3>
-        <span className="muted small">營業額或數量被修改＝出錯・點格子看該組當天的工作單</span>
+        <span className="muted small">營業額或數量被修改＝出錯・點格子看該{people ? "人" : "組"}當天的工作單</span>
       </div>
       <div className="cg-days-scroll">
         <table>
           <thead>
             <tr>
-              <th>組別</th>
+              <th>{people ? "人員" : "組別"}</th>
               {WEEKDAYS.map((_, i) => (
                 <th key={i}>{dayHead(i, weekStart)}</th>
               ))}
@@ -395,11 +402,11 @@ function DayGrid({ rows, ff, dateField, weekStart, onPick }: { rows: GroupRow[];
               const err = cells.reduce((s, c) => s + c.errors, 0);
               const errDays = cells.filter((c) => c.errors).length;
               return (
-                <tr key={r.group}>
-                  <td className="cg-group">{r.group}</td>
+                <tr key={rk(r)}>
+                  <td className="cg-group">{r.group}{r.personId && <span className="muted small"> {r.team}</span>}</td>
                   {cells.map((c, i) => (
                     <td key={i}>
-                      <DayCellView c={c} onClick={() => onPick(r.group, i)} />
+                      <DayCellView c={c} onClick={() => onPick(rk(r), i)} />
                     </td>
                   ))}
                   <td className="num">{err ? <span className="bad-text">{err} 張・{errDays} 天</span> : <span className="muted">0</span>}</td>
@@ -428,16 +435,17 @@ function FailPanel({ rows, wf, cfg, dateField, weekStart, onPick }: { rows: Grou
       }
     }
   const label = cfg.checkLabel.replace(/（.*）/, "");
+  const perPerson = rows.some((r) => r.personId); // 以人為單位時，列本身就是人，不需要再有「依人員」
   if (!fails.length) return <div className="cg-fail"><p className="muted small">這週沒有{label}「不通過」的工作單。</p></div>;
   return (
     <div className="cg-fail">
       <div className="cg-fail-cols">
         <div>
-          <h4>依組別</h4>
+          <h4>{perPerson ? "依人員" : "依組別"}</h4>
           <table>
             <thead>
               <tr>
-                <th>組別</th>
+                <th>{perPerson ? "人員" : "組別"}</th>
                 <th className="num">不通過</th>
                 <th className="num">已檢核</th>
                 <th className="num">失誤率</th>
@@ -445,8 +453,8 @@ function FailPanel({ rows, wf, cfg, dateField, weekStart, onPick }: { rows: Grou
             </thead>
             <tbody>
               {[...rows].filter((r) => r.pass + r.fail > 0).sort((a, b) => (errorRate(b) ?? 0) - (errorRate(a) ?? 0)).map((r) => (
-                <tr key={r.group} className={onPick ? "cg-link" : undefined} onClick={onPick ? () => onPick(r.group) : undefined}>
-                  <td className="cg-group">{r.group}</td>
+                <tr key={rk(r)} className={onPick ? "cg-link" : undefined} onClick={onPick ? () => onPick(rk(r)) : undefined}>
+                  <td className="cg-group">{rowLabel(r)}</td>
                   <td className={`num ${r.fail ? "bad-text" : ""}`}>{r.fail}</td>
                   <td className="num">{r.pass + r.fail}</td>
                   <td className="num">{pct(errorRate(r))}</td>
@@ -455,7 +463,7 @@ function FailPanel({ rows, wf, cfg, dateField, weekStart, onPick }: { rows: Grou
             </tbody>
           </table>
         </div>
-        <div>
+        {!perPerson && <div>
           <h4>依人員{wf.person ? `（${wf.person.name}）` : ""}</h4>
           {wf.person ? (
             <table>
@@ -479,7 +487,7 @@ function FailPanel({ rows, wf, cfg, dateField, weekStart, onPick }: { rows: Grou
           ) : (
             <p className="muted small">找不到出工人欄位，無法依人員列出。</p>
           )}
-        </div>
+        </div>}
       </div>
       <h4>不通過的工作單</h4>
       <div className="cg-detail">
@@ -503,10 +511,10 @@ function FailPanel({ rows, wf, cfg, dateField, weekStart, onPick }: { rows: Grou
                 const d = o.fields[dateField];
                 return (
                   <tr key={o.id}>
-                    <td className="cg-group">{row.group}</td>
+                    <td className="cg-group">{perPerson ? row.team : row.group}</td>
                     <td>{typeof d === "number" ? `${formatDate(d).slice(5)}（${WEEKDAYS[dayOfWeek(d, weekStart)] ?? ""}）` : "—"}</td>
                     <td>{wf.orderNo ? text(o.fields[wf.orderNo.name]) || o.id : o.id}</td>
-                    <td className="strong">{wf.person ? text(o.fields[wf.person.name]) || "—" : "—"}</td>
+                    <td className="strong">{perPerson ? row.group : wf.person ? text(o.fields[wf.person.name]) || "—" : "—"}</td>
                     <td>{wf.jobNo ? text(o.fields[wf.jobNo.name]) || "—" : "—"}</td>
                     <td>{wf.item ? text(o.fields[wf.item.name]) || "—" : "—"}</td>
                     <td className="num">{wf.qty ? text(o.fields[wf.qty.name]) || "—" : "—"}</td>
@@ -528,6 +536,8 @@ function FailPanel({ rows, wf, cfg, dateField, weekStart, onPick }: { rows: Grou
 // 簡表: the boss's preferred layout — one row per group, plain counts, a 合計 row
 // and a summary block underneath. Clicking a group opens it.
 function SheetTable({ rows, unplanned, wf, ff, hasCheck, hasFix, onPick }: { rows: GroupRow[]; unplanned: GroupRow[]; wf: WorkFields; ff: FixFields; hasCheck: boolean; hasFix: boolean; onPick: (g: string) => void }) {
+  // 以人為單位（R02）：依內業組別分段，每組一列小計，下面是該組的人。
+  const byPerson = [...rows, ...unplanned].some((r) => r.personId);
   const mk = (r: GroupRow) => {
     const fixed = r.orders.filter((o) => fixDiffs(o, ff).length).length;
     const sop = wf.sopViolation ? sopSummary(r, wf) : null;
@@ -557,10 +567,10 @@ function SheetTable({ rows, unplanned, wf, ff, hasCheck, hasFix, onPick }: { row
     viol: all.reduce((s, d) => s + (d.viol ?? 0), 0),
   };
   const n = (v: number | null, bad = false) => (v === null ? <span className="muted">—</span> : <span className={bad && v > 0 ? "bad-text strong" : undefined}>{formatNumber(Math.round(v * 10) / 10)}</span>);
-  const renderRow = (d: (typeof data)[number]) => (
-              <Fragment key={d.r.group}>
-                <tr onClick={() => onPick(d.r.group)} className="cg-link">
-                  <td className="cg-sheet-name">{d.r.group}{d.r.crews && <span className="muted small"> 組別合計・拆 {d.r.crews.length} 隊</span>}</td>
+  const renderRow = (d: (typeof data)[number], kind: "group" | "team" | "person" = "group") => (
+              <Fragment key={rk(d.r)}>
+                <tr onClick={kind === "team" ? undefined : () => onPick(rk(d.r))} className={kind === "team" ? "cg-team" : kind === "person" ? "cg-link cg-person" : "cg-link"}>
+                  <td className="cg-sheet-name">{kind === "team" ? `${d.r.group}小計・${teamPeople.get(d.r) ?? 0} 人` : d.r.group}{d.r.crews && <span className="muted small"> 組別合計・拆 {d.r.crews.length} 隊</span>}</td>
                   <td>{d.r.orders.length}</td>
                   <td>{hasCheck ? d.r.pass + d.r.fail : "—"}</td>
                   <td>{hasCheck ? n(d.r.fail, true) : "—"}</td>
@@ -589,13 +599,22 @@ function SheetTable({ rows, unplanned, wf, ff, hasCheck, hasFix, onPick }: { row
                 ))}
               </Fragment>
             );
+  const teamPeople = new Map<GroupRow, number>();
+  const renderBody = (list: typeof data) => {
+    if (!byPerson) return list.map((d) => renderRow(d));
+    return teamSections(list.map((d) => d.r)).flatMap((sec) => {
+      teamPeople.set(sec.total, sec.rows.length);
+      return [renderRow(mk(sec.total), "team"), ...sec.rows.map((r) => renderRow(mk(r), "person"))];
+    });
+  };
+  const firstHead = byPerson ? "組別／人員" : "組別";
   return (
     <div className="cg-sheet-wrap">
       <div className="cg-sheet">
         <table>
           <thead>
             <tr>
-              <th>組別</th>
+              <th>{firstHead}</th>
               <th>工作單</th>
               <th>已檢核</th>
               <th>不通過</th>
@@ -608,11 +627,11 @@ function SheetTable({ rows, unplanned, wf, ff, hasCheck, hasFix, onPick }: { row
             </tr>
           </thead>
           <tbody>
-            {data.map(renderRow)}
+            {renderBody(data)}
           </tbody>
           <tfoot>
             <tr>
-              <td className="cg-sheet-name">合計（有預排的組）</td>
+              <td className="cg-sheet-name">合計（有預排的{byPerson ? "人" : "組"}）</td>
               <td>{t.orders}</td>
               <td>{hasCheck ? t.checked : "—"}</td>
               <td>{hasCheck ? n(t.fail, true) : "—"}</td>
@@ -630,13 +649,13 @@ function SheetTable({ rows, unplanned, wf, ff, hasCheck, hasFix, onPick }: { row
       </div>
       {unplanned.length > 0 && (
         <details className="cg-unplanned">
-          <summary>沒有預排的組（{unplanned.length} 組・{unplanned.reduce((s, r) => s + r.orders.length, 0)} 張工作單）</summary>
+          <summary>沒有預排的{byPerson ? "人" : "組"}（{unplanned.length} {byPerson ? "列" : "組"}・{unplanned.reduce((s, r) => s + r.orders.length, 0)} 張工作單）</summary>
           <div className="cg-sheet">
             <table>
               <thead>
-                <tr><th>組別</th><th>工作單</th><th>已檢核</th><th>不通過</th><th>失誤率</th><th>被修改</th><th>違反 SOP</th><th>營業額點數</th><th>預排點數</th><th>與預排差異</th></tr>
+                <tr><th>{firstHead}</th><th>工作單</th><th>已檢核</th><th>不通過</th><th>失誤率</th><th>被修改</th><th>違反 SOP</th><th>營業額點數</th><th>預排點數</th><th>與預排差異</th></tr>
               </thead>
-              <tbody>{dataUn.map(renderRow)}</tbody>
+              <tbody>{renderBody(dataUn)}</tbody>
             </table>
           </div>
         </details>
@@ -656,7 +675,7 @@ function SheetTable({ rows, unplanned, wf, ff, hasCheck, hasFix, onPick }: { row
 }
 
 // 違反 SOP 明細：哪一組、哪一天、哪張單、誰。
-function SopPanel({ items, wf, dateField, weekStart, onPick }: { items: { group: string; order: TableData["records"][number] }[]; wf: WorkFields; dateField: string; weekStart: number; onPick: (g: string) => void }) {
+function SopPanel({ items, wf, dateField, weekStart, onPick }: { items: { key: string; group: string; order: TableData["records"][number] }[]; wf: WorkFields; dateField: string; weekStart: number; onPick: (g: string) => void }) {
   if (!items.length) return <div className="cg-fail"><p className="muted small">這週沒有違反 SOP 的工作單。</p></div>;
   return (
     <div className="cg-fail">
@@ -675,10 +694,10 @@ function SopPanel({ items, wf, dateField, weekStart, onPick }: { items: { group:
             </tr>
           </thead>
           <tbody>
-            {items.map(({ group, order: o }) => {
+            {items.map(({ key, group, order: o }) => {
               const d = o.fields[dateField];
               return (
-                <tr key={o.id} className="cg-link" onClick={() => onPick(group)}>
+                <tr key={o.id} className="cg-link" onClick={() => onPick(key)}>
                   <td className="cg-group">{group}</td>
                   <td>{typeof d === "number" ? `${formatDate(d).slice(5)}（${WEEKDAYS[dayOfWeek(d, weekStart)] ?? ""}）` : "—"}</td>
                   <td>{wf.orderNo ? text(o.fields[wf.orderNo.name]) || o.id : o.id}</td>
@@ -701,7 +720,7 @@ function SopPanel({ items, wf, dateField, weekStart, onPick }: { items: { group:
 // One group, one week: every R01 item for that group on a single screen.
 function GroupFocus({ row, group, wf, cfg, sop, disabled, hasCheck, hasFlags, ff, hasFix, dateField, weekStart, day, setDay }: { row?: GroupRow; group: string; wf: WorkFields; cfg: BoardConfig; sop: Sop; disabled: boolean; hasCheck: boolean; hasFlags: boolean; ff: FixFields; hasFix: boolean; dateField: string; weekStart: number; day: number | null; setDay: (d: number | null) => void }) {
   const [failOpen, setFailOpen] = useState(false);
-  if (!row) return <EmptyState kind="empty" title={`${group} 這週沒有${cfg.workLabel}`} />;
+  if (!row) return <EmptyState kind="empty" title={`${group.includes("|") ? "這位人員" : group} 這週沒有${cfg.workLabel}`} />;
   const diff = row.planned && wf.revenue ? row.revenue - row.planned.points : null;
   const cells = dayCells(row, ff, dateField, weekStart);
   const errOrders = cells.reduce((s, c) => s + c.errors, 0);
@@ -709,7 +728,7 @@ function GroupFocus({ row, group, wf, cfg, sop, disabled, hasCheck, hasFlags, ff
   return (
     <div className="cg-focus">
       <div className="cg-focus-head">
-        <h3>{row.group}</h3>
+        <h3>{rowLabel(row)}</h3>
         <span className="muted small">{row.orders.length} 張工作單</span>
         <span className="cg-focus-sop">
           <span className="muted small">符合 SOP（可派新工作）</span>
@@ -817,9 +836,12 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
     const wf = resolveWorkFields(data.fields, cfg.checkNames);
     const inWeek = inRange(data.records, dateField, week.start, week.end);
     const records = cfg.keepWorkTrade && wf.trade ? inWeek.filter((r) => cfg.keepWorkTrade!(text(r.fields[wf.trade!.name]))) : inWeek;
-    const sf = sched.data ? resolveScheduleFields(sched.data.fields) : {};
-    const planned = plannedPoints(sched.data as TableData | undefined, sf, week.start, week.end, cfg.keepTrade);
-    const grouped = groupRows(records, wf, planned);
+    // 以人為單位（R02）：預排用人員 record_id＋日期比對、日期欄認 id；其餘（R01）維持以組為單位。
+    const sf: ScheduleFields = sched.data ? (cfg.unit === "person" ? resolvePersonScheduleFields(sched.data.fields) : resolveScheduleFields(sched.data.fields)) : {};
+    const grouped =
+      cfg.unit === "person"
+        ? personRows(records, wf, dateField, plannedByPerson(sched.data as TableData | undefined, sf, week.start, week.end, cfg.keepTrade))
+        : groupRows(records, wf, plannedPoints(sched.data as TableData | undefined, sf, week.start, week.end, cfg.keepTrade));
     // 讀不到成本單（例如 V4 權限 1254302）就不拆組。
     const all = cfg.crewKey && crew.status === "ok" ? splitCrews(grouped, wf, data.fields, crew.data, dateField) : grouped;
     const rows = cfg.keepGroup ? all.filter((r) => cfg.keepGroup!(r.group)) : all;
@@ -843,7 +865,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const header = (
     <div className="cg-head">
       <div>
-        <h2>{weekName(week.offset)}各組表現</h2>
+        <h2>{weekName(week.offset)}{cfg.unit === "person" ? "各人表現" : "各組表現"}</h2>
         <p className="muted small">
           {weekName(week.offset)} {week.label}
           {view && "dateField" in view && view.dateField ? `・依「${view.dateField}」` : ""}
@@ -884,7 +906,9 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   // 排程表讀得到才分「有預排／沒預排」；讀不到時全部留在主表。
   const planOn = sched.status === "ok" && Boolean(sf.group && sf.start);
   const part = planOn ? partitionByPlan(rows) : { ...partitionByPlan([]), planned: rows };
-  const sopViol = wf.sopViolation ? rows.flatMap((r) => r.orders.filter((o) => violatesSop(o, wf)).map((o) => ({ group: r.group, order: o }))) : [];
+  const sopViol = wf.sopViolation ? rows.flatMap((r) => r.orders.filter((o) => violatesSop(o, wf)).map((o) => ({ key: rk(r), group: rowLabel(r), order: o }))) : [];
+  const byPerson = cfg.unit === "person";
+  const unit = byPerson ? "人" : "組";
   const hasFix = Boolean((ff.qtyOrig && ff.qtyFixed) || (ff.revOrig && ff.revFixed && ff.revOrig !== ff.revFixed));
   const missing = [
     !wf.group && "組別",
@@ -922,11 +946,11 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
         <div className="cg-cards">
           {list.map((r) => {
             const diff = r.planned && wf.revenue ? r.revenue - r.planned.points : null;
-            const expanded = open.has(r.group);
+            const expanded = open.has(rk(r));
             return (
-              <article key={r.group} className="cg-card">
-                <button className="cg-card-head" onClick={() => toggleOpen(r.group)} aria-expanded={expanded}>
-                  <span className="cg-group">{r.group}</span>
+              <article key={rk(r)} className="cg-card">
+                <button className="cg-card-head" onClick={() => toggleOpen(rk(r))} aria-expanded={expanded}>
+                  <span className="cg-group">{rowLabel(r)}</span>
                   <span className="muted small">{r.orders.length} 張工作單</span>
                   {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                 </button>
@@ -970,7 +994,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
             <thead>
               <tr>
                 <th aria-label="展開" />
-                <th>組別</th>
+                <th>{byPerson ? "人員" : "組別"}</th>
                 <th className="num">營業額點數</th>
                 <th className="num">預排點數</th>
                 <th className="num">與預排差異</th>
@@ -984,13 +1008,13 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
             <tbody>
               {list.map((r) => {
                 const diff = r.planned && wf.revenue ? r.revenue - r.planned.points : null;
-                const expanded = open.has(r.group);
+                const expanded = open.has(rk(r));
                 return (
-                  <Fragment key={r.group}>
-                    <tr className={`cg-row ${expanded ? "open" : ""}`} onClick={() => toggleOpen(r.group)}>
+                  <Fragment key={rk(r)}>
+                    <tr className={`cg-row ${expanded ? "open" : ""}`} onClick={() => toggleOpen(rk(r))}>
                       <td className="cg-caret">{expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</td>
                       <td>
-                        <span className="cg-group">{r.group}</span>
+                        <span className="cg-group">{rowLabel(r)}</span>
                         <span className="muted small"> {r.orders.length} 張</span>
                       </td>
                       <td className="num strong">
@@ -1068,7 +1092,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
           <div className="kpi">
             <div className="kpi-label">工作單數</div>
             <div className="kpi-value">{formatNumber(totals.orders)}</div>
-            <div className="kpi-sub">{rows.length} 組</div>
+            <div className="kpi-sub">{byPerson ? `${new Set(rows.map((r) => r.personId)).size} 人・${new Set(rows.map((r) => r.team)).size} 組` : `${rows.length} 組`}</div>
           </div>
           <div className="kpi">
             <div className="kpi-label">
@@ -1090,7 +1114,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
             </div>
             <div className={`kpi-value ${sopViol.length ? "bad-text" : ""}`}>{wf.sopViolation ? `${sopViol.length} 次` : "—"}</div>
             <div className="kpi-sub">
-              {wf.sopViolation ? `${new Set(sopViol.map((v) => v.group)).size} 組・取自「${wf.sopViolation.name}」・點開看是哪幾張` : "日報找不到「是否違反SOP」欄位"}
+              {wf.sopViolation ? `${new Set(sopViol.map((v) => v.key)).size} ${unit}・取自「${wf.sopViolation.name}」・點開看是哪幾張` : "日報找不到「是否違反SOP」欄位"}
             </div>
           </button>
         </div>
@@ -1140,7 +1164,22 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
         </ul>
       )}
 
-      {(rows.length > 0 || focus) && (
+      {byPerson && (rows.length > 0 || focus) && (
+        <div className="cg-layout">
+          <select className="cg-select" aria-label="選擇人員" value={focus ?? ""} onChange={(e) => pick(e.target.value || null)}>
+            <option value="">全部人員</option>
+            {teamSections(rows).map((sec) => (
+              <optgroup key={sec.team} label={sec.team}>
+                {sec.rows.map((r) => (
+                  <option key={rk(r)} value={rk(r)}>{r.group}</option>
+                ))}
+              </optgroup>
+            ))}
+            {focus && !rows.some((r) => rk(r) === focus) && <option value={focus}>（這位人員這週沒有資料）</option>}
+          </select>
+        </div>
+      )}
+      {!byPerson && (rows.length > 0 || focus) && (
         <div className="cg-picker" role="group" aria-label="選擇組別">
           <button className={`cg-chip ${!focus ? "on" : ""}`} onClick={() => pick(null)} aria-pressed={!focus}>
             全部組別
@@ -1154,7 +1193,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
       )}
 
       {focus ? (
-        <GroupFocus row={rows.find((r) => r.group === focus)} group={focus} wf={wf} cfg={cfg} sop={sop} disabled={sopLocked} hasCheck={hasCheck} hasFlags={hasFlags} ff={ff} hasFix={hasFix} dateField={dateField} weekStart={week.start} day={day} setDay={setDay} />
+        <GroupFocus row={rows.find((r) => rk(r) === focus)} group={focus} wf={wf} cfg={cfg} sop={sop} disabled={sopLocked} hasCheck={hasCheck} hasFlags={hasFlags} ff={ff} hasFix={hasFix} dateField={dateField} weekStart={week.start} day={day} setDay={setDay} />
       ) : rows.length === 0 ? (
         <EmptyState kind="empty" title={`${weekName(week.offset)}沒有${cfg.workLabel}`} />
       ) : null}
@@ -1169,7 +1208,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
               詳細
             </button>
           </div>
-          <span className="muted small">點組別看該組這週的每張工作單</span>
+          <span className="muted small">點{byPerson ? "人員" : "組別"}看該{unit}這週的每張工作單</span>
         </div>
       )}
 
@@ -1180,7 +1219,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
           {detailView(part.planned)}
           {part.unplanned.length > 0 && (
             <details className="cg-unplanned">
-              <summary>沒有預排的組（{part.unplanned.length} 組・{part.unplannedOrders} 張工作單）</summary>
+              <summary>沒有預排的{unit}（{part.unplanned.length} {byPerson ? "列" : "組"}・{part.unplannedOrders} 張工作單）</summary>
               {detailView(part.unplanned)}
             </details>
           )}
@@ -1190,8 +1229,8 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
       {!focus && rows.length > 0 && hasFix && <DayGrid rows={rows} ff={ff} dateField={dateField} weekStart={week.start} onPick={(g, d) => pick(g, d)} />}
 
       <p className="cg-foot">
-        失誤率＝{cfg.checkLabel}「不通過」÷ 已檢核（未檢核不計）。預排點數＝預排表{cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}點數欄，未填以每組每天 1 點計（標 *）。差異＝營業額點數（原值）− 預排點數。
-        {cfg.keepWorkTrade && view.wf.trade && ` 只計${cfg.workLabel}中業別不是內業的工作單。`}{hidden.length > 0 && ` 不列入：${hidden.map((h) => `${/^rec/.test(h.group) ? "未對應組別" : h.group}（${h.orders} 張）`).join("、")}。`}{cfg.costKey && " 組別與工作日期取自所屬內業成本單。"}{" 與預排差異只算有預排點數的組（合計列同）；沒有預排的組收在下方「沒有預排的組」，不進合計差異；頁首卡片仍含全部組。"}{cfg.crewKey && " 拆組判定：所選週內，同一組別、同一工作日期，工作單所屬外業成本單的「組長」有 2 個以上不同的人，該組視為拆組出工，依組長分列子隊（組長空白歸「未填組長」）；預排表沒有分隊，預排點數只掛在組別合計列；子列不重複計入合計；讀不到成本單時不拆組。"}出錯＝工作單的{[ff.qtyFixed && `「${ff.qtyFixed.name}」≠「${ff.qtyOrig?.name ?? "數量"}」`, ff.revFixed && ff.revOrig && ff.revFixed !== ff.revOrig && `「${ff.revFixed.name}」≠「${ff.revOrig.name}」`].filter(Boolean).join(" 或 ") || "修改後數值與原填不同"}（兩邊都有值才比較）。{wf.sopViolation ? `SOP 取自日報「${wf.sopViolation.name}」：有任一張違反顯示紅色，全部填寫且沒有違反顯示綠色「SOP 完成」。` : "SOP 由控制組成員在每張工作單上勾選（展開組別），整組都勾完才顯示綠色「SOP 完成」；記錄勾選人與時間，不寫回 Lark。"}
+        失誤率＝{cfg.checkLabel}「不通過」÷ 已檢核（未檢核不計）。{byPerson ? `一列一個人（內業成本單的填報人），依成本單的內業組別分段，每組一列小計；同一人在不同內業組別填單時，每組各一列。預排點數＝預排表${cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}依「人員＋日期」比對（組別不參與，預排「人員」欄多人逐人展開，休假條不算），有填「預估營業額點數」就分攤到每天，未填以每人每天 1 點計（同人同日多條只算一次，標 *）；預排日期認欄位 id，不看欄名。` : `預排點數＝預排表${cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}點數欄，未填以每組每天 1 點計（標 *）。`}差異＝營業額點數（原值）− 預排點數。
+        {cfg.keepWorkTrade && view.wf.trade && ` 只計${cfg.workLabel}中業別不是內業的工作單。`}{hidden.length > 0 && ` 不列入：${hidden.map((h) => `${/^rec/.test(h.group) ? "未對應組別" : h.group}（${h.orders} 張）`).join("、")}。`}{cfg.costKey && " 組別與工作日期取自所屬內業成本單。"}{byPerson ? " 與預排差異只算有預排點數的人（組小計與合計列同）；沒有預排的人收在下方「沒有預排的人」，不進合計差異；頁首卡片仍含全部人。" : " 與預排差異只算有預排點數的組（合計列同）；沒有預排的組收在下方「沒有預排的組」，不進合計差異；頁首卡片仍含全部組。"}{cfg.crewKey && " 拆組判定：所選週內，同一組別、同一工作日期，工作單所屬外業成本單的「組長」有 2 個以上不同的人，該組視為拆組出工，依組長分列子隊（組長空白歸「未填組長」）；預排表沒有分隊，預排點數只掛在組別合計列；子列不重複計入合計；讀不到成本單時不拆組。"}出錯＝工作單的{[ff.qtyFixed && `「${ff.qtyFixed.name}」≠「${ff.qtyOrig?.name ?? "數量"}」`, ff.revFixed && ff.revOrig && ff.revFixed !== ff.revOrig && `「${ff.revFixed.name}」≠「${ff.revOrig.name}」`].filter(Boolean).join(" 或 ") || "修改後數值與原填不同"}（兩邊都有值才比較）。{wf.sopViolation ? `SOP 取自日報「${wf.sopViolation.name}」：有任一張違反顯示紅色，全部填寫且沒有違反顯示綠色「SOP 完成」。` : "SOP 由控制組成員在每張工作單上勾選（展開組別），整組都勾完才顯示綠色「SOP 完成」；記錄勾選人與時間，不寫回 Lark。"}
         {view.records.length > 0 && ` 資料至 ${formatDate(Math.max(...view.records.map((r) => (r.fields[view.dateField] as number) ?? 0)))}。`}
       </p>
 

@@ -31,7 +31,12 @@ function project(data: TableData, req: NextRequest): TableData {
   return {
     ...data,
     fields,
-    records: data.records.map((r) => ({ id: r.id, fields: Object.fromEntries(names.map((n) => [n, r.fields[n] ?? null])) })),
+    records: data.records.map((r) => ({
+      id: r.id,
+      fields: Object.fromEntries(names.map((n) => [n, r.fields[n] ?? null])),
+      // link record_ids ride along for the projected fields only
+      ...(r.links ? (() => { const l = Object.fromEntries(names.filter((n) => r.links![n]).map((n) => [n, r.links![n]])); return Object.keys(l).length ? { links: l } : {}; })() : {}),
+    })),
   };
 }
 

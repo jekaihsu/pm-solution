@@ -71,7 +71,7 @@ npm ci
 cp .env.example .env.local   # 填入 LARK_APP_ID / LARK_APP_SECRET（不要提交）
 AUTH_DISABLED=1 DATA_DIR=./data npm run dev     # http://localhost:3000
 npm run typecheck && npm run build              # 推送前必跑
-node --test scripts/test-control-group.mjs      # R01／R02 組別邏輯測試（不連 Lark）
+node --test scripts/test-control-group.mjs scripts/test-r02-people.mjs   # R01／R02 邏輯測試（不連 Lark）
 node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄位
 ```
 
@@ -114,7 +114,14 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 - ROV 組是外業（業主裁示 2026-10-13）：預排列組別為 ROV（`groupKey`、大小寫不拘）一律計入 R01、不計入 R02，不管業別欄；其他組照舊用業別（`keepFieldSchedule`／`keepInternalSchedule`）。
 - 版面：預設「簡表」（老闆偏好：一組一列純數字、合計列、右側總數），可切「詳細」；點組別看單組單週；每日出錯表；點失誤率卡片看哪組、哪位出工人。
 
-**R02 內業檢查**：同 R01 六項＋業主進度；失誤率用「雅雯檢核」；預排取業別＝內業；組別與工作日期由「所屬成本單」帶入；只顯示所選週；進度 % 先不算，只顯示；天數＝距交期天數（交期欄位未定位）。
+**R02 內業檢查（以人為單位，業主裁示 2026-10-13）**：外業以組別排、填；內業一人填一張，仍分組別，但以人為單位計算。R01 維持以組為單位（兩者共用 `GroupBoard`，用 `BOARDS.r02.unit="person"` 區分）。
+- 一列一個人＝內業成本單（V3 `tbl8JdWLLwlPFuoF`）的「填報人」（link→人員名單 `tblmlpA6nG5Ou7NQ`），依成本單的「內業組別」分段：每組一列小計，下面是該組的人；整體合計列照舊。同一人一週內在不同內業組別填單，每組各一列（工作單依成本單歸屬，不重複計）。工作單經 `joinInternal` 帶入工作日期、內業組別、填報人。
+- 每人欄位同 R01（工作單、已檢核、不通過、失誤率、被修改、違反 SOP、營業額點數、預排點數、與預排差異）；點人看該人該週工作單；每日出錯表一人一列。失誤率仍用「雅雯檢核」（目前沒有不通過來源，口徑業主未定，不另發明）。
+- 預排以「人員 record_id ＋ 日期」比對，組別不參與 join（`plannedByPerson`）。預排「人員」欄 `fld7KNCsVe` 可多人，逐人展開；有填「預估營業額點數」`fld5lTSN1r` 就平均分攤到每天（每位被排的人各得一份），沒填的每人每天 1 點（同人同日多條只算一次）；條類型＝休假不算。業別取內業，ROV 一律算外業（`keepInternalSchedule`）。**預排日期一律用欄位 id**：真起日 `fldMXOggGP`、真訖日 `fldjWv1xST`（欄名曾被 UI 改反），V3 找不到 id 才退回欄名（V4 表 id 不同）。
+- 預排點數掛在「那天他填報的內業組別」；那天沒填成本單就掛他張數最多的組；整週沒有工作單才用預排上的組別（只用來決定顯示位置）。
+- 與預排差異沿用 `partitionByPlan`：主表（含組小計、合計）只列有預排的人；沒預排的人收在下方可展開區塊；頁首卡片含全部。
+- record_id 保留：`lib/lark.ts` 讀表時 link 欄的 record_id 另存在 `TableData.records[].links[欄名]`（與 `fields` 內標題文字 index 對齊），`/api/sources` 投影時一併帶出；`fields` 的行為不變，其他報表不受影響。
+- 其餘：進度 % 先不算，只顯示；天數＝距交期天數（交期欄位未定位）。上週（2026-10-05～10-11）實測以人拆開後各組加總＝以組計算（控制 86 張／已檢核 61／營業額 28.25／被修改 19；圖報A 8／5／2.94／1；圖報B 2／2／1／1）。測試：`node --test scripts/test-r02-people.mjs`。
 
 **R07 儀器車輛管理詳情**（`components/EquipmentBoard.tsx`）：三塊——儀器管理系統（清單、可用、送修／停用、月租型）；月租型儀器＋車輛在所選週有沒有檢查（未檢查＝紅，檢查結果異常另計）；TAF 與自校驗（TAF 依最近一次有效期限：逾期紅、30 天內黃；自校顯示最近一次日期與結果）。來源 `equipment-system`／`equipment-inspection`／`equipment-calibration` 尚未定位；清單未接入前暫用 V3 儀器費率。欄位用名稱自動辨識（見檔案內 `masterFields` 等）。
 

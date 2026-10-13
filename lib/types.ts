@@ -19,7 +19,10 @@ export interface TableMeta {
 export interface TableData {
   table: TableMeta;
   fields: FieldMeta[];
-  records: { id: string; fields: Record<string, CellValue> }[];
+  // `links`: for link fields only, the linked records' record_ids, index-aligned with the
+  // titles that `fields[name]` holds after resolveLinks (R02 以人為單位 needs the ids to join
+  // on 人員 record_id). Optional, absent when the table has no link cells or in demo data.
+  records: { id: string; fields: Record<string, CellValue>; links?: Record<string, string[]> }[];
   fetchedAt: number;
   source: "lark" | "demo";
   complete: boolean; // false when paging stopped early
