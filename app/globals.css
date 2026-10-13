@@ -647,3 +647,20 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
 .cg-err td { background: var(--bad-soft); }
 .cg-fix { margin-right: 4px; }
 .cg-strip-day { min-width: 62px; }
+
+/* 簡表 (spreadsheet-style summary) */
+.cg-layout { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cg-sheet-wrap { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: start; }
+.cg-sheet { overflow-x: auto; min-width: 0; }
+.cg-sheet table, .cg-sheet-sum { border-collapse: collapse; font-size: 13px; background: var(--surface); }
+.cg-sheet table { width: 100%; }
+.cg-sheet th, .cg-sheet td, .cg-sheet-sum td { border: 1px solid var(--border); padding: 7px 10px; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cg-sheet th { background: var(--surface-2); font-weight: 600; color: var(--text); }
+.cg-sheet .cg-sheet-name { text-align: left; font-weight: 600; background: var(--surface-2); }
+.cg-sheet tfoot td { font-weight: 600; border-top: 2px solid var(--text-2); }
+.cg-sheet .cg-diff { justify-content: center; }
+.cg-sheet-sum td:first-child { text-align: left; background: var(--surface-2); font-weight: 500; }
+.cg-sheet-sum td:last-child { min-width: 64px; font-weight: 600; }
+@media (max-width: 900px) {
+  .cg-sheet-wrap { grid-template-columns: minmax(0, 1fr); }
+}

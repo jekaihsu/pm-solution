@@ -12,18 +12,20 @@ export const dynamic = "force-dynamic";
 // only the response gets smaller.
 //  only=meta   → field list and counts, no records (sources page)
 //  only=dates  → date fields only (overview trend counts)
-//  fields=a,b  → those names; "x*" matches a prefix, "@dates" every date field
+//  fields=a,b  → those names; "x*" matches a prefix, "~x" any name containing x
+//                (case-insensitive), "@dates" every date field
 function project(data: TableData, req: NextRequest): TableData {
   const only = req.nextUrl.searchParams.get("only");
   const list = req.nextUrl.searchParams.get("fields");
   if (only === "meta") return { ...data, records: [] };
   if (!only && !list) return data;
   const tokens = list ? list.split(",") : [];
-  const exact = new Set(tokens.filter((t) => !t.endsWith("*") && !t.startsWith("@")));
+  const exact = new Set(tokens.filter((t) => !t.endsWith("*") && !t.startsWith("@") && !t.startsWith("~")));
   const prefixes = tokens.filter((t) => t.endsWith("*")).map((t) => t.slice(0, -1));
+  const contains = tokens.filter((t) => t.startsWith("~")).map((t) => t.slice(1).toLowerCase());
   const allDates = only === "dates" || tokens.includes("@dates");
   const fields = data.fields.filter(
-    (f) => (allDates && f.kind === "date") || exact.has(f.name) || prefixes.some((p) => f.name.startsWith(p)) || (list && f.primary),
+    (f) => (allDates && f.kind === "date") || exact.has(f.name) || prefixes.some((p) => f.name.startsWith(p)) || contains.some((c) => f.name.toLowerCase().includes(c)) || (list && f.primary),
   );
   const names = fields.map((f) => f.name);
   return {

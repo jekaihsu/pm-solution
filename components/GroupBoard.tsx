@@ -2,7 +2,7 @@
 import { ArrowDownRight, ArrowUpRight, CheckCheck, ChevronDown, ChevronRight, CircleAlert, CircleCheck, Minus } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
-import { COST_FIELDS, JOINED_DATE, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, dayOfWeek, errorRate, fixDiffs, groupRows, joinInternal, plannedPoints, resolveFixFields, resolveScheduleFields, resolveWorkFields, type FixFields, type GroupRow, type WorkFields } from "@/lib/controlGroup";
+import { COST_FIELDS, JOINED_DATE, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, dayOfWeek, errorRate, fixDiffs, groupRows, violatesSop, joinInternal, plannedPoints, resolveFixFields, resolveScheduleFields, resolveWorkFields, type FixFields, type GroupRow, type WorkFields } from "@/lib/controlGroup";
 import { inRange, resolveDateField } from "@/lib/metrics";
 import { sourceByKey, type DataVersion } from "@/lib/reports";
 import type { CellValue, TableData } from "@/lib/types";
@@ -177,6 +177,37 @@ function SopStatus({ done, total }: { done: number; total: number }) {
   return <span className="pill">未確認</span>;
 }
 
+// When the 日報 has「是否違反SOP」(filled in Lark) that is the answer; the site's
+// own ticks are only used for tables without it.
+function sopSummary(row: GroupRow, wf: WorkFields) {
+  let viol = 0;
+  let filled = 0;
+  for (const o of row.orders) {
+    const v = violatesSop(o, wf);
+    if (v !== null) filled++;
+    if (v) viol++;
+  }
+  return { viol, filled, total: row.orders.length };
+}
+
+function GroupSop({ row, wf, entries }: { row: GroupRow; wf: WorkFields; entries: Record<string, SopEntry> }) {
+  if (!wf.sopViolation) return <SopStatus done={sopCount(row, entries)} total={row.orders.length} />;
+  const { viol, filled, total } = sopSummary(row, wf);
+  if (viol)
+    return (
+      <span className="pill pill-bad">
+        <CircleAlert size={12} /> 違反 SOP {viol} 張
+      </span>
+    );
+  if (filled === total && total > 0)
+    return (
+      <span className="pill pill-good cg-sop-done">
+        <CircleCheck size={12} /> SOP 完成
+      </span>
+    );
+  return <span className="pill">{filled ? `已填 ${filled}/${total}，無違反` : "未填"}</span>;
+}
+
 function SopBox({ id, label, entry, onToggle, disabled }: { id: string; label: string; entry?: SopEntry; onToggle: (keys: string[], ok: boolean) => void; disabled: boolean }) {
   return (
     <label
@@ -197,7 +228,7 @@ function OrderDetail({ row, wf, checkLabel, sop, disabled, ff, dateField, onlyDa
   const allDone = done === row.orders.length;
   return (
     <div className="cg-detail">
-      {!disabled && (
+      {!disabled && !wf.sopViolation && (
         <div className="cg-detail-bar">
           <span className="muted small">
             SOP 已確認 {done}/{row.orders.length} 張
@@ -263,7 +294,14 @@ function OrderDetail({ row, wf, checkLabel, sop, disabled, ff, dateField, onlyDa
                 </td>
                 <td>{!wf.flags.length ? <span className="muted">—</span> : an.length ? an.map((a) => <span key={a} className="tag">{a}</span>) : <span className="muted">無</span>}</td>
                 <td>
-                  <SopBox id={r.id} label={no} entry={sop.entries[orderKey(r.id)]} onToggle={sop.toggle} disabled={disabled} />
+                  {wf.sopViolation ? (
+                    (() => {
+                      const v = violatesSop(r, wf);
+                      return v === null ? <span className="muted">未填</span> : v ? <span className="pill pill-bad">違反</span> : <span className="pill pill-good">符合</span>;
+                    })()
+                  ) : (
+                    <SopBox id={r.id} label={no} entry={sop.entries[orderKey(r.id)]} onToggle={sop.toggle} disabled={disabled} />
+                  )}
                 </td>
               </tr>
             );
@@ -458,6 +496,95 @@ function FailPanel({ rows, wf, cfg, dateField, weekStart, onPick }: { rows: Grou
   );
 }
 
+// 簡表: the boss's preferred layout — one row per group, plain counts, a 合計 row
+// and a summary block underneath. Clicking a group opens it.
+function SheetTable({ rows, wf, ff, hasCheck, hasFix, onPick }: { rows: GroupRow[]; wf: WorkFields; ff: FixFields; hasCheck: boolean; hasFix: boolean; onPick: (g: string) => void }) {
+  const data = rows.map((r) => {
+    const fixed = r.orders.filter((o) => fixDiffs(o, ff).length).length;
+    const sop = wf.sopViolation ? sopSummary(r, wf) : null;
+    return { r, fixed, viol: sop ? sop.viol : null, diff: r.planned && wf.revenue ? r.revenue - r.planned.points : null };
+  });
+  const sum = (f: (d: (typeof data)[number]) => number) => data.reduce((s, d) => s + f(d), 0);
+  const t = {
+    orders: sum((d) => d.r.orders.length),
+    checked: sum((d) => d.r.pass + d.r.fail),
+    fail: sum((d) => d.r.fail),
+    unchecked: sum((d) => d.r.unchecked),
+    fixed: sum((d) => d.fixed),
+    viol: sum((d) => d.viol ?? 0),
+    revenue: sum((d) => d.r.revenue),
+    planned: sum((d) => d.r.planned?.points ?? 0),
+    hasPlan: data.some((d) => d.r.planned),
+  };
+  const n = (v: number | null, bad = false) => (v === null ? <span className="muted">—</span> : <span className={bad && v > 0 ? "bad-text strong" : undefined}>{formatNumber(Math.round(v * 10) / 10)}</span>);
+  return (
+    <div className="cg-sheet-wrap">
+      <div className="cg-sheet">
+        <table>
+          <thead>
+            <tr>
+              <th>組別</th>
+              <th>工作單</th>
+              <th>已檢核</th>
+              <th>不通過</th>
+              <th>失誤率</th>
+              <th>被修改</th>
+              <th>違反 SOP</th>
+              <th>營業額點數</th>
+              <th>預排點數</th>
+              <th>與預排差異</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((d) => (
+              <tr key={d.r.group} onClick={() => onPick(d.r.group)} className="cg-link">
+                <td className="cg-sheet-name">{d.r.group}</td>
+                <td>{d.r.orders.length}</td>
+                <td>{hasCheck ? d.r.pass + d.r.fail : "—"}</td>
+                <td>{hasCheck ? n(d.r.fail, true) : "—"}</td>
+                <td>{pct(errorRate(d.r))}</td>
+                <td>{hasFix ? n(d.fixed, true) : "—"}</td>
+                <td>{n(d.viol, true)}</td>
+                <td>{wf.revenue ? n(d.r.revenue) : "—"}</td>
+                <td>{d.r.planned ? n(d.r.planned.points) : "—"}</td>
+                <td>
+                  <Diff value={d.diff} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td className="cg-sheet-name">合計</td>
+              <td>{t.orders}</td>
+              <td>{hasCheck ? t.checked : "—"}</td>
+              <td>{hasCheck ? n(t.fail, true) : "—"}</td>
+              <td>{pct(t.checked ? t.fail / t.checked : null)}</td>
+              <td>{hasFix ? n(t.fixed, true) : "—"}</td>
+              <td>{wf.sopViolation ? n(t.viol, true) : "—"}</td>
+              <td>{wf.revenue ? n(t.revenue) : "—"}</td>
+              <td>{t.hasPlan ? n(t.planned) : "—"}</td>
+              <td>
+                <Diff value={t.hasPlan && wf.revenue ? t.revenue - t.planned : null} />
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <table className="cg-sheet-sum">
+        <tbody>
+          <tr><td>工作單總數</td><td>{t.orders}</td></tr>
+          <tr><td>已檢核</td><td>{hasCheck ? t.checked : "—"}</td></tr>
+          <tr><td>待檢核</td><td>{hasCheck ? t.unchecked : "—"}</td></tr>
+          <tr><td>不通過</td><td>{hasCheck ? n(t.fail, true) : "—"}</td></tr>
+          <tr><td>被修改</td><td>{hasFix ? n(t.fixed, true) : "—"}</td></tr>
+          <tr><td>違反 SOP</td><td>{wf.sopViolation ? n(t.viol, true) : "—"}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // One group, one week: every R01 item for that group on a single screen.
 function GroupFocus({ row, group, wf, cfg, sop, disabled, hasCheck, hasFlags, ff, hasFix, dateField, weekStart, day, setDay }: { row?: GroupRow; group: string; wf: WorkFields; cfg: BoardConfig; sop: Sop; disabled: boolean; hasCheck: boolean; hasFlags: boolean; ff: FixFields; hasFix: boolean; dateField: string; weekStart: number; day: number | null; setDay: (d: number | null) => void }) {
   const [failOpen, setFailOpen] = useState(false);
@@ -473,7 +600,7 @@ function GroupFocus({ row, group, wf, cfg, sop, disabled, hasCheck, hasFlags, ff
         <span className="muted small">{row.orders.length} 張工作單</span>
         <span className="cg-focus-sop">
           <span className="muted small">符合 SOP（可派新工作）</span>
-          <SopStatus done={sopCount(row, sop.entries)} total={row.orders.length} />
+          <GroupSop row={row} wf={wf} entries={sop.entries} />
         </span>
       </div>
       <div className="kpis">
@@ -552,6 +679,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   useEffect(() => setFocus(new URLSearchParams(window.location.search).get("group")), []);
   const [day, setDay] = useState<number | null>(null);
   const [failOpen, setFailOpen] = useState(false);
+  const [layout, setLayout] = useState<"sheet" | "detail">("sheet");
   useEffect(() => setDay(null), [version, week.start]);
   const pick = (g: string | null, d: number | null = null) => {
     setFocus(g);
@@ -759,9 +887,23 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
         <EmptyState kind="empty" title={`${weekName(week.offset)}沒有${cfg.workLabel}`} />
       ) : null}
 
-      {!focus && rows.length > 0 && hasFix && <DayGrid rows={rows} ff={ff} dateField={dateField} weekStart={week.start} onPick={(g, d) => pick(g, d)} />}
+      {!focus && rows.length > 0 && (
+        <div className="cg-layout">
+          <div className="seg" role="group" aria-label="版面">
+            <button className={layout === "sheet" ? "on" : ""} onClick={() => setLayout("sheet")} aria-pressed={layout === "sheet"}>
+              簡表
+            </button>
+            <button className={layout === "detail" ? "on" : ""} onClick={() => setLayout("detail")} aria-pressed={layout === "detail"}>
+              詳細
+            </button>
+          </div>
+          <span className="muted small">點組別看該組這週的每張工作單</span>
+        </div>
+      )}
 
-      {focus || rows.length === 0 ? null : isMobile ? (
+      {!focus && rows.length > 0 && layout === "sheet" && <SheetTable rows={rows} wf={wf} ff={ff} hasCheck={hasCheck} hasFix={hasFix} onPick={(g) => pick(g)} />}
+
+      {focus || rows.length === 0 || layout === "sheet" ? null : isMobile ? (
         <div className="cg-cards">
           {rows.map((r) => {
             const diff = r.planned && wf.revenue ? r.revenue - r.planned.points : null;
@@ -797,7 +939,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
                 </dl>
                 <div className="cg-card-sop">
                   <span className="muted small">符合 SOP</span>
-                  <SopStatus done={sopCount(r, sop.entries)} total={r.orders.length} />
+                  <GroupSop row={r} wf={wf} entries={sop.entries} />
                 </div>
                 {expanded && <OrderDetail row={r} wf={wf} checkLabel={cfg.checkLabel} sop={sop} disabled={sopLocked} ff={ff} dateField={dateField} weekStart={week.start} />}
               </article>
@@ -866,7 +1008,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
                       </td>
                       <td className="num">{wf.qty ? formatNumber(Math.round(r.qty * 10) / 10) : "—"}</td>
                       <td>
-                        <SopStatus done={sopCount(r, sop.entries)} total={r.orders.length} />
+                        <GroupSop row={r} wf={wf} entries={sop.entries} />
                       </td>
                     </tr>
                     {expanded && (
@@ -884,9 +1026,11 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
         </div>
       )}
 
+      {!focus && rows.length > 0 && hasFix && <DayGrid rows={rows} ff={ff} dateField={dateField} weekStart={week.start} onPick={(g, d) => pick(g, d)} />}
+
       <p className="cg-foot">
         失誤率＝{cfg.checkLabel}「不通過」÷ 已檢核（未檢核不計）。預排點數＝預排表{cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}點數欄，未填以每組每天 1 點計（標 *）。差異＝營業額點數（原值）− 預排點數。
-        {cfg.keepWorkTrade && view.wf.trade && ` 只計${cfg.workLabel}中業別不是內業的工作單。`}{cfg.costKey && " 組別與工作日期取自所屬內業成本單。"}出錯＝工作單的{[ff.qtyFixed && `「${ff.qtyFixed.name}」≠「${ff.qtyOrig?.name ?? "數量"}」`, ff.revFixed && ff.revOrig && ff.revFixed !== ff.revOrig && `「${ff.revFixed.name}」≠「${ff.revOrig.name}」`].filter(Boolean).join(" 或 ") || "修改後數值與原填不同"}（兩邊都有值才比較）。SOP 由控制組成員在每張工作單上勾選（展開組別），整組都勾完才顯示綠色「SOP 完成」；記錄勾選人與時間，不寫回 Lark。
+        {cfg.keepWorkTrade && view.wf.trade && ` 只計${cfg.workLabel}中業別不是內業的工作單。`}{cfg.costKey && " 組別與工作日期取自所屬內業成本單。"}出錯＝工作單的{[ff.qtyFixed && `「${ff.qtyFixed.name}」≠「${ff.qtyOrig?.name ?? "數量"}」`, ff.revFixed && ff.revOrig && ff.revFixed !== ff.revOrig && `「${ff.revFixed.name}」≠「${ff.revOrig.name}」`].filter(Boolean).join(" 或 ") || "修改後數值與原填不同"}（兩邊都有值才比較）。{wf.sopViolation ? `SOP 取自日報「${wf.sopViolation.name}」：有任一張違反顯示紅色，全部填寫且沒有違反顯示綠色「SOP 完成」。` : "SOP 由控制組成員在每張工作單上勾選（展開組別），整組都勾完才顯示綠色「SOP 完成」；記錄勾選人與時間，不寫回 Lark。"}
         {view.records.length > 0 && ` 資料至 ${formatDate(Math.max(...view.records.map((r) => (r.fields[view.dateField] as number) ?? 0)))}。`}
       </p>
 

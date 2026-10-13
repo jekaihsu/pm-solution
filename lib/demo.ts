@@ -39,6 +39,7 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["⚠營業額異常", "checkbox", (r) => r() > 0.92],
       ["出工人", "multiselect", (r) => [pick(r, ["王小明", "陳大文", "林志強", "張家豪", "李俊傑", "黃建宏"])]],
       ["修改後數量", "number", (r) => (r() > 0.88 ? Math.round(r() * 20 * 10) / 10 : null)],
+      ["是否違反SOP", "select", (r) => (r() > 0.25 ? (r() > 0.88 ? "是" : "否") : null)],
       ["修改後營業額", "number", (r) => (r() > 0.9 ? Math.round(r() * 8 * 10) / 10 : null)],
     ],
   },

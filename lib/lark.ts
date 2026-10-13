@@ -128,6 +128,19 @@ async function resolveTableId(src: SourceDef): Promise<string> {
 
 // ---------- tables & fields ----------
 
+// Diagnostics: which tables in a Base have a field whose name matches (names only).
+export async function findFields(baseToken: string, re: RegExp): Promise<{ table: string; tableId: string; field: string; type: number }[]> {
+  return cached(`find:${baseToken}:${re.source}`, async () => {
+    const out: { table: string; tableId: string; field: string; type: number }[] = [];
+    const tables = await listTables(baseToken);
+    await pool(tables, 3, async (t) => {
+      const fields = await listFields(baseToken, t.id).catch(() => []);
+      for (const f of fields) if (re.test(f.name)) out.push({ table: t.name, tableId: t.id, field: f.name, type: f.rawType ?? 0 });
+    });
+    return out;
+  }, false, 10 * 60 * 1000);
+}
+
 export async function listTables(baseToken: string, force = false): Promise<TableMeta[]> {
   return cached(
     `tables:${baseToken}`,

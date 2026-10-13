@@ -28,6 +28,7 @@ export interface WorkFields {
   status?: FieldMeta;
   trade?: FieldMeta;
   person?: FieldMeta;
+  sopViolation?: FieldMeta; // 日報「是否違反SOP」(filled in Lark)
   flags: FieldMeta[];
 }
 
@@ -43,6 +44,7 @@ export function resolveWorkFields(fields: FieldMeta[], checkNames: string[] = ["
     status: pickField(fields, ["檢核狀態"]),
     trade: pickField(fields, ["業別", "工作類別"]),
     person: pickField(fields, ["出工人", "組長", "填報人"]),
+    sopViolation: fields.find((f) => /(違|违)反\s*sop/i.test(f.name)) ?? fields.find((f) => /sop/i.test(f.name)),
     flags: fields.filter((f) => f.name.startsWith("⚠")),
   };
 }
@@ -106,6 +108,18 @@ export function fixDiffs(r: TableData["records"][number], ff: FixFields): FixDif
 
 // Taipei weekday 0–6 (Mon–Sun) of a timestamp inside the week starting at weekStart.
 export const dayOfWeek = (t: number, weekStart: number) => Math.floor((t - weekStart) / DAY);
+
+// 是否違反SOP: checkbox ticked, or a text/option saying 是／違反. 「否」「未違反」= no.
+export function violatesSop(r: TableData["records"][number], wf: WorkFields): boolean | null {
+  if (!wf.sopViolation) return null;
+  const v = r.fields[wf.sopViolation.name];
+  if (v === null || v === undefined || v === "" || (Array.isArray(v) && !v.length)) return null;
+  if (typeof v === "boolean") return v;
+  const t = text(v).trim();
+  if (/^(否|無|没有|沒有|未違反|未违反|符合|no|false|0)$/i.test(t)) return false;
+  if (/是|違反|违反|yes|true|1|有/i.test(t)) return true;
+  return truthy(v);
+}
 
 export function anomalies(r: TableData["records"][number], wf: WorkFields): string[] {
   return wf.flags.filter((f) => truthy(r.fields[f.name])).map((f) => f.name.replace(/^⚠/, ""));
@@ -278,7 +292,7 @@ export function joinInternal(work: TableData, cost: TableData | undefined): { da
 export const WORK_FIELDS = [
   "組別", "工作單號", "案件編號", "工程編號", "工作編號", "可能確認單工作編號", "可能的確認單工編(若暫無確認單才需填寫)",
   "合約工項", "內業工項", "工作項目", "工項", "完成數量", "計價數量", "對外計價數量", "數量",
-  "最終營業額點數", "營業額點數", "點數", "控制組檢核", "雅雯檢核", "檢核狀態", "所屬成本單", "業別", "工作類別", "修改後數量", "修改後營業額", "修改後營業額點數", "出工人", "組長", "填報人",
+  "最終營業額點數", "營業額點數", "點數", "控制組檢核", "雅雯檢核", "檢核狀態", "所屬成本單", "業別", "工作類別", "修改後數量", "修改後營業額", "修改後營業額點數", "出工人", "組長", "填報人", "~SOP",
   "所屬案件", "案件", "工程名稱", "交期", "合約交期", "預定完成日", "完工期限", "到期日", "⚠*", "@dates",
 ];
 export const COST_FIELDS = ["工作日期", "內業組別", "所屬組別", "組別", "@dates"];
