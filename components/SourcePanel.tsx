@@ -113,11 +113,16 @@ function SourceBody({
 }) {
   const storeKey = `pm:${reportId}:${source.key}:${data.source}`;
   const dateFields = data.fields.filter((f) => f.kind === "date");
-  const [dateField, setDateField] = useState<string>(() => {
-    const saved = load<string>(`${storeKey}:date`);
+  // Only an explicit choice is remembered, so improved defaults still reach users.
+  const [dateField, setDateFieldState] = useState<string>(() => {
+    const saved = load<string>(`${storeKey}:datefield`);
     if (saved && (saved === ALL || dateFields.some((f) => f.name === saved))) return saved;
     return source.dateField && dateFields.some((f) => f.name === source.dateField) ? source.dateField : dateFields[0]?.name ?? ALL;
   });
+  const setDateField = (v: string) => {
+    setDateFieldState(v);
+    save(`${storeKey}:datefield`, v);
+  };
   const [filters, setFilters] = useState<Filters>(() => load<Filters>(`${storeKey}:filters`) ?? {});
   const [columns, setColumns] = useState<string[]>(() => {
     const saved = load<string[]>(`${storeKey}:cols`);
@@ -133,7 +138,7 @@ function SourceBody({
   const [editing, setEditing] = useState<Widget | null>(null);
   const [q, setQ] = useState("");
 
-  useEffect(() => save(`${storeKey}:date`, dateField), [storeKey, dateField]);
+
   useEffect(() => save(`${storeKey}:filters`, filters), [storeKey, filters]);
   useEffect(() => save(`${storeKey}:cols`, columns), [storeKey, columns]);
   useEffect(() => save(`${storeKey}:dash`, widgets), [storeKey, widgets]);

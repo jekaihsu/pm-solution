@@ -33,7 +33,7 @@ const V4_RULE = { createdAfter: V4_BASELINE, createdAfterLabel: "2026-10-07 20:1
 
 // Default visible columns, matched by field name; V3 and V4 share most names.
 const COLS = {
-  fieldWork: ["工作單號", "出工日期", "出工日", "工作日期-薪資", "組別", "出工人", "所屬案件", "案件編號", "合約工項", "完成數量", "計價數量", "營業額點數", "最終營業額點數", "檢核狀態", "控制組檢核", "外業經理檢核", "是否重工"],
+  fieldWork: ["工作單號", "出工日期", "出工日", "工作日期", "組別", "出工人", "所屬案件", "案件編號", "合約工項", "完成數量", "計價數量", "營業額點數", "最終營業額點數", "檢核狀態", "控制組檢核", "外業經理檢核", "是否重工"],
   fieldCost: ["單號", "工作日期", "組別", "組長", "出工人數", "當日營業額點數總和", "出工成本總計", "檢核狀態", "外業經理檢核", "工務助理檢核"],
   internalWork: ["工作單號", "姓名", "所屬案件", "案件編號", "內業工項", "計價數量", "營業額點數", "最終營業額點數", "品管檢核", "雅雯檢核", "檢核時間", "是否重工"],
   internalCost: ["單號", "工作日期", "組別", "所屬組別", "內業組別", "填報人", "當日營業額點數總和", "出工成本總計", "內業組長檢核", "PM檢核"],
@@ -66,7 +66,7 @@ function raw(key: string, name: string, version: DataVersion, table: string, ext
 }
 
 export const SOURCES: SourceDef[] = [
-  raw("v3-field-work", "外業工作單", "v3", "tbl97f1uXqi7Qz0k", { columns: COLS.fieldWork, ...DASH.fieldWork, note: "R01 與 R10 共用同一批工作單，跨報告不可相加。" }),
+  raw("v3-field-work", "外業工作單", "v3", "tbl97f1uXqi7Qz0k", { dateField: "出工日期", columns: COLS.fieldWork, ...DASH.fieldWork, note: "R01 與 R10 共用同一批工作單，跨報告不可相加。" }),
   raw("v4-field-work", "外業工作單", "v4", "tbl5zPLS0ExWNEty", { dateField: "工作日期-薪資", columns: COLS.fieldWork, ...DASH.fieldWork, note: "R01 與 R10 共用；欄名含「最終」不代表已核定。" }),
   raw("v4-field-cost", "外業成本單", "v4", "tbl8wRYCUCvbSoJG", { dateField: "工作日期", columns: COLS.fieldCost, ...DASH.fieldCost }),
   raw("v3-internal-work", "內業工作單", "v3", "tblTP5Naz52FBpFg", { columns: COLS.internalWork, ...DASH.internalWork, note: "R02 與 R09 共用；「最終營業額點數」欄名含「最終」不代表已核定。" }),

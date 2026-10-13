@@ -31,6 +31,16 @@ async function getTenantAccessToken(): Promise<string> {
   return cachedToken.value;
 }
 
+// Plain-language explanations for the errors people actually hit.
+const HINTS: Record<number, string> = {
+  1254302: "此 Base 開啟了進階權限，PM週報應用尚未被加入可閱讀此資料表的角色",
+  91402: "找不到此 Base 或資料表",
+  1254040: "找不到此 Base（app_token 錯誤或已刪除）",
+  1254041: "找不到此資料表",
+  99991672: "應用缺少 bitable:app:readonly 權限，或新版本尚未發布",
+  91403: "應用沒有此 Base 的存取權，請在 Base 的「新增文件應用」加入 PM週報",
+};
+
 async function larkFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = await getTenantAccessToken();
   const res = await fetch(`${API_BASE}/open-apis${path}`, {
@@ -43,7 +53,7 @@ async function larkFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
     cache: "no-store",
   });
   const json = await res.json();
-  if (json.code !== 0) throw new Error(`Lark API ${path} failed: ${json.code} ${json.msg}`);
+  if (json.code !== 0) throw new Error(`${HINTS[json.code] ? `${HINTS[json.code]}｜` : ""}Lark API ${path.split("?")[0]} failed: ${json.code} ${json.msg}`);
   return json.data as T;
 }
 
@@ -127,12 +137,21 @@ export async function listFields(baseToken: string, tableId: string): Promise<Fi
     const qs = new URLSearchParams({ page_size: "100" });
     if (pageToken) qs.set("page_token", pageToken);
     const data = await larkFetch<{
-      items?: { field_id: string; field_name: string; type: number; ui_type?: string; is_primary?: boolean }[];
+      items?: { field_id: string; field_name: string; type: number; ui_type?: string; is_primary?: boolean; property?: { table_id?: string } | null }[];
       has_more: boolean;
       page_token?: string;
     }>(`/bitable/v1/apps/${baseToken}/tables/${tableId}/fields?${qs}`);
     for (const f of data.items ?? []) {
-      fields.push({ id: f.field_id, name: f.field_name, kind: fieldKind(f.type, f.ui_type), primary: Boolean(f.is_primary) });
+      const isLink = f.type === 18 || f.type === 21;
+      fields.push({
+        id: f.field_id,
+        name: f.field_name,
+        // Links are resolved to the linked records' titles and behave like tags.
+        kind: isLink ? "multiselect" : fieldKind(f.type, f.ui_type),
+        primary: Boolean(f.is_primary),
+        rawType: f.type,
+        linkTable: isLink ? (f.property?.table_id ?? tableId) : undefined,
+      });
     }
     pageToken = data.has_more ? data.page_token : undefined;
   } while (pageToken);
@@ -190,6 +209,83 @@ function normalizeValue(raw: unknown, kind: FieldKind): CellValue {
 
 const MAX_RECORDS = 20000;
 
+// Link cells come back as { link_record_ids } or [{ record_ids, text? }]; keep the ids.
+function linkIds(raw: unknown): string[] | null {
+  if (!raw) return null;
+  const ids: string[] = [];
+  const visit = (v: unknown) => {
+    if (!v) return;
+    if (typeof v === "string") ids.push(v);
+    else if (Array.isArray(v)) v.forEach(visit);
+    else if (typeof v === "object") {
+      const o = v as { link_record_ids?: string[]; record_ids?: string[]; value?: unknown };
+      if (o.link_record_ids) ids.push(...o.link_record_ids);
+      else if (o.record_ids) ids.push(...o.record_ids);
+      else if (o.value) visit(o.value);
+    }
+  };
+  visit(raw);
+  return ids.length ? ids : null;
+}
+
+// Lookup/formula fields whose ui_type didn't reveal the result type: if every value is
+// an epoch-millisecond timestamp treat the field as a date, if every value is numeric
+// treat it as a number.
+function inferLookupKinds(fields: FieldMeta[], records: TableData["records"]) {
+  for (const f of fields) {
+    if (f.kind !== "text" || (f.rawType !== 19 && f.rawType !== 20)) continue;
+    const vals = records.map((r) => r.fields[f.name]).filter((v) => v !== null && v !== "");
+    if (!vals.length) continue;
+    const allNum = vals.every((v) => typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v));
+    if (!allNum) continue;
+    const allMs = vals.every((v) => /^\d{13}$/.test(v as string) && Number(v) > 946684800000 && Number(v) < 4102444800000);
+    f.kind = allMs ? "date" : "number";
+    for (const r of records) {
+      const v = r.fields[f.name];
+      r.fields[f.name] = v === null || v === "" ? null : Number(v);
+    }
+  }
+}
+
+// Replaces linked record ids with the linked records' primary-field text.
+async function resolveLinks(baseToken: string, fields: FieldMeta[], records: TableData["records"]) {
+  for (const f of fields.filter((x) => x.linkTable)) {
+    const ids = [...new Set(records.flatMap((r) => (r.fields[f.name] as string[] | null) ?? []))];
+    if (!ids.length) continue;
+    try {
+      const names = await linkTitles(baseToken, f.linkTable!, ids);
+      for (const r of records) {
+        const v = r.fields[f.name] as string[] | null;
+        if (v) r.fields[f.name] = v.map((id) => names.get(id) ?? id);
+      }
+    } catch (err) {
+      console.error(`[link ${f.name}]`, (err as Error).message); // keep ids if the linked table can't be read
+    }
+  }
+}
+
+async function linkTitles(baseToken: string, tableId: string, ids: string[]): Promise<Map<string, string>> {
+  const key = `titles:${baseToken}:${tableId}`;
+  const known = (cache.get(key)?.value as Map<string, string> | undefined) ?? new Map<string, string>();
+  const missing = ids.filter((id) => !known.has(id));
+  if (missing.length) {
+    const tFields = await listFields(baseToken, tableId);
+    const primary = tFields.find((x) => x.primary) ?? tFields[0];
+    for (let i = 0; i < missing.length; i += 100) {
+      const data = await larkFetch<{ records?: { record_id: string; fields: Record<string, unknown> }[] }>(
+        `/bitable/v1/apps/${baseToken}/tables/${tableId}/records/batch_get`,
+        { method: "POST", body: JSON.stringify({ record_ids: missing.slice(i, i + 100) }) },
+      );
+      for (const rec of data.records ?? []) {
+        const v = normalizeValue(rec.fields[primary.name], primary.kind === "number" ? "number" : "text");
+        known.set(rec.record_id, v === null || v === "" ? rec.record_id : String(v));
+      }
+    }
+    cache.set(key, { value: known, expiresAt: Date.now() + 10 * 60 * 1000 });
+  }
+  return known;
+}
+
 export async function getSourceData(src: SourceDef, force = false): Promise<TableData> {
   const { baseToken, tableId, viewId } = src;
   if (!baseToken || !tableId) throw new Error(`Source ${src.key} has no Base/table configured`);
@@ -220,11 +316,14 @@ export async function getSourceData(src: SourceDef, force = false): Promise<Tabl
             continue;
           }
           const row: Record<string, CellValue> = {};
-          for (const f of fields) row[f.name] = normalizeValue(item.fields[f.name], f.kind);
+          for (const f of fields) row[f.name] = f.linkTable ? linkIds(item.fields[f.name]) : normalizeValue(item.fields[f.name], f.kind);
           records.push({ id: item.record_id, fields: row });
         }
         pageToken = data.has_more ? data.page_token : undefined;
       } while (pageToken && records.length < MAX_RECORDS);
+
+      inferLookupKinds(fields, records);
+      await resolveLinks(baseToken, fields, records);
 
       return {
         table: { id: tableId, name: src.name },

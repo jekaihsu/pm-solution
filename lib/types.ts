@@ -7,6 +7,8 @@ export interface FieldMeta {
   name: string;
   kind: FieldKind;
   primary: boolean;
+  rawType?: number; // Lark field type code
+  linkTable?: string; // target table for link fields
 }
 
 export interface TableMeta {
