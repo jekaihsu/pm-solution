@@ -612,6 +612,49 @@ function SheetTable({ rows, wf, ff, hasCheck, hasFix, onPick }: { rows: GroupRow
   );
 }
 
+// 違反 SOP 明細：哪一組、哪一天、哪張單、誰。
+function SopPanel({ items, wf, dateField, weekStart, onPick }: { items: { group: string; order: TableData["records"][number] }[]; wf: WorkFields; dateField: string; weekStart: number; onPick: (g: string) => void }) {
+  if (!items.length) return <div className="cg-fail"><p className="muted small">這週沒有違反 SOP 的工作單。</p></div>;
+  return (
+    <div className="cg-fail">
+      <h4>違反 SOP 的工作單（{items.length} 張）</h4>
+      <div className="cg-detail">
+        <table>
+          <thead>
+            <tr>
+              <th>組別</th>
+              <th>日期</th>
+              <th>工作單號</th>
+              <th>出工人</th>
+              <th>工作編號</th>
+              <th>工作項目</th>
+              <th>備註</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map(({ group, order: o }) => {
+              const d = o.fields[dateField];
+              return (
+                <tr key={o.id} className="cg-link" onClick={() => onPick(group)}>
+                  <td className="cg-group">{group}</td>
+                  <td>{typeof d === "number" ? `${formatDate(d).slice(5)}（${WEEKDAYS[dayOfWeek(d, weekStart)] ?? ""}）` : "—"}</td>
+                  <td>{wf.orderNo ? text(o.fields[wf.orderNo.name]) || o.id : o.id}</td>
+                  <td className="strong">{wf.person ? text(o.fields[wf.person.name]) || "—" : "—"}</td>
+                  <td>{wf.jobNo ? text(o.fields[wf.jobNo.name]) || "—" : "—"}</td>
+                  <td>{wf.item ? text(o.fields[wf.item.name]) || "—" : "—"}</td>
+                  <td>
+                    <Notes r={o} wf={wf} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // One group, one week: every R01 item for that group on a single screen.
 function GroupFocus({ row, group, wf, cfg, sop, disabled, hasCheck, hasFlags, ff, hasFix, dateField, weekStart, day, setDay }: { row?: GroupRow; group: string; wf: WorkFields; cfg: BoardConfig; sop: Sop; disabled: boolean; hasCheck: boolean; hasFlags: boolean; ff: FixFields; hasFix: boolean; dateField: string; weekStart: number; day: number | null; setDay: (d: number | null) => void }) {
   const [failOpen, setFailOpen] = useState(false);
@@ -707,6 +750,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const [day, setDay] = useState<number | null>(null);
   const [failOpen, setFailOpen] = useState(false);
   const [layout, setLayout] = useState<"sheet" | "detail">("sheet");
+  const [sopOpen, setSopOpen] = useState(false);
   useEffect(() => setDay(null), [version, week.start]);
   const pick = (g: string | null, d: number | null = null) => {
     setFocus(g);
@@ -791,6 +835,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   }
 
   const { wf, ff, sf, rows, hidden, totals, join, dateField } = view;
+  const sopViol = wf.sopViolation ? rows.flatMap((r) => r.orders.filter((o) => violatesSop(o, wf)).map((o) => ({ group: r.group, order: o }))) : [];
   const hasFix = Boolean((ff.qtyOrig && ff.qtyFixed) || (ff.revOrig && ff.revFixed && ff.revOrig !== ff.revFixed));
   const missing = [
     !wf.group && "組別",
@@ -847,13 +892,19 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
             <div className="kpi-value">{pct(overallRate)}</div>
             <div className="kpi-sub">{hasCheck ? `不通過 ${totals.fail} ÷ 已檢核 ${totals.pass + totals.fail}・點開看哪組、誰` : `找不到${cfg.checkLabel}欄位`}</div>
           </button>
-          <div className="kpi">
-            <div className="kpi-label">異常工作單</div>
-            <div className="kpi-value">{hasFlags ? formatNumber(totals.anomaly) : "—"}</div>
-            <div className="kpi-sub">{hasFlags ? `任一 ⚠ 欄位有標記（${wf.flags.length} 個欄位）` : "找不到 ⚠ 異常欄位"}</div>
-          </div>
+          <button className={`kpi kpi-btn ${sopOpen ? "on" : ""}`} onClick={() => setSopOpen(!sopOpen)} disabled={!wf.sopViolation} aria-expanded={sopOpen}>
+            <div className="kpi-label">
+              違反 SOP {wf.sopViolation && <ChevronDown size={13} className="kpi-caret" />}
+            </div>
+            <div className={`kpi-value ${sopViol.length ? "bad-text" : ""}`}>{wf.sopViolation ? `${sopViol.length} 次` : "—"}</div>
+            <div className="kpi-sub">
+              {wf.sopViolation ? `${new Set(sopViol.map((v) => v.group)).size} 組・取自「${wf.sopViolation.name}」・點開看是哪幾張` : "日報找不到「是否違反SOP」欄位"}
+            </div>
+          </button>
         </div>
       )}
+
+      {!focus && sopOpen && wf.sopViolation && <SopPanel items={sopViol} wf={wf} dateField={dateField} weekStart={week.start} onPick={(g) => pick(g)} />}
 
       {!focus && failOpen && hasCheck && <FailPanel rows={rows} wf={wf} cfg={cfg} dateField={dateField} weekStart={week.start} onPick={(g) => pick(g)} />}
 
