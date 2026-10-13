@@ -21,6 +21,7 @@ export interface BoardConfig {
   scheduleKey: (v: DataVersion) => string;
   keepTrade: (trade: string) => boolean; // which schedule rows (by 業別) belong to this board
   keepWorkTrade?: (trade: string) => boolean; // when the work sheet has a 業別 field, which rows belong here
+  keepGroup?: (group: string) => boolean; // which 組別 values belong on this board
   needsTrade: boolean; // true when the board can't work without a 業別 field
   scheduleTradeLabel?: string;
   checkNames: string[];
@@ -36,6 +37,8 @@ export const BOARDS: Record<"r01" | "r02", BoardConfig> = {
     scheduleKey: (v) => `${v}-schedule`,
     keepTrade: (t) => !/內業/.test(t),
     keepWorkTrade: (t) => !/內業/.test(t), // 控制組只看外業
+    // 控制組只看外業組：不列行政、業務、內業，以及沒轉成名稱的關聯記錄 ID。
+    keepGroup: (g) => !/行政|業務|业务|內業|内业/.test(g) && !/^(id|rec[A-Za-z0-9]{6,})$/i.test(g.trim()),
     needsTrade: false,
     scheduleTradeLabel: "業別不是內業",
     checkNames: ["控制組檢核"],
@@ -728,13 +731,15 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
     const records = cfg.keepWorkTrade && wf.trade ? inWeek.filter((r) => cfg.keepWorkTrade!(text(r.fields[wf.trade!.name]))) : inWeek;
     const sf = sched.data ? resolveScheduleFields(sched.data.fields) : {};
     const planned = plannedPoints(sched.data as TableData | undefined, sf, week.start, week.end, cfg.keepTrade);
-    const rows = groupRows(records, wf, planned);
+    const all = groupRows(records, wf, planned);
+    const rows = cfg.keepGroup ? all.filter((r) => cfg.keepGroup!(r.group)) : all;
+    const hidden = all.filter((r) => !rows.includes(r)).map((r) => ({ group: r.group, orders: r.orders.length }));
     const totals = rows.reduce(
       (t, r) => ({ orders: t.orders + r.orders.length, revenue: t.revenue + r.revenue, pass: t.pass + r.pass, fail: t.fail + r.fail, anomaly: t.anomaly + r.anomalyCount }),
       { orders: 0, revenue: 0, pass: 0, fail: 0, anomaly: 0 },
     );
     const ff = resolveFixFields(data.fields);
-    return { dateField, wf, ff, sf, rows, totals, records, data, join };
+    return { dateField, wf, ff, sf, rows, hidden, totals, records, data, join };
   }, [work.data, cost.data, cost.status, sched.data, version, week.start, week.end, cfg]);
 
   const toggleOpen = (g: string) =>
@@ -785,7 +790,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
     );
   }
 
-  const { wf, ff, sf, rows, totals, join, dateField } = view;
+  const { wf, ff, sf, rows, hidden, totals, join, dateField } = view;
   const hasFix = Boolean((ff.qtyOrig && ff.qtyFixed) || (ff.revOrig && ff.revFixed && ff.revOrig !== ff.revFixed));
   const missing = [
     !wf.group && "組別",
@@ -1054,7 +1059,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
 
       <p className="cg-foot">
         失誤率＝{cfg.checkLabel}「不通過」÷ 已檢核（未檢核不計）。預排點數＝預排表{cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}點數欄，未填以每組每天 1 點計（標 *）。差異＝營業額點數（原值）− 預排點數。
-        {cfg.keepWorkTrade && view.wf.trade && ` 只計${cfg.workLabel}中業別不是內業的工作單。`}{cfg.costKey && " 組別與工作日期取自所屬內業成本單。"}出錯＝工作單的{[ff.qtyFixed && `「${ff.qtyFixed.name}」≠「${ff.qtyOrig?.name ?? "數量"}」`, ff.revFixed && ff.revOrig && ff.revFixed !== ff.revOrig && `「${ff.revFixed.name}」≠「${ff.revOrig.name}」`].filter(Boolean).join(" 或 ") || "修改後數值與原填不同"}（兩邊都有值才比較）。{wf.sopViolation ? `SOP 取自日報「${wf.sopViolation.name}」：有任一張違反顯示紅色，全部填寫且沒有違反顯示綠色「SOP 完成」。` : "SOP 由控制組成員在每張工作單上勾選（展開組別），整組都勾完才顯示綠色「SOP 完成」；記錄勾選人與時間，不寫回 Lark。"}
+        {cfg.keepWorkTrade && view.wf.trade && ` 只計${cfg.workLabel}中業別不是內業的工作單。`}{hidden.length > 0 && ` 不列入：${hidden.map((h) => `${/^rec/.test(h.group) ? "未對應組別" : h.group}（${h.orders} 張）`).join("、")}。`}{cfg.costKey && " 組別與工作日期取自所屬內業成本單。"}出錯＝工作單的{[ff.qtyFixed && `「${ff.qtyFixed.name}」≠「${ff.qtyOrig?.name ?? "數量"}」`, ff.revFixed && ff.revOrig && ff.revFixed !== ff.revOrig && `「${ff.revFixed.name}」≠「${ff.revOrig.name}」`].filter(Boolean).join(" 或 ") || "修改後數值與原填不同"}（兩邊都有值才比較）。{wf.sopViolation ? `SOP 取自日報「${wf.sopViolation.name}」：有任一張違反顯示紅色，全部填寫且沒有違反顯示綠色「SOP 完成」。` : "SOP 由控制組成員在每張工作單上勾選（展開組別），整組都勾完才顯示綠色「SOP 完成」；記錄勾選人與時間，不寫回 Lark。"}
         {view.records.length > 0 && ` 資料至 ${formatDate(Math.max(...view.records.map((r) => (r.fields[view.dateField] as number) ?? 0)))}。`}
       </p>
 
