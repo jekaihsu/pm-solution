@@ -1,74 +1,93 @@
 "use client";
 import Link from "next/link";
-import { REPORTS, SOURCES, sourceLabel, sourceByKey, type SourceDef } from "@/lib/reports";
+import { formatNumber } from "@/lib/aggregate";
+import { resolveDateField, weeklyCounts } from "@/lib/metrics";
+import { REPORTS, SOURCES, sourceByKey, type SourceDef } from "@/lib/reports";
 import { weekName } from "@/lib/week";
 import { showSource, useShell } from "./AppShell";
+import Sparkline from "./Sparkline";
 import { useSource, type SourceState } from "./useSource";
 
-function weekCount(src: SourceDef, s: SourceState, start: number, end: number): { n: number; field: string } | null {
-  const d = s.data;
-  if (s.status !== "ok" || !d) return null;
-  const field = d.fields.find((f) => f.name === src.dateField && f.kind === "date") ?? d.fields.find((f) => f.kind === "date");
-  if (!field) return null;
-  const n = d.records.filter((r) => {
-    const v = r.fields[field.name];
-    return typeof v === "number" && v >= start && v < end;
-  }).length;
-  return { n, field: field.name };
+function statusText(s: SourceState): string {
+  switch (s.status) {
+    case "loading":
+      return "載入中…";
+    case "not-located":
+      return "來源未定位";
+    case "not-connected":
+      return "未連接";
+    case "no-demo":
+      return "無示範";
+    case "error":
+      return "讀取失敗";
+    default:
+      return "";
+  }
+}
+
+function SourceRow({ src, state, offset }: { src: SourceDef; state: SourceState; offset: number }) {
+  const d = state.data;
+  const field = d ? resolveDateField(src, d.fields) : undefined;
+  const trend = d && field ? weeklyCounts(d, field, offset, 8) : null;
+  const now = trend?.[trend.length - 1].count;
+  const prev = trend?.[trend.length - 2].count;
+  const diff = now !== undefined && prev !== undefined ? now - prev : null;
+  const dot = state.status === "ok" ? (d?.stale ? "warn" : "good") : state.status === "error" ? "bad" : "";
+
+  return (
+    <li>
+      <span className={`dot ${dot}`} aria-hidden />
+      <span className="ov-src-name">
+        {src.name}
+        {src.version && <span className={`ver ver-${src.version}`}>{src.version.toUpperCase()}</span>}
+      </span>
+      {state.status !== "ok" || !d ? (
+        <span className="ov-src-val muted">{statusText(state)}</span>
+      ) : trend ? (
+        <span className="ov-src-val">
+          <Sparkline values={trend.map((t) => t.count)} labels={trend.map((t) => t.label)} height={20} />
+          <strong>{formatNumber(now ?? 0)}</strong>
+          {diff !== null && <span className="delta">{diff > 0 ? `▲${diff}` : diff < 0 ? `▼${-diff}` : "＝"}</span>}
+        </span>
+      ) : (
+        <span className="ov-src-val">共 {formatNumber(d.total)} 筆</span>
+      )}
+    </li>
+  );
 }
 
 export default function Overview() {
   const { week, version } = useShell();
   // SOURCES is a fixed list, so calling the hook per entry keeps hook order stable.
-  const states = Object.fromEntries(SOURCES.map((s) => [s.key, { src: s, state: useSource(s.key) }]));
+  const states = Object.fromEntries(SOURCES.map((s) => [s.key, useSource(s.key)]));
 
   return (
     <div>
-      <header className="report-head">
-        <div>
-          <h1>週報總覽</h1>
-          <p className="purpose">
-            {weekName(week.offset)} {week.label}（Asia/Taipei，週一至週日）。各報告視角不同，筆數不可跨報告相加：R01 與 R10 共用外業工作單。V3 與 V4 分開計，不相加。
-          </p>
-        </div>
+      <header className="report-bar">
+        <h1>週報總覽</h1>
+        <span className="muted small ov-sub">
+          {weekName(week.offset)} {week.label}・數字為本期筆數、▲▼ 與前週比較、小圖為近 8 週
+        </span>
       </header>
+      <p className="muted small ov-note">各報告視角不同，筆數不可跨報告相加（R01 與 R10 共用外業工作單）；V3 與 V4 分開計。</p>
       <div className="overview-grid">
-        {REPORTS.map((r) => (
-          <Link key={r.id} href={`/reports/${r.slug}`} className="ov-card">
-            <div className="ov-top">
-              <span className="rid">{r.id}</span>
-              <h2>{r.name}</h2>
-            </div>
-            <ul className="ov-sources">
-              {r.sources.filter((key) => showSource(sourceByKey(key)!, version)).map((key) => {
-                const { src, state } = states[key];
-                const wc = weekCount(src, state, week.start, week.end);
-                return (
-                  <li key={key}>
-                    <span className={`dot ${state.status === "ok" ? (state.data?.stale ? "warn" : "good") : state.status === "error" ? "bad" : ""}`} aria-hidden />
-                    <span className="ov-src-name">{sourceLabel(src)}</span>
-                    <span className="ov-src-val">
-                      {state.status === "ok" && state.data
-                        ? wc
-                          ? `本期 ${wc.n} 筆`
-                          : `共 ${state.data.total} 筆`
-                        : state.status === "loading"
-                          ? "…"
-                          : state.status === "not-located"
-                            ? "來源未定位"
-                            : state.status === "not-connected"
-                              ? "未連接"
-                              : state.status === "no-demo"
-                                ? "無示範"
-                                : "讀取失敗"}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-            <div className="ov-foot">{r.pending.length} 項定義待確認</div>
-          </Link>
-        ))}
+        {REPORTS.map((r) => {
+          const keys = r.sources.filter((key) => showSource(sourceByKey(key)!, version));
+          return (
+            <Link key={r.id} href={`/reports/${r.slug}`} className="ov-card">
+              <div className="ov-top">
+                <span className="rid">{r.id}</span>
+                <h2>{r.name}</h2>
+              </div>
+              <ul className="ov-sources">
+                {keys.map((key) => (
+                  <SourceRow key={key} src={sourceByKey(key)!} state={states[key]} offset={week.offset} />
+                ))}
+              </ul>
+              <div className="ov-foot">{r.pending.length} 項定義待確認 →</div>
+            </Link>
+          );
+        })}
       </div>
     </div>
   );

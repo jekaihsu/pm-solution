@@ -14,7 +14,8 @@ const weekStart = () => {
   d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - 7); // last Monday
   return d.getTime();
 };
-const inWeeks = (r: () => number) => weekStart() + Math.floor(r() * 21) * day;
+// Spread over the last ~8 weeks so trends and week-over-week deltas have data.
+const inWeeks = (r: () => number) => weekStart() - 49 * day + Math.floor(r() * 63) * day;
 
 const groups = ["外業一組", "外業二組", "外業三組", "外業四組"];
 const projects = ["P-2601", "P-2602", "P-2603", "P-2604", "P-2605", "P-2606"];
@@ -22,7 +23,7 @@ const items = ["地形測量", "控制測量", "放樣", "地籍調查"];
 
 const SPECS: Record<string, { n: number; spec: Spec }> = {
   "field-work": {
-    n: 60,
+    n: 220,
     spec: [
       ["工作單號", "text", (_, i) => `W-${1000 + i}`],
       ["工程編號", "select", (r) => pick(r, projects)],

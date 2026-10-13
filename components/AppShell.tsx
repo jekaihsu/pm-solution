@@ -70,6 +70,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               資料來源與定義
             </Link>
           </nav>
+          <label className="toggle sidebar-toggle">
+            <input type="checkbox" checked={demo} onChange={(e) => setDemo(e.target.checked)} />
+            顯示示範資料
+          </label>
         </aside>
         <div className="main">
           <header className="topbar">
@@ -80,7 +84,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <button className="btn small" onClick={() => setWeekOffset(offset - 1)} aria-label="前一週">
                 ‹
               </button>
-              <span className="week-label">
+              <span className="week-label" onClick={() => setWeekOffset(-1)} title="回到上週">
                 <strong>{weekName(offset)}</strong> {week.label}
               </span>
               <button className="btn small" onClick={() => setWeekOffset(offset + 1)} disabled={offset >= 0} aria-label="下一週">
@@ -95,12 +99,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               ))}
             </div>
             <div className="topbar-right">
-              <label className="toggle">
-                <input type="checkbox" checked={demo} onChange={(e) => setDemo(e.target.checked)} />
-                示範資料
-              </label>
-              <button className="btn small" onClick={ctx.refresh}>
-                重新整理
+              <button className="btn small" onClick={ctx.refresh} aria-label="重新整理" title="重新整理">
+                ⟳<span className="hide-sm"> 重新整理</span>
               </button>
               {user && (
                 <span className="user">

@@ -342,3 +342,57 @@ th button:focus-visible, .btn:focus-visible, a:focus-visible, summary:focus-visi
 }
 .fields-details > summary { cursor: pointer; font-size: 13px; color: var(--text-2); margin-bottom: 8px; }
 .state-box a { color: var(--accent); }
+
+/* ---------- dashboard ---------- */
+.seg-sm button { padding: 3px 10px; font-size: 13px; }
+.dash { padding: 12px; }
+.dash .kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 12px; }
+.dash .kpi { background: var(--page); }
+.kpi-value { font-variant-numeric: tabular-nums; }
+.delta { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kpi-spark { display: flex; align-items: flex-end; gap: 8px; margin-top: 8px; }
+.spark { display: block; overflow: visible; }
+.spark-bar { fill: color-mix(in srgb, var(--accent) 35%, transparent); }
+.spark-now { fill: var(--accent); }
+.dash-foot { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+.dash .card { background: var(--surface); }
+
+/* ---------- overview ---------- */
+.ov-sub { margin-left: 4px; }
+.ov-note { margin: -4px 0 14px; }
+.ov-src-name .ver { margin-left: 6px; }
+.ov-src-val { display: inline-flex; align-items: center; gap: 8px; }
+.ov-src-val strong { min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+.ov-src-val .delta { min-width: 34px; }
+
+/* ---------- mobile cards ---------- */
+.cards { display: grid; gap: 8px; padding: 10px; }
+.rec { all: unset; display: block; background: var(--page); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+.rec:focus-visible { outline: 2px solid var(--accent); }
+.rec-title { font-weight: 600; margin-bottom: 6px; }
+.rec dl { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
+.rec dl > div { min-width: 0; }
+.rec dt { color: var(--muted); font-size: 11.5px; }
+.rec dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rec.open dd { white-space: normal; word-break: break-word; }
+.rec-more { font-size: 12px; color: var(--accent); margin-top: 6px; }
+
+.sidebar-toggle { margin: 18px 10px 0; padding-top: 12px; border-top: 1px solid var(--border); }
+.week-label { cursor: pointer; }
+
+@media (max-width: 700px) {
+  .hide-sm { display: none; }
+  .topbar { gap: 8px; }
+  .topbar .seg button { padding: 4px 8px; }
+  .report-bar h1 { font-size: 17px; }
+  .ov-sub { display: none; }
+  .dash { padding: 10px; }
+  .dash .kpis { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .dash .kpi { padding: 10px 12px; }
+  .dash .kpi-value { font-size: 22px; }
+  .toolbar { gap: 2px; }
+  .tool-select select { max-width: 110px; }
+  .facts-line { white-space: normal; }
+  .grid { gap: 10px; }
+  .sheet-tabs button { padding: 8px 10px; }
+}

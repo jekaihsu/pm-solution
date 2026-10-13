@@ -1,12 +1,14 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { aggregate, applyFilters, defaultWidgets, formatNumber, groupKeys, type Filters, type Widget } from "@/lib/aggregate";
+import { applyFilters, formatNumber, groupKeys, type Filters, type Widget } from "@/lib/aggregate";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { sourceLabel, type SourceDef } from "@/lib/reports";
 import type { CellValue, FieldMeta, TableData } from "@/lib/types";
 import { formatDate, weekName } from "@/lib/week";
 import { useShell } from "./AppShell";
-import ChartView from "./ChartView";
+import RecordCards from "./RecordCards";
+import SourceDashboard, { dashboardWidgets } from "./SourceDashboard";
+import { MOBILE, useMedia } from "./useMedia";
 import WidgetEditor from "./WidgetEditor";
 import { STATUS_TEXT, useSource } from "./useSource";
 
@@ -56,6 +58,7 @@ export default function SourcePanel({ reportId, source }: { reportId: string; so
       reportId={reportId}
       source={source}
       data={data}
+      weekOffset={week.offset}
       weekStart={week.start}
       weekEnd={week.end}
       weekText={`${weekName(week.offset)} ${week.label}`}
@@ -94,6 +97,7 @@ function SourceBody({
   reportId,
   source,
   data,
+  weekOffset,
   weekStart,
   weekEnd,
   weekText,
@@ -101,6 +105,7 @@ function SourceBody({
   reportId: string;
   source: SourceDef;
   data: TableData;
+  weekOffset: number;
   weekStart: number;
   weekEnd: number;
   weekText: string;
@@ -119,15 +124,21 @@ function SourceBody({
     const valid = saved?.filter((n) => names.has(n));
     return valid?.length ? valid : defaultColumns(source, data.fields);
   });
-  const [widgets, setWidgets] = useState<Widget[]>(() => load<Widget[]>(`${storeKey}:widgets`) ?? defaultWidgets(data.fields.filter((f) => f.kind !== "date")));
-  const [showCharts, setShowCharts] = useState(false);
+  const initialDate = dateField === ALL ? undefined : dateField;
+  const [widgets, setWidgets] = useState<Widget[]>(() => load<Widget[]>(`${storeKey}:dash`) ?? dashboardWidgets(source, data.fields, initialDate));
+  const isMobile = useMedia(MOBILE);
+  const [viewPref, setViewPref] = useState<"dash" | "table" | null>(() => load<"dash" | "table">(`${storeKey}:view`));
+  const view = viewPref ?? (isMobile ? "dash" : "table");
   const [editing, setEditing] = useState<Widget | null>(null);
   const [q, setQ] = useState("");
 
   useEffect(() => save(`${storeKey}:date`, dateField), [storeKey, dateField]);
   useEffect(() => save(`${storeKey}:filters`, filters), [storeKey, filters]);
   useEffect(() => save(`${storeKey}:cols`, columns), [storeKey, columns]);
-  useEffect(() => save(`${storeKey}:widgets`, widgets), [storeKey, widgets]);
+  useEffect(() => save(`${storeKey}:dash`, widgets), [storeKey, widgets]);
+  useEffect(() => {
+    if (viewPref) save(`${storeKey}:view`, viewPref);
+  }, [storeKey, viewPref]);
 
   const byWeek = dateField !== ALL;
   const { inWeek, undated } = useMemo(() => {
@@ -174,6 +185,15 @@ function SourceBody({
     downloadCsv(`${reportId}_${sourceLabel(source)}_${byWeek ? weekText.replace(/[\s/–]/g, "_") : "全部"}.csv`, toCsv(data.fields, filtered, meta));
   };
 
+  const emptyText =
+    data.records.length === 0
+      ? data.excluded
+        ? "套用 V4 納入規則後沒有記錄（不代表數值為零）"
+        : "來源目前沒有記錄（不代表數值為零）"
+      : byWeek
+        ? `${weekText} 依「${dateField}」沒有符合的記錄`
+        : "此篩選條件沒有記錄";
+
   // One compact line of context instead of stacked banners.
   const facts: string[] = [];
   if (data.source === "demo") facts.push("示範資料");
@@ -186,6 +206,14 @@ function SourceBody({
   return (
     <div className="sheet">
       <div className="toolbar">
+        <div className="seg seg-sm" role="group" aria-label="檢視">
+          <button className={view === "dash" ? "on" : ""} onClick={() => setViewPref("dash")} aria-pressed={view === "dash"}>
+            看板
+          </button>
+          <button className={view === "table" ? "on" : ""} onClick={() => setViewPref("table")} aria-pressed={view === "table"}>
+            {isMobile ? "清單" : "表格"}
+          </button>
+        </div>
         <label className="tool tool-select" title="依哪個日期欄位篩選統計週">
           <span>📅</span>
           <select value={dateField} onChange={(e) => setDateField(e.target.value)} aria-label="週篩選依據">
@@ -230,19 +258,18 @@ function SourceBody({
           )}
         </Popover>
 
+        {view === "table" && (
         <Popover label={`欄位 ${visibleFields.length}/${data.fields.length}`}>
           <ColumnPicker fields={data.fields} columns={columns} onChange={setColumns} onReset={() => setColumns(defaultColumns(source, data.fields))} />
         </Popover>
+        )}
 
-        <input className="tool-search" placeholder="搜尋…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="搜尋明細" />
+        {view === "table" && <input className="tool-search" placeholder="搜尋…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="搜尋明細" />}
 
         <div className="toolbar-right">
           <span className="count-text">
             <strong>{formatNumber(filtered.length)}</strong> 筆{byWeek ? `（${weekText}）` : ""}
           </span>
-          <button className={`tool ${showCharts ? "on" : ""}`} onClick={() => setShowCharts((s) => !s)} aria-pressed={showCharts}>
-            圖表
-          </button>
           <button className="tool" onClick={exportCsv} disabled={!filtered.length}>
             匯出
           </button>
@@ -260,59 +287,30 @@ function SourceBody({
         {data.stale && data.error && <span className="bad-text"> · 最近一次讀取失敗：{data.error}</span>}
       </div>
 
-      {showCharts && filtered.length > 0 && (
-        <div className="charts">
-          <div className="charts-head">
-            <button className="btn ghost small" onClick={() => setWidgets(defaultWidgets(data.fields.filter((f) => f.kind !== "date")))}>
-              重設圖表
-            </button>
-            <button
-              className="btn primary small"
-              onClick={() => setEditing({ id: Math.random().toString(36).slice(2, 9), title: "", type: "bar", groupBy: filterable[0]?.name ?? data.fields[0]?.name ?? "", agg: "count", width: 1 })}
-            >
-              ＋ 新增圖表
-            </button>
-          </div>
-          <div className="grid">
-            {widgets.map((w, i) => (
-              <article key={w.id} className={`card ${w.width === 2 ? "wide" : ""}`}>
-                <header>
-                  <h3>{w.title}</h3>
-                  <div className="card-actions">
-                    <button title="前移" disabled={i === 0} onClick={() => setWidgets((ws) => move(ws, i, i - 1))}>
-                      ←
-                    </button>
-                    <button title="後移" disabled={i === widgets.length - 1} onClick={() => setWidgets((ws) => move(ws, i, i + 1))}>
-                      →
-                    </button>
-                    <button title="編輯" onClick={() => setEditing(w)}>
-                      ✎
-                    </button>
-                    <button title="刪除" onClick={() => setWidgets((ws) => ws.filter((x) => x.id !== w.id))}>
-                      ✕
-                    </button>
-                  </div>
-                </header>
-                <ChartView widget={w} series={aggregate(filtered, data.fields, w)} colorKeys={options.get(w.groupBy) ?? []} stackColorKeys={options.get(w.stackBy ?? "") ?? []} />
-              </article>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {filtered.length === 0 ? (
-        <div className="state-box">
-          {data.records.length === 0
-            ? data.excluded
-              ? "套用 V4 納入規則後沒有記錄（不代表數值為零）"
-              : "來源目前沒有記錄（不代表數值為零）"
-            : byWeek
-              ? `${weekText} 依「${dateField}」沒有符合的記錄`
-              : "此篩選條件沒有記錄"}
-        </div>
+      {view === "dash" ? (
+        <SourceDashboard
+          source={source}
+          data={data}
+          dateField={byWeek ? dateField : undefined}
+          weekOffset={weekOffset}
+          filters={filters}
+          records={filtered}
+          widgets={widgets}
+          colorKeys={options}
+          onEdit={setEditing}
+          onRemove={(id) => setWidgets((ws) => ws.filter((x) => x.id !== id))}
+          onMove={(from, to) => setWidgets((ws) => move(ws, from, to))}
+          onReset={() => setWidgets(dashboardWidgets(source, data.fields, byWeek ? dateField : undefined))}
+          onAdd={() => setEditing({ id: Math.random().toString(36).slice(2, 9), title: "", type: "bar", groupBy: filterable[0]?.name ?? data.fields[0]?.name ?? "", agg: "count", width: 1 })}
+        />
+      ) : filtered.length === 0 ? (
+        <div className="state-box">{emptyText}</div>
+      ) : isMobile ? (
+        <RecordCards fields={visibleFields} records={filtered} query={q} allFields={data.fields} />
       ) : (
         <DataTable fields={visibleFields} records={filtered} query={q} allFields={data.fields} />
       )}
+      {view === "dash" && filtered.length === 0 && <div className="state-box">{emptyText}</div>}
 
       {editing && (
         <WidgetEditor

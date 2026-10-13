@@ -67,6 +67,8 @@ export default function ChartView({
     tick: { fill: theme.muted, fontSize: 12 },
     tickLine: false,
   };
+  // Day buckets (YYYY-MM-DD) read as MM/DD so a week fits on a phone.
+  const shortDay = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v.slice(5).replace("-", "/") : String(v));
   const tooltip = (
     <Tooltip
       cursor={{ fill: theme.grid, opacity: 0.5, stroke: theme.axis }}
@@ -116,7 +118,7 @@ export default function ChartView({
       <ResponsiveContainer width="100%" height={300}>
         <BarChart data={rows} barCategoryGap="20%">
           {grid}
-          <XAxis dataKey="name" {...axisProps} />
+          <XAxis dataKey="name" {...axisProps} tickFormatter={shortDay} />
           <YAxis {...axisProps} axisLine={false} tickFormatter={formatNumber} width={48} />
           {tooltip}
           {legend}
@@ -144,7 +146,7 @@ export default function ChartView({
       <ResponsiveContainer width="100%" height={280}>
         <Chart data={series.rows}>
           {grid}
-          <XAxis dataKey="name" {...axisProps} />
+          <XAxis dataKey="name" {...axisProps} tickFormatter={shortDay} />
           <YAxis {...axisProps} axisLine={false} tickFormatter={formatNumber} width={48} />
           {tooltip}
           {widget.type === "line" ? (
@@ -172,7 +174,7 @@ export default function ChartView({
           </>
         ) : (
           <>
-            <XAxis dataKey="name" {...axisProps} interval={0} angle={series.rows.length > 6 ? -30 : 0} textAnchor={series.rows.length > 6 ? "end" : "middle"} height={series.rows.length > 6 ? 60 : 30} />
+            <XAxis dataKey="name" {...axisProps} tickFormatter={shortDay} interval={0} angle={series.rows.length > 6 ? -30 : 0} textAnchor={series.rows.length > 6 ? "end" : "middle"} height={series.rows.length > 6 ? 60 : 30} />
             <YAxis {...axisProps} axisLine={false} tickFormatter={formatNumber} width={48} />
           </>
         )}
