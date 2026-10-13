@@ -424,6 +424,8 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
 .ov-chevron { margin-left: auto; color: var(--muted); transition: transform 0.15s; }
 .ov-card:hover .ov-chevron { transform: translateX(2px); color: var(--text); }
 .ov-list { list-style: none; margin: 0; padding: 0; display: grid; }
+/* Let long source names ellipsize instead of widening the card past a phone screen. */
+.ov-card, .ov-list > * { min-width: 0; }
 .ov-row { display: flex; align-items: center; gap: 10px; height: 34px; font-size: 13px; border-top: 1px solid var(--border-soft); }
 .ov-row:first-child { border-top: none; }
 .ov-name { flex: 1; min-width: 0; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -566,6 +568,10 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
 
 /* ---------- R04 HR ---------- */
 .hr { display: grid; gap: 14px; }
+/* Grid items default to min-width:auto, so one long unbroken string (an API path in a
+   load error) widened every card past the phone screen. Let them shrink and wrap. */
+.hr > *, .hr-card > *, .hr-src > * { min-width: 0; }
+.hr-card { overflow-wrap: anywhere; }
 .hr-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 16px 18px; display: grid; gap: 12px; }
 .hr-card-head { display: flex; align-items: center; gap: 8px; color: var(--text-2); }
 .hr-card-head h2 { font-size: 15px; font-weight: 600; margin: 0; color: var(--text); }
