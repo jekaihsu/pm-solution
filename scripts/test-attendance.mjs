@@ -1098,6 +1098,7 @@ test("R4-2 半天假＋出差外出時，Lark 打卡上的出差／外出標記�
   const withLeave = buildAttendanceView(base2({ now: NOW_SUN, tasks: [task("emp_A", 20261006, recs)], approvals: [outAppr, lv("emp_A", am("2026-10-06"))] }));
   assert.equal(person(plain, "甲").days[1], "trip");
   assert.equal(person(withLeave, "甲").days[1], "trip");
+  assert.deepEqual(sumOf(withLeave, "trip", "out", "leave"), [1, 0, 0]);
 });
 
 test("R4-3 離職舊列與在職列共用 Lark帳號但名字不同：不當別名（成本單照舊算對不到），計入 rosterShared", () => {
@@ -1164,4 +1165,40 @@ test("R4-9 平日但 Lark 給純免打卡（補假）時，半天假＋同日出
   const v = buildAttendanceView(base2({ now: NOW_SUN, tasks: [task("emp_A", 20261009, [rec("NoNeedCheck", "NoNeedCheck")])], approvals: [lv("emp_A", am("2026-10-09")), { user_id: "emp_A", trips: [tripOn("2026-10-09")] }] }));
   assert.equal(person(v, "甲").days[4], "off");
   assert.deepEqual(sumOf(v, "trip", "leave"), [0, 0]);
+});
+
+// ---- 第五輪審查 ----
+test("R5-1 今天＋只有日期的半天假（上下午不明）比照上午假：上下班都 Lack 也只計請假 0.5、不算缺卡；過去日照舊", () => {
+  const unk = leave("LU", "2026-10-07", "2026-10-07", 43200, 3);
+  const recs = [task("emp_A", 20261007, [rec("Lack", "Lack")])];
+  const today = buildAttendanceView(base2({ tasks: recs, approvals: [lv("emp_A", unk)] }));
+  assert.equal(person(today, "甲").days[2], "leave-half-open");
+  assert.deepEqual(sumOf(today, "leave", "expected", "lack"), [0.5, 0, 0]);
+  const past = buildAttendanceView(base2({ now: NOW_SUN, tasks: recs, approvals: [lv("emp_A", unk)] }));
+  assert.equal(person(past, "甲").days[2], "leave-half-lack");
+});
+
+test("R5-2 名冊：姓名空白的殘留列共用在職者帳號，不算「不同人共用帳號」（不誤報），並當別名", () => {
+  const cols = { name: PEOPLE_NAME, group: PEOPLE_GROUP, active: PEOPLE_ACTIVE, account: PEOPLE_ACCOUNT };
+  const mk = (id, name, oid, active) => ({ id, fields: { [PEOPLE_NAME]: name, [PEOPLE_GROUP]: name ? "PM" : null, [PEOPLE_ACTIVE]: active }, people: { [PEOPLE_ACCOUNT]: [{ id: oid, name: "x" }] } });
+  for (const rows of [[mk("rP", "甲", "ou_p", true), mk("rBlank", "", "ou_p", null)], [mk("rBlank", "", "ou_p", null), mk("rP", "甲", "ou_p", true)], [mk("rP", "甲", "ou_p", true), mk("rBlank2", "", "ou_p", true)]]) {
+    const r = buildRoster(rows, cols);
+    assert.equal(r.merged, 0);
+    assert.equal(r.people.length, 1);
+    assert.equal(r.people[0].name, "甲");
+  }
+});
+
+test("R5-3 規則一致：平日沒紀錄、整天假＋出差同日→請假優先；今天沒紀錄的出差照計；一側免打卡一側沒結果的整天出差照計；只有下班標 Travel 也算標記", () => {
+  const both = buildAttendanceView(base2({ now: NOW_SUN, approvals: [lv("emp_A", leave("L1", "2026-10-06 09:00:00", "2026-10-06 18:00:00", 86400)), { user_id: "emp_A", trips: [tripOn("2026-10-06")] }] }));
+  assert.equal(person(both, "甲").days[1], "leave");
+  assert.deepEqual(sumOf(both, "leave", "trip"), [1, 0]);
+  const today = buildAttendanceView(base2({ approvals: [{ user_id: "emp_A", trips: [tripOn("2026-10-07")] }] }));
+  assert.equal(person(today, "甲").days[2], "trip");
+  const offTrip = buildAttendanceView(base2({ now: NOW_SUN, tasks: [task("emp_A", 20261006, [rec("NoNeedCheck", "Todo")])], approvals: [{ user_id: "emp_A", trips: [tripOn("2026-10-06")] }] }));
+  assert.equal(person(offTrip, "甲").days[1], "trip");
+  const outAppr = { user_id: "emp_A", outs: [{ approval_id: "O1", start_time: "2026-10-06 14:00:00", end_time: "2026-10-06 15:00:00", interval: 3600, reason: "r" }] };
+  const outOnly = buildAttendanceView(base2({ now: NOW_SUN, tasks: [task("emp_A", 20261006, [rec("Normal", "Normal", "None", "Travel")])], approvals: [outAppr, lv("emp_A", am("2026-10-06"))] }));
+  assert.equal(person(outOnly, "甲").days[1], "trip");
+  assert.deepEqual(sumOf(outOnly, "trip", "out"), [1, 0]);
 });

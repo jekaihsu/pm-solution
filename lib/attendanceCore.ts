@@ -102,7 +102,8 @@ export function classifyDay(records: LarkTaskRecord[] | undefined, ctx: { approv
     const inSupp = r.check_in_result_supplement ?? "", outSupp = r.check_out_result_supplement ?? "";
     for (const s of [inSupp, outSupp]) if (SUPP[s] && !suppKind && !(half && s === "Leave")) suppKind = SUPP[s];
     const usable = (res: string | undefined, supp: string, skip: boolean): res is string => !!res && KNOWN.has(res) && res !== "NoNeedCheck" && !skip && !(half && supp === "Leave");
-    if (usable(inRes, inSupp, half === "am")) sides.push({ result: inRes, supp: inSupp });
+    // 上午假忽略上班側；今天＋上下午不明的半天假比照上午假（上班側可能就是請假那半邊，不能當缺卡）
+    if (usable(inRes, inSupp, half === "am" || (half === "unknown" && !!ctx.open))) sides.push({ result: inRes, supp: inSupp });
     const stillWorking = !!ctx.open && outRes === "Lack" && !RESCUE.has(outSupp) && (lenient || isPunch(inRes, inSupp));
     if (usable(outRes, outSupp, half === "pm" || stillWorking)) sides.push({ result: outRes, supp: outSupp });
   }
@@ -177,7 +178,7 @@ export function buildRoster(rows: RosterRow[], cols: { name: string; group: stri
       if (openId && r.id) {
         const live = byOpenId.get(openId);
         if (!live) inactiveIds.set(openId, [...(inactiveIds.get(openId) ?? []), { id: r.id, name }]);
-        else if (name === live.name) live.altRecordIds = [...(live.altRecordIds ?? []), r.id];
+        else if (!name || name === live.name) live.altRecordIds = [...(live.altRecordIds ?? []), r.id];
         else merged++; // 名字不同＝不同人共用帳號：不當別名（成本單照舊算對不到），計數供註腳提醒
       }
       continue;
@@ -186,7 +187,7 @@ export function buildRoster(rows: RosterRow[], cols: { name: string; group: stri
     if (dup) {
       // 同一 Lark帳號（open_id）的另一列＝同一個人：只留第一列，record_id 記成別名；名字不同＝不同人共用帳號，計數供註腳提醒
       if (r.id) dup.altRecordIds = [...(dup.altRecordIds ?? []), r.id];
-      if (name !== dup.name) merged++;
+      if (name && dup.name && name !== dup.name) merged++; // 姓名空白的殘留列不算不同人
       continue;
     }
     inService++;
@@ -202,7 +203,7 @@ export function buildRoster(rows: RosterRow[], cols: { name: string; group: stri
   }
   for (const p of people) {
     for (const o of inactiveIds.get(p.openId) ?? []) {
-      if (o.name === p.name) p.altRecordIds = [...(p.altRecordIds ?? []), o.id];
+      if (!o.name || o.name === p.name) p.altRecordIds = [...(p.altRecordIds ?? []), o.id];
       else merged++;
     }
   }
