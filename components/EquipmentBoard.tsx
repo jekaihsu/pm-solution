@@ -514,14 +514,24 @@ export default function EquipmentBoard() {
   const cal = useSource("equipment-calibration");
   const master = system.status === "ok" ? system.data : fallback.status === "ok" ? fallback.data : undefined;
   const masterLabel = system.status === "ok" ? "儀器管理系統：儀器總表" : "V3 儀器費率（暫代，非完整台帳）";
-  const notLocated = useMemo(() => [system, insp, cal].some((s) => s.status === "not-located"), [system, insp, cal]);
+  const missing = useMemo(
+    () =>
+      [
+        [system, "儀器管理系統的儀器清單"],
+        [insp, "月租儀器／車輛檢查紀錄"],
+        [cal, "TAF／自校驗紀錄"],
+      ]
+        .filter(([s]) => (s as typeof system).status === "not-located")
+        .map(([, label]) => label as string),
+    [system, insp, cal],
+  );
 
   return (
     <div className="hr">
-      {notLocated && !demo && (
+      {missing.length > 0 && !demo && (
         <ul className="cg-notes">
           <li>
-            <CircleAlert size={14} /> 儀器管理系統的資料表尚未接入。請提供 Base 連結，或打開右下角「示範資料」先看畫面。
+            <CircleAlert size={14} /> 尚未接入：{missing.join("、")}。請提供所在的 Base 連結，或打開右下角「示範資料」先看畫面。
           </li>
         </ul>
       )}
