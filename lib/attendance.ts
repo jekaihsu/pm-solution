@@ -6,6 +6,7 @@ import { PEOPLE_ACCOUNT, PEOPLE_ACTIVE, PEOPLE_GROUP, PEOPLE_NAME } from "./peop
 import { sourceByKey } from "./reports";
 import {
   attendanceErrorText,
+  attendanceTtl,
   buildAttendanceView,
   buildRoster,
   fieldCostError,
@@ -176,7 +177,7 @@ async function compute(weekStart: number, now: number, force: boolean): Promise<
   if (!rosterSrc) return { status: "error", error: "找不到人員名單來源" };
   const rows = (await getSourceData(rosterSrc)).records as unknown as RosterRow[];
   const fieldCostP = fieldCost(dates, force);
-  const { people: roster, noAccountPeople, inService, noAccount } = buildRoster(rows, { name: PEOPLE_NAME, group: PEOPLE_GROUP, active: PEOPLE_ACTIVE, account: PEOPLE_ACCOUNT });
+  const { people: roster, noAccountPeople, inService, noAccount, merged } = buildRoster(rows, { name: PEOPLE_NAME, group: PEOPLE_GROUP, active: PEOPLE_ACTIVE, account: PEOPLE_ACCOUNT });
 
   const perm: Perm = { missing: new Set() };
   const [em, gm] = await Promise.allSettled([employeeIdMap(roster.map((r: RosterPerson) => r.openId), force), groupMembers(force)]);
@@ -203,8 +204,8 @@ async function compute(weekStart: number, now: number, force: boolean): Promise<
       dates[0] > today || !memberIds.length ? Promise.resolve({ tasks: [], invalid: 0 }) : queryTasks(memberIds, dates[0], last),
       queryApprovals(allIds, dates[0], dates[6]),
     ]);
-    const view = buildAttendanceView({ weekStart, now, roster, noAccountPeople, employeeIds, members, tasks: t.tasks, approvals, notes: { rosterInService: inService, noAccount, groupCount, invalidIds: t.invalid }, fieldCost: await fieldCostP });
-    if (fieldCostWarning(view)) console.warn(`[attendance] 外業成本單可能沒讀完整 error=${view.notes.fieldError ?? "-"} sheets=${view.notes.fieldSheets} emptyLinks=${view.notes.fieldEmptyLinks} allEmpty=${view.notes.fieldAllEmpty} noDate=${view.notes.fieldNoDate} matched=${view.notes.fieldMatched} unmatched=${view.notes.fieldUnmatched}`);
+    const view = buildAttendanceView({ weekStart, now, roster, noAccountPeople, employeeIds, members, tasks: t.tasks, approvals, notes: { rosterInService: inService, noAccount, groupCount, invalidIds: t.invalid, ...(merged ? { rosterShared: merged } : {}) }, fieldCost: await fieldCostP });
+    if (fieldCostWarning(view)) console.warn(`[attendance] 外業成本單可能沒讀完整 error=${view.notes.fieldError ?? "-"} sheets=${view.notes.fieldSheets} emptyLinks=${view.notes.fieldEmptyLinks} incomplete=${view.notes.fieldIncomplete ?? false} allEmpty=${view.notes.fieldAllEmpty} noDate=${view.notes.fieldNoDate} matched=${view.notes.fieldMatched} unmatched=${view.notes.fieldUnmatched}`);
     return view;
   } catch (e) {
     absorb(perm, e, SCOPES.task);
@@ -218,7 +219,7 @@ export async function getAttendance(weekStart: number, opts: { force?: boolean; 
   const monday = Date.parse(`${weekDates(weekStart)[0]}T00:00:00+08:00`);
   const isCurrent = weekDates(monday).includes(taipeiDate(now)) && taipeiDate(now) <= weekDates(monday)[6];
   // 失敗、權限沒開、外業成本單可能沒讀完整：只快取 1 分鐘，下次開頁會重讀
-  const ttl = (v: AttendanceResponse) => (v.status === "ok" && !fieldCostWarning(v) ? (isCurrent ? 5 * 60000 : 6 * H) : 60000);
+  const ttl = (v: AttendanceResponse) => attendanceTtl(v, isCurrent);
   try {
     return await memo(`att:week:${monday}`, ttl, () => compute(monday, now, !!opts.force), opts.force);
   } catch (e) {

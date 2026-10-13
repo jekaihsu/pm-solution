@@ -1,7 +1,7 @@
 "use client";
 import { CalendarCheck, CircleAlert, Plane } from "lucide-react";
 import { useEffect, useState } from "react";
-import { fieldCostWarning, type AttendanceResponse, type DayCode } from "@/lib/attendanceCore";
+import { fieldCostReminder, fieldCostWarning, type AttendanceResponse, type DayCode } from "@/lib/attendanceCore";
 import { weekName } from "@/lib/week";
 import { useShell } from "./AppShell";
 
@@ -94,6 +94,7 @@ export default function AttendanceCards() {
   };
   const ok = res?.status === "ok" ? res : null;
   const warn = ok ? fieldCostWarning(ok) : null;
+  const reminder = ok ? fieldCostReminder(ok) : null;
   const kpis: [string, string][] = ok
     ? [["應到人日", fmt(ok.summary.expected)], ["出勤人日", fmt(ok.summary.present)], ["出勤率", pct(ok.summary.present, ok.summary.expected)], ["其中外業出勤", fmt(ok.summary.field)], ["遲到", fmt(ok.summary.late)], ["早退", fmt(ok.summary.early)], ["缺卡", fmt(ok.summary.lack)], ["請假", fmt(ok.summary.leave)], ["出差", fmt(ok.summary.trip)], ["外出", fmt(ok.summary.out)]]
     : [];
@@ -130,8 +131,8 @@ export default function AttendanceCards() {
                   </tr>
                 </thead>
                 <tbody>
-                  {ok.people.map((p) => (
-                    <tr key={`${p.group}|${p.name}`}>
+                  {ok.people.map((p, pi) => (
+                    <tr key={`${pi}|${p.group}|${p.name}`}>
                       <td className="att-name">{p.name}</td>
                       <td>{p.group}</td>
                       {p.days.map((c, i) => (
@@ -159,9 +160,11 @@ export default function AttendanceCards() {
               </li>
               <li>
                 外業沒填日報的日子不列入應到、也不算缺卡（待確認，格子顯示「無日報」）；外業在平日請假、出差、外出照樣從分母扣除。
-                {ok.notes.fieldSheets === undefined ? "" : `本週到今天的外業成本單 ${ok.notes.fieldSheets} 筆（其中組長與實際出工人都沒讀到 ${ok.notes.fieldEmptyLinks ?? 0} 筆）；成本單裡有 ${ok.notes.fieldUnmatched} 位對不到在職名冊，不列入。整張成本單（不分週）工作日期空白 ${ok.notes.fieldNoDate ?? 0} 筆，其中日期、組長、實際出工人全空 ${ok.notes.fieldAllEmpty ?? 0} 筆（平常約 6 筆，暴增可能是 Lark 回了空白頁）。`}
+                {ok.notes.fieldSheets === undefined ? "" : `本週到今天的外業成本單 ${ok.notes.fieldSheets} 筆；成本單裡有 ${ok.notes.fieldUnmatched} 位對不到在職名冊，不列入。整張成本單（不分週）工作日期空白 ${ok.notes.fieldNoDate ?? 0} 筆，其中日期、組長、實際出工人全空 ${ok.notes.fieldAllEmpty ?? 0} 筆（平常約 6 筆，暴增可能是 Lark 回了空白頁）。`}
               </li>
-              <li>到班＝正常、遲到、早退與補卡（補卡、主管修正）；缺卡另計，今天沒打卡也算缺卡（今天已打上班卡、下班還沒到不算缺卡）。請假、出差、外出的日子從分母扣除、另列天數。請假依請假時刻判斷涵蓋上午（到 12:00）或下午（13:00 起）：只涵蓋一半算 0.5 天（請假 0.5、應到 0.5），另半天考勤組看打卡（忽略請假那半邊的打卡；正常算到班 0.5、缺卡算缺卡 0.5），外業看當天有沒有成本單；今天上午假而下午還沒結束、上班側也沒打卡時，另半天不入應到、不算缺卡，只計請假 0.5；只請午休不算請假；只有日期沒有時刻的單日半天假不分上下午。本週未過完只算到今天，未來日不算缺卡。</li>
+              <li>到班＝正常、遲到、早退與補卡（補卡、主管修正）；缺卡另計，今天沒打卡也算缺卡（今天已打上班卡、下班還沒到不算缺卡）。請假、出差、外出的日子從分母扣除、另列天數。請假依請假時刻判斷涵蓋上午（到 12:00）或下午（13:00 起）：只涵蓋一半算 0.5 天（請假 0.5、應到 0.5），另半天考勤組看打卡（忽略請假那半邊的打卡；正常算到班 0.5、缺卡算缺卡 0.5），外業看當天有沒有成本單；今天上午假而下午還沒結束、上班側也沒打卡時，另半天不入應到、不算缺卡，只計請假 0.5；只請午休不算請假；只有日期沒有時刻的單日半天假不分上下午（今天的這種假比照上午假）。半天假同日又有出差／外出，一律整天算出差／外出（請假不重複計）；整天假、出差、外出落在平日但 Lark 沒有打卡紀錄，照樣計入並從分母扣除；週末、補假等純免打卡日的請假不計。本週未過完只算到今天，未來日不算缺卡。</li>
+              {reminder && <li>{reminder}。</li>}
+              {!!ok.notes.rosterShared && <li>人員名單有 {ok.notes.rosterShared} 列和別列共用同一 Lark帳號但名字不同（在職的已併為同一人、離職舊列不併入），請檢查名單。</li>}
               <li>
                 在職 {ok.notes.rosterInService} 人：{ok.notes.noAccount} 人沒有 Lark帳號、{ok.notes.unmapped} 人換不到 employee_id（以上除非是有成本單的外業人員，否則不列入）、考勤組另有 {ok.notes.outsideRoster} 人不在人員名單，不列入。
                 {ok.source === "demo" ? "（示範資料）" : ""}

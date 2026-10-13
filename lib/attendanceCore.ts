@@ -87,13 +87,14 @@ const isPunch = (res?: string, supp?: string) => !!res && ((KNOWN.has(res) && re
  * 再看 NoNeedCheck（免打卡）；user_approvals 覆蓋只套在「應打卡日」，週末不會被誤算。
  * leaveHalf：半天假那天忽略請假那一半的打卡（am 忽略 check_in、pm 忽略 check_out；unknown 忽略標 Leave 的那邊），只看另一半。
  * open：當天還沒結束——已打上班卡、下班那邊 Lack 不算缺卡（上班沒打卡仍是缺卡）。
- * 今天＋上午假（am）：剩下的是下午，下班 Lack 一律不算缺卡（下午還沒結束）；上班側有有效打卡（不含標 Leave 的那邊）代表下午已到→ ok，
+ * 今天＋上午假（am）或只有日期的半天假（unknown，上下午不明）：下班 Lack 一律不算缺卡（下午還沒結束）；上班側有有效打卡（不含標 Leave 的那邊）代表下午已到→ ok，
  * 沒有證據就回 off／none（呼叫端只計請假 0.5，不入應到）。
  */
 export function classifyDay(records: LarkTaskRecord[] | undefined, ctx: { approval?: ApprovalKind | null; leaveHalf?: HalfSide; open?: boolean } = {}): DayCode {
   const recs = records ?? [];
   if (!recs.length) return "none";
   const half = ctx.leaveHalf;
+  const lenient = half === "am" || half === "unknown"; // 今天（open）時下班 Lack 不算缺卡
   let suppKind: ApprovalKind | null = null;
   const sides: { result: string; supp: string }[] = [];
   for (const r of recs) {
@@ -102,11 +103,11 @@ export function classifyDay(records: LarkTaskRecord[] | undefined, ctx: { approv
     for (const s of [inSupp, outSupp]) if (SUPP[s] && !suppKind && !(half && s === "Leave")) suppKind = SUPP[s];
     const usable = (res: string | undefined, supp: string, skip: boolean): res is string => !!res && KNOWN.has(res) && res !== "NoNeedCheck" && !skip && !(half && supp === "Leave");
     if (usable(inRes, inSupp, half === "am")) sides.push({ result: inRes, supp: inSupp });
-    const stillWorking = !!ctx.open && outRes === "Lack" && !RESCUE.has(outSupp) && (half === "am" || isPunch(inRes, inSupp));
+    const stillWorking = !!ctx.open && outRes === "Lack" && !RESCUE.has(outSupp) && (lenient || isPunch(inRes, inSupp));
     if (usable(outRes, outSupp, half === "pm" || stillWorking)) sides.push({ result: outRes, supp: outSupp });
   }
   if (!sides.length && !suppKind) {
-    if (half === "am" && ctx.open && recs.some((r) => isPunch(r.check_in_result, r.check_in_result_supplement) && r.check_in_result_supplement !== "Leave")) return ctx.approval ?? "ok";
+    if (lenient && ctx.open && recs.some((r) => isPunch(r.check_in_result, r.check_in_result_supplement) && r.check_in_result_supplement !== "Leave")) return ctx.approval ?? "ok";
     return recs.some((r) => r.check_in_result === "NoNeedCheck" || r.check_out_result === "NoNeedCheck") ? "off" : "none";
   }
   const approval = suppKind ?? ctx.approval ?? null;
@@ -130,6 +131,12 @@ export function halfLeaveDueDay(recs: LarkTaskRecord[] | undefined, weekday: boo
   return recs.some((r) => r.check_in_result_supplement === "Leave" || r.check_out_result_supplement === "Leave" || !(r.check_in_result === "NoNeedCheck" && r.check_out_result === "NoNeedCheck"));
 }
 
+/** 打卡紀錄上的出差／外出標記（Travel／GoOut）；沒有就回 null。 */
+function tripOutSupplement(recs: LarkTaskRecord[] | undefined): "trip" | "out" | null {
+  for (const r of recs ?? []) for (const s of [r.check_in_result_supplement, r.check_out_result_supplement]) if (s === "Travel" || s === "GoOut") return SUPP[s] as "trip" | "out";
+  return null;
+}
+
 // ---------- 名冊、考勤組成員 ----------
 export interface RosterPerson {
   name: string;
@@ -149,29 +156,41 @@ export const NO_GROUP = "（未填組別）";
 /** 在職但沒有 Lark帳號的人（外業用 record_id 對成本單；不輸出 recordId）。 */
 export type FieldOnlyPerson = Omit<RosterPerson, "openId">;
 
-/** 在職名冊（V3 人員名單）。欄名由呼叫端傳入；同 record_id 只留一列；在職沒有 Lark帳號的只計人數，另回 noAccountPeople 供外業使用。 */
+/** 在職名冊（V3 人員名單）。欄名由呼叫端傳入；同 record_id 只留一列；merged＝名字不同卻共用同一 Lark帳號而被合併的列數；在職沒有 Lark帳號的只計人數，另回 noAccountPeople 供外業使用。 */
 export function buildRoster(rows: RosterRow[], cols: { name: string; group: string; active: string; account: string }) {
   const people: RosterPerson[] = [];
   const noAccountPeople: FieldOnlyPerson[] = [];
   const seen = new Set<string>();
   const byOpenId = new Map<string, RosterPerson>();
-  let inService = 0, noAccount = 0;
+  const inactiveIds = new Map<string, { id: string; name: string }[]>(); // 離職列（依 open_id）：同名的之後併進在職列當別名
+  let inService = 0, noAccount = 0, merged = 0;
   const text = (v: Cell) => (v === null || v === undefined ? "" : Array.isArray(v) ? v.join("、") : String(v)).trim();
   for (const r of rows) {
     if (r.id) {
       if (seen.has(r.id)) continue;
       seen.add(r.id);
     }
-    if (r.fields[cols.active] !== true) continue;
     const openId = r.people?.[cols.account]?.find((p) => p.id)?.id;
+    const name = text(r.fields[cols.name]);
+    // 別名先於在職過濾：離職舊列與在職列共用 open_id 時，舊列的 record_id 也要對得上同一個人
+    if (r.fields[cols.active] !== true) {
+      if (openId && r.id) {
+        const live = byOpenId.get(openId);
+        if (!live) inactiveIds.set(openId, [...(inactiveIds.get(openId) ?? []), { id: r.id, name }]);
+        else if (name === live.name) live.altRecordIds = [...(live.altRecordIds ?? []), r.id];
+        else merged++; // 名字不同＝不同人共用帳號：不當別名（成本單照舊算對不到），計數供註腳提醒
+      }
+      continue;
+    }
     const dup = openId ? byOpenId.get(openId) : undefined;
     if (dup) {
-      // 同一 Lark帳號（open_id）的另一列＝同一個人：只留第一列，record_id 記成別名
+      // 同一 Lark帳號（open_id）的另一列＝同一個人：只留第一列，record_id 記成別名；名字不同＝不同人共用帳號，計數供註腳提醒
       if (r.id) dup.altRecordIds = [...(dup.altRecordIds ?? []), r.id];
+      if (name !== dup.name) merged++;
       continue;
     }
     inService++;
-    const name = text(r.fields[cols.name]), group = text(r.fields[cols.group]) || NO_GROUP;
+    const group = text(r.fields[cols.group]) || NO_GROUP;
     if (!openId) {
       noAccount++;
       noAccountPeople.push({ name, group, ...(r.id ? { recordId: r.id } : {}) });
@@ -181,7 +200,13 @@ export function buildRoster(rows: RosterRow[], cols: { name: string; group: stri
     byOpenId.set(openId, p);
     people.push(p);
   }
-  return { people, noAccountPeople, inService, noAccount };
+  for (const p of people) {
+    for (const o of inactiveIds.get(p.openId) ?? []) {
+      if (o.name === p.name) p.altRecordIds = [...(p.altRecordIds ?? []), o.id];
+      else merged++;
+    }
+  }
+  return { people, noAccountPeople, inService, noAccount, merged };
 }
 
 export interface GroupDef {
@@ -371,6 +396,7 @@ export interface AttendanceNotes {
   outsideRoster: number; // 考勤組成員不在名冊（不列姓名）
   groupCount: number;
   invalidIds: number;
+  rosterShared?: number; // 人員名單有幾列因共用同一 Lark帳號（名字不同）而合併成一人（只放數字）
   fieldPeople: number; // 外業人員（不在考勤組、所選週有外業成本單）人數
   fieldUnmatched: number; // 成本單的組長／出工人對不到在職名冊的不重複人數
   fieldNoApproval: number; // 外業人員中沒有 employee_id、查不到請假／出差／外出審批的人數
@@ -380,6 +406,7 @@ export interface AttendanceNotes {
   fieldNoDate?: number; // 日期空白的筆數（整張成本單，不限所選週）
   fieldAllEmpty?: number; // 其中日期、組長、實際出工人三者全空的筆數（整張成本單；Lark 回空白頁的形狀）
   fieldMatched?: number; // 所選週成本單裡對到名冊的不重複人數（含考勤組成員）
+  fieldIncomplete?: true; // 成本單分頁沒讀完（complete=false 或筆數少於來源總數）
   fieldError?: string; // 固定文案＋錯誤碼，例「讀不到外業成本單（1254302）」
 }
 export interface AttendanceView {
@@ -413,7 +440,7 @@ export interface AttendanceInput {
   members: Set<string>; // 考勤組成員 employee_id
   tasks: LarkUserTask[];
   approvals: LarkUserApprovals[];
-  notes: Pick<AttendanceNotes, "rosterInService" | "noAccount" | "groupCount" | "invalidIds">;
+  notes: Pick<AttendanceNotes, "rosterInService" | "noAccount" | "groupCount" | "invalidIds"> & { rosterShared?: number };
   source?: "lark" | "demo";
   fieldCost?: FieldCostInput;
 }
@@ -426,6 +453,7 @@ export interface FieldCostRow {
 export interface FieldCostInput {
   rows: FieldCostRow[];
   error?: string; // 固定文案（讀不到／欄位缺失），不含 API 路徑或 token
+  incomplete?: true; // 資料沒讀完整（TableData.complete=false，或筆數少於 total／sourceTotal）
 }
 
 // 外業成本單欄位：優先用 field id（欄名會被改），找不到 id 才用欄名（2026-10-13 讀 V3 欄位表確認）
@@ -433,6 +461,10 @@ const FC_FIDS = { date: "fldQh6cdMp", leader: "fldmg63eFl", crew: "flddpaUr6b" }
 interface FieldCostData {
   fields: { id: string; name: string }[];
   records: { fields: Record<string, unknown>; links?: Record<string, string[]> }[];
+  complete?: boolean; // lib/types.ts TableData：分頁中途停止＝false
+  total?: number; // 實際送出的筆數
+  sourceTotal?: number; // Lark 來源總數（含被納入規則排除的）
+  excluded?: number;
 }
 /** 讀外業成本單：只留所選週的列（含日期空白的，供計數）。找不到必要欄位＝讀不到；找不到實際出工人＝只算組長並留警示。 */
 export function parseFieldCost(data: FieldCostData, dates: string[]): FieldCostInput {
@@ -446,7 +478,8 @@ export function parseFieldCost(data: FieldCostData, dates: string[]): FieldCostI
     if (date && !dates.includes(date)) continue;
     rows.push({ date, leaderIds: r.links?.[leaderCol] ?? [], crewIds: crewCol ? r.links?.[crewCol] ?? [] : [] });
   }
-  return { rows, ...(crewCol ? {} : { error: "外業成本單找不到「實際出工人」欄，只算組長" }) };
+  const incomplete = data.complete === false || (typeof data.total === "number" && data.total > data.records.length) || (typeof data.sourceTotal === "number" && data.sourceTotal > data.records.length + (data.excluded ?? 0));
+  return { rows, ...(crewCol ? {} : { error: "外業成本單找不到「實際出工人」欄，只算組長" }), ...(incomplete ? { incomplete: true as const } : {}) };
 }
 /** 讀外業成本單失敗的固定文案＋錯誤碼；不帶 API 路徑、base／table id、原始訊息。 */
 export function fieldCostError(e: unknown): string {
@@ -456,10 +489,17 @@ export function fieldCostError(e: unknown): string {
 /**
  * 全空列（日期、組長、實際出工人都空）的正常基線與警示門檻。
  * 2026-10-13 以 lark-cli 唯讀量測 V3 外業成本單全表 755 列（連跑 3 次結果相同）：全空列 6、日期空白 13、有日期但 link 都空 1。
- * Lark 回空白頁時一整頁（100～500 列）的值都是空的，所以門檻＝基線＋20；之後若基線自然成長，先量測再改這兩個常數。
+ * 網站讀成本單 page_size 是 500（lib/lark.ts），Lark 回空白頁時整頁（最多 500 列）的值都是空的，所以門檻＝基線＋20；
+ * 盲區：最後一頁只有 1～20 列時整頁空白，全空列增加不到 20 列，不會觸發。之後若基線自然成長，先量測再改這兩個常數。
  */
 export const FIELD_ALL_EMPTY_BASELINE = 6;
 export const FIELD_ALL_EMPTY_LIMIT = FIELD_ALL_EMPTY_BASELINE + 20;
+/**
+ * 「有日期但組長與實際出工人 link 都空」（所選週）：2026-10-13 全表量測基線 1 筆（人工漏填偶爾會有）。
+ * 1～3 筆＝資料提醒（註腳顯示，不算沒讀完、不縮短快取）；超過 3 筆才當「可能沒讀完整」警示。
+ */
+export const FIELD_EMPTY_LINKS_BASELINE = 1;
+export const FIELD_EMPTY_LINKS_LIMIT = 3;
 
 /** 一般錯誤（非權限）只回固定文案＋錯誤碼；不帶 API 路徑、base／table id、Lark 原始訊息。 */
 export function attendanceErrorText(e: unknown): string {
@@ -467,14 +507,26 @@ export function attendanceErrorText(e: unknown): string {
   return `讀取出勤資料失敗（${typeof code === "number" || (typeof code === "string" && /^\d+$/.test(code)) ? code : "未知"}）`;
 }
 
-/** 外業成本單可能沒讀完整時的警示文字（沒事回 null）：讀不到／欄位缺失、過去的週 0 筆、有日期但 link 都空、全空列暴增、人全部對不到名冊。 */
+/** 資料提醒（不是警示）：所選週有 1～3 張成本單沒填組長與實際出工人；沒有或超過門檻（改走警示）回 null。 */
+export function fieldCostReminder(v: Pick<AttendanceView, "notes">): string | null {
+  const n = v.notes.fieldEmptyLinks ?? 0;
+  return n >= 1 && n <= FIELD_EMPTY_LINKS_LIMIT ? `有 ${n} 張成本單沒填組長與實際出工人` : null;
+}
+
+/** 快取存活時間：成功且沒有警示＝本週 5 分鐘、過去週 6 小時；失敗、沒權限、有警示＝60 秒（下次開頁重讀）。 */
+export function attendanceTtl(v: AttendanceResponse, isCurrent: boolean): number {
+  return v.status === "ok" && !fieldCostWarning(v) ? (isCurrent ? 5 * 60000 : 6 * 3600000) : 60000;
+}
+
+/** 外業成本單可能沒讀完整時的警示文字（沒事回 null）：讀不到／欄位缺失、過去的週 0 筆、有日期但 link 都空超過 3 筆、沒讀完、全空列暴增、人全部對不到名冊。 */
 export function fieldCostWarning(v: Pick<AttendanceView, "days" | "notes">): string | null {
   const n = v.notes;
   if (n.fieldSheets === undefined) return null;
   const parts: string[] = [];
   if (n.fieldError) parts.push(n.fieldError);
   if (n.fieldSheets === 0 && v.days.every((d) => d.kind === "past")) parts.push("這週成本單 0 筆");
-  if (n.fieldEmptyLinks) parts.push(`${n.fieldEmptyLinks} 筆成本單有日期但組長與實際出工人都沒讀到`);
+  if (n.fieldIncomplete) parts.push("成本單資料沒有全部讀完");
+  if ((n.fieldEmptyLinks ?? 0) > FIELD_EMPTY_LINKS_LIMIT) parts.push(`${n.fieldEmptyLinks} 筆成本單有日期但組長與實際出工人都沒讀到`);
   if ((n.fieldAllEmpty ?? 0) > FIELD_ALL_EMPTY_LIMIT) parts.push(`整張成本單有 ${n.fieldAllEmpty} 筆整列都是空的（日期、組長、實際出工人全空；平常約 ${FIELD_ALL_EMPTY_BASELINE} 筆）`);
   if (n.fieldSheets > 0 && n.fieldMatched === 0 && (n.fieldUnmatched ?? 0) > 0) parts.push(`這週 ${n.fieldSheets} 筆成本單裡的 ${n.fieldUnmatched} 位出工人全部對不到在職名冊`);
   return parts.length ? `外業成本單可能沒讀完整：${parts.join("；")}` : null;
@@ -510,8 +562,18 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
   const fieldDays = new Map<string, Set<string>>();
   const fieldOnly = inp.noAccountPeople ?? [];
   // record_id（含同人多列的別名）→ 名冊裡代表這個人的 record_id
+  // 兩個 open_id 換出同一個 employee_id 時只留第一列，第二列的 record_id（含別名）也併到第一列
   const rosterRecIds = new Map<string, string>();
-  for (const r of [...inp.roster, ...fieldOnly]) if (r.recordId) for (const id of [r.recordId, ...(r.altRecordIds ?? [])]) if (!rosterRecIds.has(id)) rosterRecIds.set(id, r.recordId);
+  const eidFirst = new Map<string, FieldOnlyPerson>();
+  for (const r of [...inp.roster, ...fieldOnly]) {
+    const eid = "openId" in r ? inp.employeeIds.get((r as RosterPerson).openId) : undefined;
+    let canon: FieldOnlyPerson = r;
+    if (eid) {
+      canon = eidFirst.get(eid) ?? r;
+      eidFirst.set(eid, canon);
+    }
+    if (canon.recordId) for (const id of [r.recordId, ...(r.altRecordIds ?? [])]) if (id && !rosterRecIds.has(id)) rosterRecIds.set(id, canon.recordId);
+  }
   const unmatched = new Set<string>();
   const matched = new Set<string>();
   let sheets = 0, emptyLinks = 0, noDate = 0, allEmpty = 0;
@@ -596,6 +658,14 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
       if (isMember) {
         const recs = tasks.get(`${eid}|${d}`);
         if (lw > 0 && lw < 1) {
+          if (other && halfLeaveDueDay(recs, i < 5)) {
+            // 半天假同日又有出差、外出：一律整天算出差／外出（不論打卡紀錄、不論是不是今天；請假不重複計），週末免打卡日除外。
+            // 出差或外出以 Lark 打卡上的標記優先（與沒有請假時 classifyDay 的順序一致），沒有標記才用審批。
+            const kind = tripOutSupplement(recs) ?? other;
+            add(kind, 1);
+            codes.push(kind);
+            continue;
+          }
           // 半天假：請假 0.5；另半天看打卡（忽略請假那半邊的打卡）
           const base = classifyDay(recs, { approval: other, leaveHalf: halfSide(part!), open: d === today });
           if (WORKED.has(base)) {
@@ -614,7 +684,9 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
           }
           continue;
         }
-        const code = classifyDay(recs, { approval: lw >= 1 ? "leave" : other, open: d === today });
+        let code = classifyDay(recs, { approval: lw >= 1 ? "leave" : other, open: d === today });
+        // 整天假、出差、外出落在應打卡日但沒有可用打卡紀錄（平日沒 task 紀錄、或兩側標 Leave）：與半天假、外業一致，照計 1、不入應到；純免打卡日（週末）不計
+        if ((lw >= 1 || other) && (code === "none" || code === "off") && halfLeaveDueDay(recs, i < 5)) code = lw >= 1 ? "leave" : other!;
         add(code, 1);
         codes.push(code);
         continue;
@@ -658,7 +730,7 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
       fieldPeople,
       fieldUnmatched: unmatched.size,
       fieldNoApproval,
-      ...(inp.fieldCost ? { fieldSheets: sheets, fieldEmptyLinks: emptyLinks, fieldNoDate: noDate, fieldAllEmpty: allEmpty, fieldMatched: matched.size, ...(inp.fieldCost.error ? { fieldError: inp.fieldCost.error } : {}) } : {}),
+      ...(inp.fieldCost ? { fieldSheets: sheets, fieldEmptyLinks: emptyLinks, fieldNoDate: noDate, fieldAllEmpty: allEmpty, fieldMatched: matched.size, ...(inp.fieldCost.incomplete ? { fieldIncomplete: true as const } : {}), ...(inp.fieldCost.error ? { fieldError: inp.fieldCost.error } : {}) } : {}),
     },
   };
 }

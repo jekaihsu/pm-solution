@@ -20,6 +20,8 @@ import {
   FIELD_ALL_EMPTY_LIMIT,
 } from "../lib/attendanceCore.ts";
 import { PEOPLE_NAME, PEOPLE_ACCOUNT, PEOPLE_GROUP, PEOPLE_ACTIVE } from "../lib/people.ts";
+import * as core from "../lib/attendanceCore.ts";
+import { readFileSync } from "node:fs";
 import { register } from "node:module";
 
 // demoAttendance.ts 用不帶副檔名的相對 import（Next 才解得開）：測試裡補上 .ts
@@ -589,8 +591,8 @@ test("成本單筆數與 link 全空的計數；0 筆／link 全空／欄位缺�
   ];
   const v = buildAttendanceView(base2({ fieldCost: fc(rows) }));
   assert.deepEqual([v.notes.fieldSheets, v.notes.fieldEmptyLinks, v.notes.fieldNoDate], [2, 1, 1]);
-  assert.match(fieldCostWarning(v), /外業成本單可能沒讀完整/);
-  assert.match(fieldCostWarning(v), /1 筆/);
+  assert.equal(fieldCostWarning(v), null); // 1 筆 link 全空＝資料提醒，不算沒讀完（R3-5 有完整分級測試）
+  assert.equal(core.fieldCostReminder(v), "有 1 張成本單沒填組長與實際出工人");
   const okv = buildAttendanceView(base2({ fieldCost: fc([{ date: "2026-10-05", leaderIds: ["recD"], crewIds: [] }]) }));
   assert.equal(fieldCostWarning(okv), null);
   // 過去的週 0 筆＝警示；本週 0 筆（可能還沒人填）不警示
@@ -905,4 +907,261 @@ test("半天假＋同日外出／出差：外出、出差整天照扣分母（�
     assert.equal(person(f, "丁").days[1], code);
     assert.deepEqual(sumOf(f, "leave", key, "expected", "field"), [0, 1, 0, 0]);
   }
+});
+
+// ---- R04 第三輪審查修正 ----
+const NOW_SUN = Date.UTC(2026, 9, 11, 6, 0); // 台北週日 10/11 14:00
+const am = (d) => leave("LA", `${d} 08:00:00`, `${d} 12:00:00`, 14400, 2);
+const tripOf = (d) => ({ approval_id: "TT", start_time: d, end_time: d, reason: "x" });
+const outPm = (d) => out("OO", `${d} 13:00:00`, `${d} 17:00:00`, 14400);
+
+test("R3-1 半天假＋同日出差／外出：不論打卡紀錄長怎樣、是不是今天，一律整天出差／外出 1", () => {
+  const cases = [
+    ["過去 Leave/Leave", 20261006, [rec("NoNeedCheck", "NoNeedCheck", "Leave", "Leave")], "2026-10-06", 1, tripOf, "trip"],
+    ["過去 沒 task 紀錄", null, null, "2026-10-06", 1, tripOf, "trip"],
+    ["過去 Normal/Normal", 20261006, [rec()], "2026-10-06", 1, tripOf, "trip"],
+    ["今天 上午假＋外出，上班標 Leave、下班 Lack", 20261007, [rec("NoNeedCheck", "Lack", "Leave", "None")], "2026-10-07", 2, outPm, "out"],
+    ["今天 上午假＋出差，上班 Normal、下班 Lack", 20261007, [rec("Normal", "Lack")], "2026-10-07", 2, tripOf, "trip"],
+    ["今天 上午假＋外出，沒 task 紀錄", null, null, "2026-10-07", 2, outPm, "out"],
+  ];
+  for (const [label, day, recs, d, idx, mkAp, code] of cases) {
+    const ap = { user_id: "emp_A", leaves: [am(d)], [code === "trip" ? "trips" : "outs"]: [mkAp(d)] };
+    const v = buildAttendanceView(base2({ tasks: day ? [task("emp_A", day, recs)] : [], approvals: [ap] }));
+    assert.equal(person(v, "甲").days[idx], code, label);
+    assert.deepEqual([v.summary[code], v.summary.leave, v.summary.expected], [1, 0, 0], label);
+  }
+  // 週末沒紀錄、半天假＋出差：不是應打卡日，照舊不計
+  const w = buildAttendanceView(base2({ now: NOW_SUN, approvals: [{ user_id: "emp_A", leaves: [am("2026-10-10")], trips: [tripOf("2026-10-10")] }] }));
+  assert.equal(person(w, "甲").days[5], "none");
+  assert.equal(w.summary.trip, 0);
+});
+
+test("R3-2 整天假落在應打卡日（平日沒 task 紀錄、或兩側標 Leave）：格子 leave、請假 1、不入應到；週末免打卡日不計", () => {
+  const full = (d1, d2) => [lv("emp_A", leave("LF", `${d1} 00:00:00`, `${d2} 00:00:00`, 86400))];
+  const a = buildAttendanceView(base2({ approvals: full("2026-10-06", "2026-10-07") }));
+  assert.equal(person(a, "甲").days[1], "leave");
+  assert.deepEqual(sumOf(a, "leave", "expected", "present", "lack"), [1, 0, 0, 0]);
+  const b = buildAttendanceView(base2({ tasks: [task("emp_A", 20261006, [rec("NoNeedCheck", "NoNeedCheck", "Leave", "Leave")])], approvals: full("2026-10-06", "2026-10-07") }));
+  assert.equal(person(b, "甲").days[1], "leave");
+  assert.equal(b.summary.leave, 1);
+  // 週六沒紀錄／純 NoNeedCheck：不計
+  const c = buildAttendanceView(base2({ now: NOW_SUN, approvals: full("2026-10-10", "2026-10-11") }));
+  assert.equal(person(c, "甲").days[5], "none");
+  const d = buildAttendanceView(base2({ now: NOW_SUN, tasks: [task("emp_A", 20261010, [rec("NoNeedCheck", "NoNeedCheck")])], approvals: full("2026-10-10", "2026-10-11") }));
+  assert.equal(person(d, "甲").days[5], "off");
+  assert.equal(d.summary.leave, 0);
+  // 單調性：同一天、同樣沒紀錄，整天假的請假數 >= 半天假
+  const half = buildAttendanceView(base2({ approvals: [lv("emp_A", am("2026-10-06"))] }));
+  assert.ok(a.summary.leave >= half.summary.leave);
+});
+
+test("R3-3 今天＋只有日期的半天假（上下午不明）：下班 Lack 不算缺卡；上班有效打卡＝到班 0.5，沒有＝leave-half-open", () => {
+  const ap = [lv("emp_A", leave("LU", "2026-10-07", "2026-10-07", 43200))];
+  const a = buildAttendanceView(base2({ tasks: [task("emp_A", 20261007, [rec("NoNeedCheck", "Lack", "Leave", "None")])], approvals: ap }));
+  assert.equal(person(a, "甲").days[2], "leave-half-open");
+  assert.deepEqual(sumOf(a, "leave", "expected", "present", "lack"), [0.5, 0, 0, 0]);
+  const b = buildAttendanceView(base2({ tasks: [task("emp_A", 20261007, [rec("Normal", "Lack")])], approvals: ap }));
+  assert.equal(person(b, "甲").days[2], "leave-half");
+  assert.deepEqual(sumOf(b, "leave", "expected", "present", "lack"), [0.5, 0.5, 0.5, 0]);
+  // 過去日同樣紀錄不放寬：下班 Lack 照算缺卡
+  const c = buildAttendanceView(base2({ tasks: [task("emp_A", 20261006, [rec("Normal", "Lack")])], approvals: [lv("emp_A", leave("LU", "2026-10-06", "2026-10-06", 43200))] }));
+  assert.equal(person(c, "甲").days[1], "leave-half-lack");
+});
+
+test("R3-4 名冊去重副作用：共用 Lark帳號合併列數、employee_id 去重別名、離職舊列別名（先後順序都行）", () => {
+  const cols = { name: PEOPLE_NAME, group: PEOPLE_GROUP, active: PEOPLE_ACTIVE, account: PEOPLE_ACCOUNT };
+  const mk = (id, name, oid, active = true) => ({ id, fields: { [PEOPLE_NAME]: name, [PEOPLE_GROUP]: "外業A", [PEOPLE_ACTIVE]: active }, people: oid ? { [PEOPLE_ACCOUNT]: [{ id: oid, name }] } : undefined });
+  // 不同人共用一個帳號：合併並計數；同名重複列不算
+  const shared = buildRoster([mk("rowX", "辛", "ou_s"), mk("rowY", "壬", "ou_s")], cols);
+  assert.equal(shared.people.length, 1);
+  assert.equal(shared.merged, 1);
+  assert.equal(buildRoster([mk("a1", "甲", "ou_a"), mk("a2", "甲", "ou_a")], cols).merged, 0);
+  const sv = buildAttendanceView(base({ roster: shared.people, employeeIds: new Map([["ou_s", "emp_S"]]), members: new Set(), notes: { rosterInService: 2, noAccount: 0, groupCount: 1, invalidIds: 0, rosterShared: shared.merged } }));
+  assert.equal(sv.notes.rosterShared, 1);
+  // employee_id 去重：成本單接到第二列也算到這個人
+  const dupEid = buildAttendanceView(base({
+    roster: [{ name: "己", group: "外業B", openId: "ou_f1", recordId: "r1" }, { name: "己", group: "外業B", openId: "ou_f2", recordId: "r2", altRecordIds: ["r2b"] }],
+    employeeIds: new Map([["ou_f1", "emp_F"], ["ou_f2", "emp_F"]]), members: new Set(),
+    fieldCost: fc([{ date: "2026-10-05", leaderIds: ["r2"], crewIds: [] }, { date: "2026-10-06", leaderIds: ["r2b"], crewIds: [] }]),
+  }));
+  assert.equal(dupEid.people.length, 1);
+  assert.deepEqual(dupEid.people[0].days.slice(0, 2), ["field", "field"]);
+  assert.equal(dupEid.notes.fieldUnmatched, 0);
+  // 離職舊列與在職列共用 open_id：舊列 record_id 當別名（舊列在前、在後都行）
+  for (const rows of [[mk("rowNew", "癸", "ou_k"), mk("rowOld", "癸", "ou_k", false)], [mk("rowOld", "癸", "ou_k", false), mk("rowNew", "癸", "ou_k")]]) {
+    const r = buildRoster(rows, cols);
+    assert.equal(r.people.length, 1);
+    assert.equal(r.inService, 1);
+    assert.deepEqual(r.people[0].altRecordIds, ["rowOld"]);
+    const v = buildAttendanceView(base({ roster: r.people, employeeIds: new Map([["ou_k", "emp_K"]]), members: new Set(), fieldCost: fc([{ date: "2026-10-05", leaderIds: ["rowOld"], crewIds: [] }]) }));
+    assert.equal(v.people.length, 1);
+    assert.equal(v.notes.fieldUnmatched, 0);
+  }
+  // 沒對應在職列的離職舊列：不憑空多出人
+  assert.equal(buildRoster([mk("rowOld", "癸", "ou_k", false)], cols).people.length, 0);
+  // 人員列的 React key 不得只靠「組別|姓名」（同組同名會重複）
+  const src = readFileSync(new URL("../components/AttendanceCards.tsx", import.meta.url), "utf8");
+  assert.match(src, /ok\.people\.map\(\(p, \w+\)/);
+  assert.match(src, /<tr key=\{`[^`]*\$\{\w+\}[^`]*`\}>\s*\n\s*<td className="att-name">/);
+});
+
+test("R3-5 成本單警示分級：1～3 筆 link 全空＝資料提醒（不算沒讀完）；>3 筆＝警示；沒讀完整也警示", () => {
+  assert.equal(core.FIELD_EMPTY_LINKS_BASELINE, 1);
+  assert.equal(core.FIELD_EMPTY_LINKS_LIMIT, 3);
+  const empties = (n) => Array.from({ length: n }, () => ({ date: "2026-10-05", leaderIds: [], crewIds: [] }));
+  const good = [{ date: "2026-10-05", leaderIds: ["recD"], crewIds: [] }];
+  for (const n of [1, 2, 3]) {
+    const v = buildAttendanceView(base2({ fieldCost: fc([...good, ...empties(n)]) }));
+    assert.equal(fieldCostWarning(v), null, `n=${n}`);
+    assert.equal(core.fieldCostReminder(v), `有 ${n} 張成本單沒填組長與實際出工人`);
+    assert.equal(core.attendanceTtl(v, true), 5 * 60000);
+  }
+  const four = buildAttendanceView(base2({ fieldCost: fc([...good, ...empties(4)]) }));
+  assert.match(fieldCostWarning(four), /4 筆成本單有日期但組長與實際出工人都沒讀到/);
+  assert.equal(core.fieldCostReminder(four), null);
+  assert.equal(core.fieldCostReminder(buildAttendanceView(base2({ fieldCost: fc(good) }))), null);
+  // 讀取完整性：complete=false、或 total／sourceTotal 大於實際列數
+  const mkData = (extra) => ({ fields: [{ id: "fldQh6cdMp", name: "d" }, { id: "fldmg63eFl", name: "l" }, { id: "flddpaUr6b", name: "c" }], records: [{ fields: { d: Date.UTC(2026, 9, 5, 2, 0) }, links: { l: ["recD"] } }], ...extra });
+  const dates = weekDates(WEEK);
+  assert.equal(parseFieldCost(mkData({}), dates).incomplete, undefined);
+  assert.equal(parseFieldCost(mkData({ complete: true, total: 1, sourceTotal: 1, excluded: 0 }), dates).incomplete, undefined);
+  for (const extra of [{ complete: false }, { total: 5 }, { sourceTotal: 9, excluded: 2 }]) {
+    const fcIn = parseFieldCost(mkData(extra), dates);
+    assert.equal(fcIn.incomplete, true, JSON.stringify(extra));
+    const v = buildAttendanceView(base2({ fieldCost: fcIn }));
+    assert.match(fieldCostWarning(v), /外業成本單可能沒讀完整：.*沒有全部讀完/);
+    assert.equal(core.attendanceTtl(v, true), 60000);
+  }
+});
+
+test("R3-6 快取 TTL 決定：成功本週 5 分、過去週 6 小時；有警示或失敗 60 秒", () => {
+  const ok = buildAttendanceView(base2({ fieldCost: fc([{ date: "2026-10-05", leaderIds: ["recD"], crewIds: [] }]) }));
+  assert.equal(core.attendanceTtl(ok, true), 5 * 60000);
+  assert.equal(core.attendanceTtl(ok, false), 6 * 3600000);
+  const warn = buildAttendanceView(base2({ fieldCost: fc([], { error: "讀不到外業成本單（1254302）" }) }));
+  assert.equal(core.attendanceTtl(warn, true), 60000);
+  assert.equal(core.attendanceTtl(warn, false), 60000);
+  for (const bad of [{ status: "error", error: "x" }, { status: "needs-permission", missing: [], hint: "" }, { status: "not-connected" }])
+    assert.equal(core.attendanceTtl(bad, false), 60000, bad.status);
+});
+
+test("R3-6 原始碼守門：lib/attendance.ts 回應路徑不回傳 .message；fieldCost 的 force 一路傳下去", () => {
+  const src = readFileSync(new URL("../lib/attendance.ts", import.meta.url), "utf8");
+  const code = src.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  const offenders = code.split("\n").filter((l) => /\.message\b/.test(l) && !/console\./.test(l));
+  assert.deepEqual(offenders, []);
+  assert.ok(!/\bString\(\s*e\s*\)|\$\{\s*e\s*\}|error:\s*e\b/.test(code), "不得直接回傳例外物件");
+  assert.match(code, /error:\s*attendanceErrorText\(/);
+  assert.match(code, /fieldCost\(\s*dates\s*,\s*force\s*\)/);
+  assert.match(code, /getSourceData\(\s*src\s*,\s*force\s*\)/);
+  assert.match(code, /compute\([^)]*opts\.force/);
+});
+
+test("R3-7 殺變異：週六沒 task 紀錄的半天假不計", () => {
+  const v = buildAttendanceView(base2({ now: NOW_SUN, approvals: [lv("emp_A", am("2026-10-10"))] }));
+  assert.equal(person(v, "甲").days[5], "none");
+  assert.equal(v.summary.leave, 0);
+  const wd = buildAttendanceView(base2({ now: NOW_SUN, approvals: [lv("emp_A", am("2026-10-09"))] }));
+  assert.equal(person(wd, "甲").days[4], "leave-half-open"); // 平日同樣條件要計
+});
+
+test("R3-7 殺變異：全空列要日期、組長、實際出工人都空（只有出工人有值不算）", () => {
+  const v = buildAttendanceView(base2({ fieldCost: fc([{ date: "", leaderIds: [], crewIds: ["recD"] }, { date: "", leaderIds: [], crewIds: [] }]) }));
+  assert.deepEqual([v.notes.fieldNoDate, v.notes.fieldAllEmpty], [2, 1]);
+});
+
+test("R3-7 殺變異：錯誤碼只接受數字，非數字顯示（未知）", () => {
+  for (const c of ["abc", "12ab", "", "1e3", null, undefined, {}]) {
+    assert.equal(attendanceErrorText({ code: c }), "讀取出勤資料失敗（未知）", String(c));
+    assert.equal(fieldCostError({ code: c }), "讀不到外業成本單（未知）", String(c));
+  }
+  assert.equal(attendanceErrorText({ code: "1254302" }), "讀取出勤資料失敗（1254302）");
+  assert.equal(fieldCostError({ code: "1254302" }), "讀不到外業成本單（1254302）");
+  assert.equal(fieldCostError({ code: 99 }), "讀不到外業成本單（99）");
+});
+
+// ---- 第四輪審查（2026-10-13 晚間）----
+const tripOn = (d, id = "T1") => ({ approval_id: id, start_time: `${d} 09:00:00`, end_time: `${d} 18:00:00`, reason: "r" });
+test("R4-1 考勤組平日沒有 task 紀錄的整天出差／外出也要計（與半天假＋出差、外業口徑一致）；週末不計", () => {
+  const v = buildAttendanceView(base2({ now: NOW_SUN, approvals: [{ user_id: "emp_A", trips: [tripOn("2026-10-06")] }, { user_id: "emp_A", outs: [{ ...tripOn("2026-10-07", "O1"), interval: 32400 }] }] }));
+  assert.deepEqual(person(v, "甲").days.slice(1, 3), ["trip", "out"]);
+  assert.deepEqual(sumOf(v, "trip", "out"), [1, 1]);
+  const wk = buildAttendanceView(base2({ now: NOW_SUN, approvals: [{ user_id: "emp_A", trips: [tripOn("2026-10-10")] }] }));
+  assert.equal(person(wk, "甲").days[5], "none");
+  assert.equal(wk.summary.trip, 0);
+});
+
+test("R4-2 半天假＋出差外出時，Lark 打卡上的出差／外出標記優先於審批（與沒有請假時一致）", () => {
+  const recs = [rec("Normal", "Normal", "Travel", "Travel")];
+  const outAppr = { user_id: "emp_A", outs: [{ approval_id: "O1", start_time: "2026-10-06 14:00:00", end_time: "2026-10-06 15:00:00", interval: 3600, reason: "r" }] };
+  const plain = buildAttendanceView(base2({ now: NOW_SUN, tasks: [task("emp_A", 20261006, recs)], approvals: [outAppr] }));
+  const withLeave = buildAttendanceView(base2({ now: NOW_SUN, tasks: [task("emp_A", 20261006, recs)], approvals: [outAppr, lv("emp_A", am("2026-10-06"))] }));
+  assert.equal(person(plain, "甲").days[1], "trip");
+  assert.equal(person(withLeave, "甲").days[1], "trip");
+});
+
+test("R4-3 離職舊列與在職列共用 Lark帳號但名字不同：不當別名（成本單照舊算對不到），計入 rosterShared", () => {
+  const cols = { name: PEOPLE_NAME, group: PEOPLE_GROUP, active: PEOPLE_ACTIVE, account: PEOPLE_ACCOUNT };
+  const mk = (id, name, oid, active = true) => ({ id, fields: { [PEOPLE_NAME]: name, [PEOPLE_GROUP]: "外業A", [PEOPLE_ACTIVE]: active }, people: { [PEOPLE_ACCOUNT]: [{ id: oid, name }] } });
+  for (const rows of [[mk("rowW", "王", "ou_w"), mk("rowL", "李", "ou_w", false)], [mk("rowL", "李", "ou_w", false), mk("rowW", "王", "ou_w")]]) {
+    const r = buildRoster(rows, cols);
+    assert.equal(r.people.length, 1);
+    assert.ok(!(r.people[0].altRecordIds ?? []).includes("rowL"));
+    assert.equal(r.merged, 1);
+    const v = buildAttendanceView(base({ roster: r.people, employeeIds: new Map([["ou_w", "emp_W"]]), members: new Set(), fieldCost: fc([{ date: "2026-10-05", leaderIds: ["rowL"], crewIds: [] }]) }));
+    assert.equal(v.people.length, 0);
+    assert.equal(v.notes.fieldUnmatched, 1);
+  }
+});
+
+test("R4-4 平日但 Lark 給純免打卡（例如補假、國定假日，兩側 NoNeedCheck 沒標 Leave）：半天假、整天假都不計", () => {
+  const nn = [task("emp_A", 20261009, [rec("NoNeedCheck", "NoNeedCheck")])];
+  const half = buildAttendanceView(base2({ now: NOW_SUN, tasks: nn, approvals: [lv("emp_A", am("2026-10-09"))] }));
+  assert.equal(person(half, "甲").days[4], "off");
+  assert.equal(half.summary.leave, 0);
+  const full = buildAttendanceView(base2({ now: NOW_SUN, tasks: nn, approvals: [lv("emp_A", leave("L1", "2026-10-09 09:00:00", "2026-10-09 18:00:00", 86400))] }));
+  assert.equal(person(full, "甲").days[4], "off");
+  assert.equal(full.summary.leave, 0);
+});
+
+test("R4-5 整天假那天一側免打卡、一側沒結果（classifyDay 回 off）仍是應打卡日：計請假 1", () => {
+  const v = buildAttendanceView(base2({ now: NOW_SUN, tasks: [task("emp_A", 20261006, [rec("NoNeedCheck", "Todo")])], approvals: [lv("emp_A", leave("L1", "2026-10-06 09:00:00", "2026-10-06 18:00:00", 86400))] }));
+  assert.equal(person(v, "甲").days[1], "leave");
+  assert.equal(v.summary.leave, 1);
+});
+
+test("R4-6 讀取完整性：排除數＋讀到列數＝來源總數時不算沒讀完；少於來源總數才算", () => {
+  const data = (extra) => ({ fields: [{ id: "fldQh6cdMp", name: "工作日期" }, { id: "fldmg63eFl", name: "組長" }, { id: "flddpaUr6b", name: "實際出工人" }], records: [{ fields: { 工作日期: Date.UTC(2026, 9, 5) }, links: { 組長: ["recD"], 實際出工人: [] } }], complete: true, ...extra });
+  const dates = ["2026-10-05"];
+  assert.equal(parseFieldCost(data({ sourceTotal: 3, excluded: 2 }), dates).incomplete, undefined);
+  assert.equal(parseFieldCost(data({ sourceTotal: 4, excluded: 2 }), dates).incomplete, true);
+  assert.equal(parseFieldCost(data({ complete: false }), dates).incomplete, true);
+});
+
+test("R4-7 接線守門：TTL 依是否本週決定、rosterShared 有傳下去、註腳有顯示提醒與共用帳號", () => {
+  const svc = readFileSync(new URL("../lib/attendance.ts", import.meta.url), "utf8");
+  assert.match(svc, /attendanceTtl\(\s*\w+\s*,\s*isCurrent\s*\)/);
+  assert.match(svc, /rosterShared:\s*merged/);
+  const ui = readFileSync(new URL("../components/AttendanceCards.tsx", import.meta.url), "utf8");
+  assert.match(ui, /fieldCostReminder\(/);
+  assert.match(ui, /\{reminder && <li>/);
+  assert.match(ui, /ok\.notes\.rosterShared/);
+  assert.match(ui, /一律整天算出差／外出/);
+});
+
+test("R4-8 三列換出同一個 employee_id：只算一人，成本單接到任一列都算到這個人", () => {
+  const v = buildAttendanceView(base({
+    roster: [1, 2, 3].map((i) => ({ name: "己", group: "外業B", openId: `ou_f${i}`, recordId: `r${i}` })),
+    employeeIds: new Map([["ou_f1", "emp_F"], ["ou_f2", "emp_F"], ["ou_f3", "emp_F"]]), members: new Set(),
+    fieldCost: fc([{ date: "2026-10-05", leaderIds: ["r3"], crewIds: [] }, { date: "2026-10-06", leaderIds: ["r2"], crewIds: [] }]),
+  }));
+  assert.equal(v.people.length, 1);
+  assert.deepEqual(v.people[0].days.slice(0, 2), ["field", "field"]);
+  assert.equal(v.notes.fieldUnmatched, 0);
+});
+
+test("R4-9 平日但 Lark 給純免打卡（補假）時，半天假＋同日出差也不計（規則 1 只套應打卡日）", () => {
+  const v = buildAttendanceView(base2({ now: NOW_SUN, tasks: [task("emp_A", 20261009, [rec("NoNeedCheck", "NoNeedCheck")])], approvals: [lv("emp_A", am("2026-10-09")), { user_id: "emp_A", trips: [tripOn("2026-10-09")] }] }));
+  assert.equal(person(v, "甲").days[4], "off");
+  assert.deepEqual(sumOf(v, "trip", "leave"), [0, 0]);
 });
