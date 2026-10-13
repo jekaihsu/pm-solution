@@ -113,16 +113,21 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 
 **R04 人事**：招聘暫無；出勤、出差需開通 Lark 假勤／審批權限；加班取自薪水總表（以月為單位）。
 
-## 9. 待辦
+## 9. 待辦（依順序）
 
-- [ ] 部署最新版（`lib/version.ts` 的 APP_VERSION），看 `/api/health` 的 `sopFields` 找出「是否違反SOP」在哪張表，必要時調整 `resolveWorkFields` 的 `sopViolation`。
-- [ ] Zeabur 設定 `DATA_DIR=/app/data` 並掛載硬碟。
-- [ ] 薪水總表：把 PM週報 應用加入 Base（唯讀），確認表名與加班欄位名；設定 `HR_VIEWERS`。
-- [ ] V4 與報價 Base 的 1254302 權限。
-- [ ] 用真實 V3 資料驗收 R01（兩組對 Lark 原表）；確認 V3 外業工作單是否有 `修改後數量`。
-- [ ] R02 交期欄位位置；進度 % 口徑（使用者之後說明）。
-- [ ] 圖文說明書補 R01／R02／R04。
-- [ ] **工作單聊天串（記錄留言）**：使用者要在明細看到 Lark 記錄右側的留言串。官方「分頁獲取文檔評論」API（`GET /drive/v1/files/{token}/comments`）文件只列 doc/sheet/file/docx，未保證支援多維表格，也未說明如何對應到記錄。先跑 `node --env-file=.env.local scripts/probe-comments.mjs`（唯讀，只印結構不印內容）：
-  - 若回權限錯誤：需在 PM週報 應用開通讀取評論權限並發布新版本（先問使用者）。
-  - 若 code=0 且能對應到 record：在 `lib/lark.ts` 加讀取、快取，`OrderDetail` 加「留言」欄。
-  - 若無法對應記錄：回報使用者，替代方案是請他們把要給 PM 看的內容寫在工作單的「備註」欄（網站已顯示）。
+做事方式：可以直接用 Zeabur、Lark、瀏覽器查證；**要改權限、開通新應用權限、讀新的個資範圍，一律先問使用者**。要改程式就照第 6 節的流程（更新 `APP_VERSION` → typecheck → build → 推送 → 部署 → `/api/health` 確認）。
+
+1. **部署與硬碟**：Zeabur 服務 `settings` 設 `DATA_DIR=/app/data`、掛載 `/app/data` 硬碟；部署最新版，確認 `/api/health` 的 `version`＝`lib/version.ts`、`storage.dataDirSet`＝true。
+2. **是否違反SOP 欄位**：看 `/api/health` 的 `sopFields` 找出欄位所在的 Base／表／名稱。若不在外業工作單（例如在成本單，一組一天一筆），改 `lib/controlGroup.ts` 的 `sopViolation` 與 `GroupBoard` 讓它依「組別＋日期」套到工作單上。
+3. **V3 外業工作單欄位**（`tbl97f1uXqi7Qz0k`）：確認「修改後數量」「修改後營業額」「備註」「控制組檢核」選項、組別欄位類型。名稱不同就改 `resolveWorkFields`／`resolveFixFields`。控制組頁面出現過記錄 ID：若組別是關聯欄位且標題沒轉成功，修 `lib/lark.ts` 的 `resolveLinks`。
+4. **工作單聊天串留言**：跑 `scripts/probe-comments.mjs`（唯讀，只印結構）。
+   - 需要新權限 → 問使用者。
+   - 可讀且能對應記錄 → `lib/lark.ts` 加讀取與快取、`OrderDetail` 加「留言」欄。
+   - 無法對應記錄 → 回報，替代方案是寫在「備註」欄（已顯示）。
+5. **薪水總表**（`VwAsbezz9app3YsramgjduLYp2U`）：確認 PM週報 應用能否讀取（不能 → 問使用者是否加入應用、只給可閱讀）；確認表名與加班欄位名，必要時調整 `salaryField()`（只能更嚴，不能放寬到薪資金額）；`HR_VIEWERS` 等使用者提供 open_id。
+6. **V4 與報價 Base（1254302）**：盤點進階權限與角色，提出開通方案（群組＋唯讀角色）給使用者決定，不要自行修改。
+7. **R02 交期欄位**：找出案件交期所在的表與欄位，接到 `components/OwnerProgress.tsx` 的「距交期（天）」。進度 % 口徑等使用者說明，先維持「待定義」。
+8. **真實資料驗收 R01**（V3、上週）：挑兩組對 Lark 原表核對營業額點數、不通過、異常、被修改、張數；檢查註腳「不列入：…」是否合理（只應排除行政、業務、內業、未對應組別）。對不上就修並附組別、工作單號。
+9. **手機版檢查**：用瀏覽器 390px 寬看 R01、R02、R04，不能有水平捲動整頁。
+10. **出勤、出差**：需要 Lark 假勤／審批權限與可看名單，等使用者決定。
+11. **圖文說明書**（https://claude.ai/artifact/PsfLBoQjPkdmkeSTqczg9F）：補 R01（簡表、單組單週、每日出錯、失誤率明細、SOP、備註）、R02、R04。若無法編輯，在 repo 新增 `docs/manual.md` 並告訴使用者。
