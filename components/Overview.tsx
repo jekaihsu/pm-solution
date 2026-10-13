@@ -56,9 +56,11 @@ export default function Overview() {
   const { week, version } = useShell();
   // SOURCES is a fixed list, so calling the hook per entry keeps hook order stable.
   const states = Object.fromEntries(SOURCES.map((s) => [s.key, useSource(s.key, { only: "dates" })]));
-  const located = SOURCES.filter(isLocated);
+  // Optional reference tables (no report depends on them) are counted apart.
+  const located = SOURCES.filter((s) => isLocated(s) && !s.optional);
   const ok = located.filter((s) => states[s.key].status === "ok").length;
   const failed = located.filter((s) => states[s.key].status === "error").length;
+  const optionalFailed = SOURCES.filter((s) => s.optional && isLocated(s) && states[s.key].status === "error").length;
   const latest = Math.max(0, ...located.map((s) => states[s.key].data?.fetchedAt ?? 0));
 
   return (
@@ -84,6 +86,7 @@ export default function Overview() {
         <div className="stat">
           <span className="stat-label">讀取失敗</span>
           <span className={`stat-value ${failed ? "bad-text" : ""}`}>{failed}</span>
+          {optionalFailed > 0 && <span className="muted small">另有 {optionalFailed} 個非必要參照表讀不到</span>}
         </div>
         <div className="stat">
           <span className="stat-label">尚未定位的來源</span>

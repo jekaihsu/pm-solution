@@ -19,9 +19,17 @@ function SourceRow({ src }: { src: SourceDef }) {
   const status =
     s.status === "ok" && s.data ? (
       <span className={`pill ${s.data.stale ? "pill-warn" : "pill-good"}`}>{s.data.source === "demo" ? "示範" : s.data.stale ? "過期快照" : "已連線"}</span>
+    ) : src.optional && s.status === "error" ? (
+      <span className="pill pill-warn" title="非必要參照：沒有報表依賴這張表">非必要參照・{STATUS_TEXT[s.status]}</span>
     ) : (
       <span className={`pill ${s.status === "error" ? "pill-bad" : ""}`}>{STATUS_TEXT[s.status]}</span>
     );
+  // Tables found by name have no fixed id: show the one resolved at read time.
+  const tableId = src.tableId ?? (s.data && s.data.source !== "demo" ? s.data.table.id : undefined);
+  const location = !isLocated(src)
+    ? "尚未定位"
+    : `${src.baseToken} / ${tableId ?? (src.tableName ? `依表名「${src.tableName.source}」尋找（未解析）` : "未解析")}${src.viewId ? ` / ${src.viewId}` : ""}`;
+  const link = src.url && !src.tableId && tableId && !src.url.includes("table=") ? `${src.url}?table=${tableId}` : src.url;
 
   return (
     <section className="src-card">
@@ -41,8 +49,8 @@ function SourceRow({ src }: { src: SourceDef }) {
         </div>
         <div className="src-meta">
           {status}
-          {src.url && (
-            <a href={src.url} target="_blank" rel="noreferrer" className="icon-btn bordered" title="在 Lark 開啟" aria-label="在 Lark 開啟">
+          {link && (
+            <a href={link} target="_blank" rel="noreferrer" className="icon-btn bordered" title="在 Lark 開啟" aria-label="在 Lark 開啟">
               <ExternalLink size={14} strokeWidth={1.75} />
             </a>
           )}
@@ -50,7 +58,7 @@ function SourceRow({ src }: { src: SourceDef }) {
       </header>
       <dl className="facts">
         <dt>位置</dt>
-        <dd className="mono">{isLocated(src) ? `${src.baseToken} / ${src.tableId}${src.viewId ? ` / ${src.viewId}` : ""}` : "尚未定位"}</dd>
+        <dd className="mono">{location}</dd>
         {s.data && (
           <>
             <dt>筆數</dt>

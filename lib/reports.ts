@@ -5,6 +5,7 @@
 export type DataVersion = "v3" | "v4";
 
 export interface SourceDef {
+  optional?: boolean; // reference only: no report depends on it, so a failure is not a report outage
   key: string;
   name: string;
   version?: DataVersion; // 詠翔日報系統版本；不分版本的來源留空
@@ -209,7 +210,7 @@ export const SOURCES: SourceDef[] = [
     allowField: only(["車牌", "維修/保養日期", "費用", "維修/保養廠家", "備註"]),
   }),
   // 「資料表」：業主同事說是某位同事自己拉的、來源不明，不再當主要來源；R07 主畫面不顯示，只留在「查看原始資料表」。
-  eqSys("equipment-rates", "儀器管理系統：資料表（非正式、來源不明）", "tblZmvrjDC5Q3sIp", "非正式、來源不明（某同事自己拉的）；R07 主畫面不使用，只供查看原始資料。含日租金、啟用、狀態。"),
+  eqSys("equipment-rates", "儀器管理系統：資料表（非正式、來源不明）", "tblZmvrjDC5Q3sIp", "非正式、來源不明（某同事自己拉的）；R07 主畫面不使用，只供查看原始資料。含日租金、啟用、狀態。", { optional: true }),
   {
     key: "contact-log",
     name: "業主聯繫紀錄",

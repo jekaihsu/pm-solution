@@ -10,7 +10,7 @@ export interface WarmStatus {
   lastEnd?: number;
   ok: number;
   total: number;
-  sources: Record<string, { ok: boolean; ms: number; at: number; records?: number; sourceTotal?: number; excluded?: number; noCreatedTime?: number; newestCreated?: string; error?: string }>;
+  sources: Record<string, { ok: boolean; ms: number; at: number; records?: number; sourceTotal?: number; excluded?: number; noCreatedTime?: number; newestCreated?: string; optional?: boolean; error?: string }>;
 }
 // Shared across Next.js module copies (startup hook vs. API routes).
 const shared = (g.__pmWarm ??= { running: false, status: { ok: 0, total: 0, sources: {} } });
@@ -36,7 +36,7 @@ export async function warmAll() {
             warmStatus.sources[src.key] = { ok: true, ms: Date.now() - t, at: Date.now(), records: d.total, sourceTotal: d.sourceTotal, excluded: d.excluded, noCreatedTime: d.noCreatedTime, newestCreated: d.newestCreated ? new Date(d.newestCreated + 8 * 3600000).toISOString().slice(0, 16).replace("T", " ") : undefined };
           } catch (err) {
             const message = (err as Error).message;
-            warmStatus.sources[src.key] = { ok: false, ms: Date.now() - t, at: Date.now(), error: message.slice(0, 200) };
+            warmStatus.sources[src.key] = { ok: false, ms: Date.now() - t, at: Date.now(), ...(src.optional ? { optional: true } : {}), error: message.slice(0, 200) };
             console.error(`[warm ${src.key}]`, message);
           }
         }
