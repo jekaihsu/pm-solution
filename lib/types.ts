@@ -22,6 +22,7 @@ export interface TableData {
   // `links`: for link fields only, the linked records' record_ids, index-aligned with the
   // titles that `fields[name]` holds after resolveLinks (R02 以人為單位 needs the ids to join
   // on 人員 record_id). Optional, absent when the table has no link cells or in demo data.
+  // Returned by /api/sources only with links=1, and only for the projected fields.
   records: { id: string; fields: Record<string, CellValue>; links?: Record<string, string[]> }[];
   fetchedAt: number;
   source: "lark" | "demo";

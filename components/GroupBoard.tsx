@@ -798,11 +798,11 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const { week, version: globalVersion, demo } = useShell();
   const [localVersion, setLocalVersion] = useState<DataVersion>("v3");
   const version: DataVersion = globalVersion === "all" ? localVersion : globalVersion;
-  const work = useSource(cfg.workKey(version), { fields: WORK_FIELDS });
+  const work = useSource(cfg.workKey(version), { fields: WORK_FIELDS, links: true });
   // Hooks run unconditionally; boards without a cost sheet reuse the work key (cached).
-  const cost = useSource(cfg.costKey ? cfg.costKey(version) : cfg.workKey(version), { fields: cfg.costKey ? COST_FIELDS : WORK_FIELDS });
-  const crew = useSource(cfg.crewKey ? cfg.crewKey(version) : cfg.workKey(version), { fields: cfg.crewKey ? FIELD_COST_FIELDS : WORK_FIELDS });
-  const sched = useSource(cfg.scheduleKey(version), { fields: SCHEDULE_FIELDS });
+  const cost = useSource(cfg.costKey ? cfg.costKey(version) : cfg.workKey(version), { fields: cfg.costKey ? COST_FIELDS : WORK_FIELDS, links: true });
+  const crew = useSource(cfg.crewKey ? cfg.crewKey(version) : cfg.workKey(version), { fields: cfg.crewKey ? FIELD_COST_FIELDS : WORK_FIELDS, links: true });
+  const sched = useSource(cfg.scheduleKey(version), { fields: SCHEDULE_FIELDS, links: true });
   const isMobile = useMedia(MOBILE);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const sop = useSop(cfg.report, version, week.start);

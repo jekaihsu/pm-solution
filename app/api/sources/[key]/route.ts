@@ -12,31 +12,42 @@ export const dynamic = "force-dynamic";
 // only the response gets smaller.
 //  only=meta   → field list and counts, no records (sources page)
 //  only=dates  → date fields only (overview trend counts)
-//  fields=a,b  → those names; "x*" matches a prefix, "~x" any name containing x
+//  fields=a,b  → those names ("#fld…" = by field id); "x*" matches a prefix, "~x" any name containing x
 //                (case-insensitive), "@dates" every date field
+//  links=1     → also return each link field's record_ids (record.links); off by default
 function project(data: TableData, req: NextRequest): TableData {
+  const wantLinks = req.nextUrl.searchParams.get("links") === "1";
+  const out = project0(data, req);
+  return {
+    ...out,
+    records: out.records.map((r) => {
+      const { links, ...rest } = r;
+      if (!wantLinks || !links) return rest;
+      const kept = Object.fromEntries(Object.entries(links).filter(([name]) => out.fields.some((f) => f.name === name)));
+      return Object.keys(kept).length ? { ...rest, links: kept } : rest;
+    }),
+  };
+}
+
+function project0(data: TableData, req: NextRequest): TableData {
   const only = req.nextUrl.searchParams.get("only");
   const list = req.nextUrl.searchParams.get("fields");
   if (only === "meta") return { ...data, records: [] };
   if (!only && !list) return data;
   const tokens = list ? list.split(",") : [];
-  const exact = new Set(tokens.filter((t) => !t.endsWith("*") && !t.startsWith("@") && !t.startsWith("~")));
+  const exact = new Set(tokens.filter((t) => !t.endsWith("*") && !t.startsWith("@") && !t.startsWith("~") && !t.startsWith("#")));
   const prefixes = tokens.filter((t) => t.endsWith("*")).map((t) => t.slice(0, -1));
   const contains = tokens.filter((t) => t.startsWith("~")).map((t) => t.slice(1).toLowerCase());
+  const ids = new Set(tokens.filter((t) => t.startsWith("#")).map((t) => t.slice(1)));
   const allDates = only === "dates" || tokens.includes("@dates");
   const fields = data.fields.filter(
-    (f) => (allDates && f.kind === "date") || exact.has(f.name) || prefixes.some((p) => f.name.startsWith(p)) || contains.some((c) => f.name.toLowerCase().includes(c)) || (list && f.primary),
+    (f) => (allDates && f.kind === "date") || exact.has(f.name) || ids.has(f.id) || prefixes.some((p) => f.name.startsWith(p)) || contains.some((c) => f.name.toLowerCase().includes(c)) || (list && f.primary),
   );
   const names = fields.map((f) => f.name);
   return {
     ...data,
     fields,
-    records: data.records.map((r) => ({
-      id: r.id,
-      fields: Object.fromEntries(names.map((n) => [n, r.fields[n] ?? null])),
-      // link record_ids ride along for the projected fields only
-      ...(r.links ? (() => { const l = Object.fromEntries(names.filter((n) => r.links![n]).map((n) => [n, r.links![n]])); return Object.keys(l).length ? { links: l } : {}; })() : {}),
-    })),
+    records: data.records.map((r) => ({ id: r.id, fields: Object.fromEntries(names.map((n) => [n, r.fields[n] ?? null])), ...(r.links ? { links: r.links } : {}) })),
   };
 }
 

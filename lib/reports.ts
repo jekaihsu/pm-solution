@@ -70,7 +70,7 @@ function raw(key: string, name: string, version: DataVersion, table: string, ext
     version,
     baseToken: base,
     tableId: table,
-    url: tableUrl(base, table),
+    url: table ? tableUrl(base, table) : `${LARK_WEB}/base/${base}`,
     ...(version === "v4" ? V4_RULE : {}),
     ...extra,
   };
@@ -87,6 +87,11 @@ export const SOURCES: SourceDef[] = [
   raw("v4-internal-cost", "內業成本單", "v4", "tblKwSDRg6WaGHYr", { dateField: "工作日期", columns: COLS.internalCost, ...DASH.internalCost }),
   raw("v3-schedule", "工作預排", "v3", "tblN8c3WN44233aG", { columns: COLS.schedule, ...DASH.schedule }),
   raw("v4-schedule", "工作預排", "v4", "tblZz6Mkhv9gHrB2", { dateField: "開始日期", columns: COLS.schedule, ...DASH.schedule }),
+  raw("v3-admin-work", "行政工作單", "v3", "tbl2c5CLgwPZ3Pl2", { note: "R11 用；沒有日期與人員，從「所屬成本單」帶入。" }),
+  raw("v3-admin-cost", "行政成本單", "v3", "tbliyB0wgDhgUQbA", { dateField: "工作日期", note: "R11 用；填表人＝看板的一列。" }),
+  // V4 行政表的 table id 未知，用表名自動找；應用目前讀不到（1254302），頁面會顯示失敗原因。
+  raw("v4-admin-work", "行政工作單", "v4", "", { tableId: undefined, tableName: /行政工作單/ }),
+  raw("v4-admin-cost", "行政成本單", "v4", "", { tableId: undefined, tableName: /行政成本單/, dateField: "工作日期" }),
   raw("v3-equipment", "儀器費率", "v3", "tblfgeEtMuBTg72O", { note: "費率表不等於完整資產台帳；租金缺值是未知，不是免費。" }),
   raw("v4-equipment", "儀器費率", "v4", "tblg3Fo23T6Gos6S", {
     createdAfter: undefined,
@@ -255,6 +260,15 @@ export const REPORTS: ReportDef[] = [
     sources: ["v3-field-work", "v3-schedule", "v4-field-work", "v4-schedule"],
     mustHave: ["預排達成率（以工程編號為主）", "進行中工作營業額剩餘"],
     pending: ["外業分母粒度、延期、停工、委外規則（D-03）", "剩餘點數避免內外業重疊（D-06）"],
+  },
+  {
+    id: "R11",
+    slug: "r11",
+    name: "行政數據",
+    purpose: "看行政人員上週的工作單、出勤天數、營業額點數與預排差異，一人一列。",
+    sources: ["v3-admin-work", "v3-admin-cost", "v4-admin-work", "v4-admin-cost", "v3-schedule", "v4-schedule"],
+    mustHave: ["每人工作單張數", "出勤天數（成本單去重日期）", "營業額點數", "預排點數與差異（業別＝行政，人員＋日期比對）", "異常張數", "加班時數"],
+    pending: ["失誤率／已檢核／不通過（行政沒有檢核欄，待定義）", "預排「預估營業額點數」目前全未填，暫以每人每天 1 點計", "預排條有填點數且多人時，是否各自全額或平分（暫各自全額）"],
   },
 ];
 
