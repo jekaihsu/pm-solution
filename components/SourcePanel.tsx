@@ -1,4 +1,5 @@
 "use client";
+import { Calendar, CalendarDays, CircleDot, Columns3, Download, ExternalLink, Hash, LayoutDashboard, List, ListFilter, Search, SquareCheck, Table2, Type, User, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { applyFilters, formatNumber, groupKeys, type Filters, type Widget } from "@/lib/aggregate";
 import { downloadCsv, toCsv } from "@/lib/csv";
@@ -10,6 +11,7 @@ import RecordCards from "./RecordCards";
 import SourceDashboard, { dashboardWidgets } from "./SourceDashboard";
 import { MOBILE, useMedia } from "./useMedia";
 import WidgetEditor from "./WidgetEditor";
+import EmptyState from "./EmptyState";
 import { STATUS_TEXT, useSource } from "./useSource";
 
 const ALL = "__all__";
@@ -38,17 +40,16 @@ export default function SourcePanel({ reportId, source }: { reportId: string; so
 
   if (state.status !== "ok" || !data) {
     return (
-      <div className={`state-box ${state.status === "error" ? "is-error" : ""}`}>
-        {STATUS_TEXT[state.status]}
-        {state.error && <div className="muted small">{state.error}</div>}
-        {source.note && <div className="muted small">{source.note}</div>}
-        {source.url && (
-          <div className="small">
-            <a href={source.url} target="_blank" rel="noreferrer">
-              在 Lark 開啟 ↗
+      <div className="sheet">
+        <EmptyState kind={state.status} title={STATUS_TEXT[state.status]}>
+          {state.error && <div className="mono">{state.error}</div>}
+          {source.note && <div>{source.note}</div>}
+          {source.url && (
+            <a href={source.url} target="_blank" rel="noreferrer" className="link">
+              在 Lark 開啟原始資料表 <ExternalLink size={12} />
             </a>
-          </div>
-        )}
+          )}
+        </EmptyState>
       </div>
     );
   }
@@ -208,14 +209,16 @@ function SourceBody({
       <div className="toolbar">
         <div className="seg seg-sm" role="group" aria-label="檢視">
           <button className={view === "dash" ? "on" : ""} onClick={() => setViewPref("dash")} aria-pressed={view === "dash"}>
+            <LayoutDashboard size={14} strokeWidth={1.75} />
             看板
           </button>
           <button className={view === "table" ? "on" : ""} onClick={() => setViewPref("table")} aria-pressed={view === "table"}>
+            <Table2 size={14} strokeWidth={1.75} />
             {isMobile ? "清單" : "表格"}
           </button>
         </div>
         <label className="tool tool-select" title="依哪個日期欄位篩選統計週">
-          <span>📅</span>
+          <CalendarDays size={14} strokeWidth={1.75} />
           <select value={dateField} onChange={(e) => setDateField(e.target.value)} aria-label="週篩選依據">
             {dateFields.map((f) => (
               <option key={f.id} value={f.name}>
@@ -226,7 +229,16 @@ function SourceBody({
           </select>
         </label>
 
-        <Popover label={`篩選${activeFilters.length ? ` ${activeFilters.length}` : ""}`} active={activeFilters.length > 0}>
+        <Popover
+          label={
+            <>
+              <ListFilter size={14} strokeWidth={1.75} />
+              篩選{activeFilters.length ? <span className="count">{activeFilters.length}</span> : null}
+            </>
+          }
+          active={activeFilters.length > 0}
+        >
+          <div className="pop-title">篩選條件</div>
           {filterable.length === 0 && <div className="muted small">沒有可篩選的選項欄位</div>}
           {filterable.map((f) => {
             const sel = filters[f.name] ?? [];
@@ -259,23 +271,36 @@ function SourceBody({
         </Popover>
 
         {view === "table" && (
-        <Popover label={`欄位 ${visibleFields.length}/${data.fields.length}`}>
+        <Popover
+          label={
+            <>
+              <Columns3 size={14} strokeWidth={1.75} />
+              欄位 <span className="muted">{visibleFields.length}/{data.fields.length}</span>
+            </>
+          }
+        >
           <ColumnPicker fields={data.fields} columns={columns} onChange={setColumns} onReset={() => setColumns(defaultColumns(source, data.fields))} />
         </Popover>
         )}
 
-        {view === "table" && <input className="tool-search" placeholder="搜尋…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="搜尋明細" />}
+        {view === "table" && (
+          <label className="tool-search">
+            <Search size={14} strokeWidth={1.75} />
+            <input placeholder="搜尋" value={q} onChange={(e) => setQ(e.target.value)} aria-label="搜尋明細" />
+          </label>
+        )}
 
         <div className="toolbar-right">
           <span className="count-text">
             <strong>{formatNumber(filtered.length)}</strong> 筆{byWeek ? `（${weekText}）` : ""}
           </span>
-          <button className="tool" onClick={exportCsv} disabled={!filtered.length}>
-            匯出
+          <button className="tool" onClick={exportCsv} disabled={!filtered.length} title="匯出 CSV">
+            <Download size={14} strokeWidth={1.75} />
+            <span className="hide-sm">匯出</span>
           </button>
           {source.url && data.source !== "demo" && (
-            <a className="tool" href={source.url} target="_blank" rel="noreferrer" title="在 Lark 開啟原始資料表">
-              ↗
+            <a className="tool" href={source.url} target="_blank" rel="noreferrer" title="在 Lark 開啟原始資料表" aria-label="在 Lark 開啟">
+              <ExternalLink size={14} strokeWidth={1.75} />
             </a>
           )}
         </div>
@@ -304,13 +329,13 @@ function SourceBody({
           onAdd={() => setEditing({ id: Math.random().toString(36).slice(2, 9), title: "", type: "bar", groupBy: filterable[0]?.name ?? data.fields[0]?.name ?? "", agg: "count", width: 1 })}
         />
       ) : filtered.length === 0 ? (
-        <div className="state-box">{emptyText}</div>
+        <EmptyState kind="empty" title={emptyText} />
       ) : isMobile ? (
         <RecordCards fields={visibleFields} records={filtered} query={q} allFields={data.fields} />
       ) : (
         <DataTable fields={visibleFields} records={filtered} query={q} allFields={data.fields} />
       )}
-      {view === "dash" && filtered.length === 0 && <div className="state-box">{emptyText}</div>}
+      {view === "dash" && filtered.length === 0 && <EmptyState kind="empty" title={emptyText} />}
 
       {editing && (
         <WidgetEditor
@@ -327,7 +352,12 @@ function SourceBody({
   );
 }
 
-const KIND_ICON: Record<string, string> = { text: "Aa", number: "#", select: "◉", multiselect: "☰", date: "📅", checkbox: "☑", person: "👤" };
+const KIND_ICON: Record<string, LucideIcon> = { text: Type, number: Hash, select: CircleDot, multiselect: List, date: Calendar, checkbox: SquareCheck, person: User };
+
+function KindIcon({ kind }: { kind: string }) {
+  const Icon = KIND_ICON[kind] ?? Type;
+  return <Icon size={13} strokeWidth={1.75} className="kind" aria-hidden />;
+}
 
 function ColumnPicker({ fields, columns, onChange, onReset }: { fields: FieldMeta[]; columns: string[]; onChange: (c: string[]) => void; onReset: () => void }) {
   const [q, setQ] = useState("");
@@ -349,7 +379,7 @@ function ColumnPicker({ fields, columns, onChange, onReset }: { fields: FieldMet
         {shown.map((f) => (
           <label key={f.id}>
             <input type="checkbox" checked={columns.includes(f.name)} onChange={() => toggle(f.name)} />
-            <span className="kind">{KIND_ICON[f.kind]}</span>
+            <KindIcon kind={f.kind} />
             {f.name}
           </label>
         ))}
@@ -398,7 +428,7 @@ function DataTable({ fields, allFields, records, query }: { fields: FieldMeta[];
     return out;
   }, [records, allFields, query, sort]);
 
-  if (!fields.length) return <div className="state-box">尚未選擇要顯示的欄位，請從「欄位」勾選。</div>;
+  if (!fields.length) return <EmptyState kind="empty" title="尚未選擇要顯示的欄位">從工具列的「欄位」勾選要顯示的欄位。</EmptyState>;
 
   return (
     <>
@@ -410,7 +440,7 @@ function DataTable({ fields, allFields, records, query }: { fields: FieldMeta[];
               {fields.map((f) => (
                 <th key={f.id} className={f.kind === "number" ? "num" : ""} aria-sort={sort?.field === f.name ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
                   <button onClick={() => setSort((s) => (s?.field === f.name ? (s.dir === 1 ? { field: f.name, dir: -1 } : null) : { field: f.name, dir: 1 }))}>
-                    <span className="kind">{KIND_ICON[f.kind]}</span>
+                    <KindIcon kind={f.kind} />
                     {f.name}
                     {sort?.field === f.name ? (sort.dir === 1 ? " ↑" : " ↓") : ""}
                   </button>

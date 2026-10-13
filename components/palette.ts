@@ -21,21 +21,21 @@ export interface ChartTheme {
 
 const lightTheme: ChartTheme = {
   series: LIGHT,
-  other: "#898781",
-  surface: "#fcfcfb",
-  grid: "#e1e0d9",
-  axis: "#c3c2b7",
-  muted: "#898781",
-  text: "#0b0b0b",
+  other: "#a1a1aa",
+  surface: "#ffffff",
+  grid: "#f0f0f2",
+  axis: "#e4e4e7",
+  muted: "#a1a1aa",
+  text: "#09090b",
 };
 const darkTheme: ChartTheme = {
   series: DARK,
-  other: "#898781",
-  surface: "#1a1a19",
-  grid: "#2c2c2a",
-  axis: "#383835",
-  muted: "#898781",
-  text: "#f0efec",
+  other: "#71717a",
+  surface: "#111113",
+  grid: "#1f1f23",
+  axis: "#27272a",
+  muted: "#71717a",
+  text: "#fafafa",
 };
 
 export function useChartTheme(): ChartTheme {

@@ -1,4 +1,5 @@
 "use client";
+import { ChevronLeft, ChevronRight, Database, FlaskConical, LayoutGrid, LogOut, Menu, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useContext, useEffect, useState } from "react";
@@ -23,15 +24,21 @@ export const useShell = () => useContext(ShellContext)!;
 
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
 
+function crumb(pathname: string): string {
+  if (pathname === "/") return "總覽";
+  if (pathname === "/sources") return "資料來源";
+  const r = REPORTS.find((x) => pathname === `/reports/${x.slug}`);
+  return r ? `${r.id} ${r.name}` : "";
+}
+
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [offset, setWeekOffset] = useState(-1); // reports default to last week
   const [demo, setDemo] = useState(false);
   const [version, setVersion] = useState<VersionFilter>("all");
   const [tick, setTick] = useState(0);
   const [navOpen, setNavOpen] = useState(false);
+  const [user, setUser] = useState<{ name: string; avatar?: string } | null>(null);
   const pathname = usePathname();
-
-  const [user, setUser] = useState<{ name: string } | null>(null);
 
   useEffect(() => setNavOpen(false), [pathname]);
   useEffect(() => {
@@ -52,65 +59,89 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <ShellContext.Provider value={ctx}>
       <div className={`shell ${demo ? "is-demo" : ""}`}>
         <aside className={`sidebar ${navOpen ? "open" : ""}`}>
-          <Link href="/" className="logo">
-            PM 週報
+          <Link href="/" className="ws">
+            <span className="ws-logo">PM</span>
+            <span className="ws-text">
+              <span className="ws-name">PM 週報</span>
+              <span className="ws-sub">Lark Base · 唯讀</span>
+            </span>
           </Link>
-          <nav>
-            <Link href="/" className={pathname === "/" ? "active" : ""}>
+
+          <nav className="nav">
+            <Link href="/" className={`nav-item ${pathname === "/" ? "active" : ""}`}>
+              <LayoutGrid size={16} strokeWidth={1.75} />
               總覽
             </Link>
             <div className="nav-label">報告</div>
             {REPORTS.map((r) => (
-              <Link key={r.id} href={`/reports/${r.slug}`} className={pathname === `/reports/${r.slug}` ? "active" : ""}>
-                <span className="rid">{r.id}</span> {r.name}
+              <Link key={r.id} href={`/reports/${r.slug}`} className={`nav-item ${pathname === `/reports/${r.slug}` ? "active" : ""}`}>
+                <span className="nav-rid">{r.id.slice(1)}</span>
+                <span className="nav-text">{r.name}</span>
               </Link>
             ))}
-            <div className="nav-label">參考</div>
-            <Link href="/sources" className={pathname === "/sources" ? "active" : ""}>
-              資料來源與定義
+            <div className="nav-label">設定</div>
+            <Link href="/sources" className={`nav-item ${pathname === "/sources" ? "active" : ""}`}>
+              <Database size={16} strokeWidth={1.75} />
+              資料來源
             </Link>
           </nav>
-          <label className="toggle sidebar-toggle">
-            <input type="checkbox" checked={demo} onChange={(e) => setDemo(e.target.checked)} />
-            顯示示範資料
-          </label>
+
+          <div className="sidebar-foot">
+            <label className="switch">
+              <input type="checkbox" checked={demo} onChange={(e) => setDemo(e.target.checked)} />
+              <span className="switch-ui" aria-hidden />
+              <FlaskConical size={14} strokeWidth={1.75} />
+              示範資料
+            </label>
+            {user && (
+              <div className="me">
+                {user.avatar ? <img src={user.avatar} alt="" className="avatar" /> : <span className="avatar">{user.name.slice(0, 1)}</span>}
+                <span className="me-name">{user.name}</span>
+                <a href="/api/auth/logout" className="icon-btn" title="登出" aria-label="登出">
+                  <LogOut size={15} strokeWidth={1.75} />
+                </a>
+              </div>
+            )}
+          </div>
         </aside>
+        {navOpen && <div className="scrim" onClick={() => setNavOpen(false)} />}
+
         <div className="main">
           <header className="topbar">
-            <button className="btn ghost nav-toggle" onClick={() => setNavOpen((o) => !o)} aria-label="選單">
-              ☰
+            <button className="icon-btn nav-toggle" onClick={() => setNavOpen((o) => !o)} aria-label="選單">
+              <Menu size={18} strokeWidth={1.75} />
             </button>
-            <div className="week-picker" role="group" aria-label="統計週">
-              <button className="btn small" onClick={() => setWeekOffset(offset - 1)} aria-label="前一週">
-                ‹
-              </button>
-              <span className="week-label" onClick={() => setWeekOffset(-1)} title="回到上週">
-                <strong>{weekName(offset)}</strong> {week.label}
-              </span>
-              <button className="btn small" onClick={() => setWeekOffset(offset + 1)} disabled={offset >= 0} aria-label="下一週">
-                ›
-              </button>
-            </div>
-            <div className="seg" role="group" aria-label="資料版本">
-              {(["all", "v3", "v4"] as const).map((v) => (
-                <button key={v} className={version === v ? "on" : ""} onClick={() => setVersion(v)} aria-pressed={version === v}>
-                  {v === "all" ? "V3＋V4" : v.toUpperCase()}
-                </button>
-              ))}
+            <div className="crumbs">
+              <span className="crumb-root">PM 週報</span>
+              <ChevronRight size={14} className="crumb-sep" />
+              <span className="crumb-here">{crumb(pathname)}</span>
+              {demo && <span className="pill pill-warn">示範資料</span>}
             </div>
             <div className="topbar-right">
-              <button className="btn small" onClick={ctx.refresh} aria-label="重新整理" title="重新整理">
-                ⟳<span className="hide-sm"> 重新整理</span>
+              <div className="week-picker" role="group" aria-label="統計週">
+                <button className="icon-btn" onClick={() => setWeekOffset(offset - 1)} aria-label="前一週">
+                  <ChevronLeft size={16} />
+                </button>
+                <button className="week-label" onClick={() => setWeekOffset(-1)} title="回到上週">
+                  <span className="week-name">{weekName(offset)}</span>
+                  <span className="week-range">{week.label}</span>
+                </button>
+                <button className="icon-btn" onClick={() => setWeekOffset(offset + 1)} disabled={offset >= 0} aria-label="下一週">
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+              <div className="seg" role="group" aria-label="資料版本">
+                {(["all", "v3", "v4"] as const).map((v) => (
+                  <button key={v} className={version === v ? "on" : ""} onClick={() => setVersion(v)} aria-pressed={version === v}>
+                    {v === "all" ? "全部" : v.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              <button className="icon-btn bordered" onClick={ctx.refresh} aria-label="重新整理" title="重新整理">
+                <RefreshCw size={15} strokeWidth={1.75} />
               </button>
-              {user && (
-                <span className="user">
-                  {user.name}
-                  <a href="/api/auth/logout">登出</a>
-                </span>
-              )}
             </div>
           </header>
-          {demo && <div className="demo-banner">目前顯示的是虛構示範資料，不是真實數字，請勿引用。</div>}
           <main className="content">{children}</main>
         </div>
       </div>

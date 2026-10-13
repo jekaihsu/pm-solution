@@ -1,7 +1,9 @@
 "use client";
+import { Info } from "lucide-react";
 import { useEffect, useState } from "react";
 import { sourceByKey, type ReportDef } from "@/lib/reports";
 import { showSource, useShell } from "./AppShell";
+import EmptyState from "./EmptyState";
 import SourcePanel from "./SourcePanel";
 
 export default function ReportView({ report }: { report: ReportDef }) {
@@ -19,42 +21,43 @@ export default function ReportView({ report }: { report: ReportDef }) {
   }, [sources, active]);
 
   return (
-    <div className="report">
-      <header className="report-bar">
-        <span className="rid-lg">{report.id}</span>
-        <h1>{report.name}</h1>
-        <button className={`tool ${showSpec ? "on" : ""}`} onClick={() => setShowSpec((s) => !s)} aria-expanded={showSpec}>
-          ⓘ 報告說明
+    <div className="page">
+      <header className="page-head">
+        <div className="page-title">
+          <div className="eyebrow">報告 {report.id}</div>
+          <h1>{report.name}</h1>
+          <p className="page-sub">{report.purpose}</p>
+        </div>
+        <button className={`btn ${showSpec ? "on" : ""}`} onClick={() => setShowSpec((s) => !s)} aria-expanded={showSpec}>
+          <Info size={15} strokeWidth={1.75} />
+          報告定義
         </button>
       </header>
 
       {showSpec && (
         <div className="spec">
-          <p className="purpose">{report.purpose}</p>
-          <div className="spec-cols">
-            <div>
-              <h4>報告必備內容</h4>
-              <ul>
-                {report.mustHave.map((m) => (
-                  <li key={m}>{m}</li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <h4>待確認定義（未定前不計算）</h4>
-              <ul>
-                {report.pending.map((p) => (
-                  <li key={p}>{p}</li>
-                ))}
-              </ul>
-            </div>
+          <div>
+            <h4>必備內容</h4>
+            <ul>
+              {report.mustHave.map((m) => (
+                <li key={m}>{m}</li>
+              ))}
+            </ul>
           </div>
-          {sources.some((s) => s.version) && <p className="muted small">V3 與 V4 是不同系統的原始資料，分開列出，不相加也不去重。</p>}
+          <div>
+            <h4>待確認定義 · 未定前不計算</h4>
+            <ul className="pending">
+              {report.pending.map((p) => (
+                <li key={p}>{p}</li>
+              ))}
+            </ul>
+          </div>
+          {sources.some((s) => s.version) && <p className="spec-note">V3 與 V4 是不同系統的原始資料，分開列出，不相加也不去重。</p>}
         </div>
       )}
 
       {sources.length > 1 && (
-        <nav className="sheet-tabs" role="tablist" aria-label="資料表">
+        <nav className="tabs" role="tablist" aria-label="資料表">
           {sources.map((s) => (
             <button key={s.key} role="tab" aria-selected={s.key === current?.key} className={s.key === current?.key ? "active" : ""} onClick={() => setActive(s.key)}>
               {s.name}
@@ -64,7 +67,13 @@ export default function ReportView({ report }: { report: ReportDef }) {
         </nav>
       )}
 
-      {current ? <SourcePanel key={current.key} reportId={report.id} source={current} /> : <div className="state-box">此版本沒有資料來源</div>}
+      {current ? (
+        <SourcePanel key={current.key} reportId={report.id} source={current} />
+      ) : (
+        <EmptyState kind="empty" title="此版本沒有資料來源">
+          切換上方「全部／V3／V4」看看其他版本。
+        </EmptyState>
+      )}
     </div>
   );
 }

@@ -73,7 +73,7 @@ export default function ChartView({
     <Tooltip
       cursor={{ fill: theme.grid, opacity: 0.5, stroke: theme.axis }}
       formatter={(v) => formatNumber(Number(v))}
-      contentStyle={{ background: theme.surface, border: `1px solid ${theme.grid}`, borderRadius: 8, color: theme.text, fontSize: 13 }}
+      contentStyle={{ background: theme.surface, border: `1px solid ${theme.axis}`, borderRadius: 10, color: theme.text, fontSize: 12.5, boxShadow: "0 8px 24px -8px rgba(0,0,0,.2)" }}
       labelStyle={{ color: theme.text, fontWeight: 600 }}
     />
   );
@@ -103,7 +103,7 @@ export default function ChartView({
           </Pie>
           <Tooltip
             formatter={(v) => `${formatNumber(Number(v))}（${total ? ((Number(v) / total) * 100).toFixed(1) : 0}%）`}
-            contentStyle={{ background: theme.surface, border: `1px solid ${theme.grid}`, borderRadius: 8, color: theme.text, fontSize: 13 }}
+            contentStyle={{ background: theme.surface, border: `1px solid ${theme.axis}`, borderRadius: 10, color: theme.text, fontSize: 12.5, boxShadow: "0 8px 24px -8px rgba(0,0,0,.2)" }}
             itemStyle={{ color: theme.text }}
           />
           <Legend layout="vertical" align="right" verticalAlign="middle" wrapperStyle={{ fontSize: 12 }} iconType="circle" iconSize={8} />
@@ -116,7 +116,7 @@ export default function ChartView({
     const { rows, keys } = foldStacks(series);
     return (
       <ResponsiveContainer width="100%" height={300}>
-        <BarChart data={rows} barCategoryGap="20%">
+        <BarChart data={rows} barCategoryGap="20%" maxBarSize={40}>
           {grid}
           <XAxis dataKey="name" {...axisProps} tickFormatter={shortDay} />
           <YAxis {...axisProps} axisLine={false} tickFormatter={formatNumber} width={48} />
@@ -165,7 +165,7 @@ export default function ChartView({
   const height = horizontal ? Math.max(200, series.rows.length * 30 + 40) : 280;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={series.rows} layout={horizontal ? "vertical" : "horizontal"} barCategoryGap="25%" margin={{ right: horizontal ? 40 : 8, top: 16 }}>
+      <BarChart data={series.rows} layout={horizontal ? "vertical" : "horizontal"} barCategoryGap="25%" maxBarSize={36} margin={{ right: horizontal ? 40 : 8, top: 16 }}>
         <CartesianGrid stroke={theme.grid} horizontal={!horizontal} vertical={horizontal} />
         {horizontal ? (
           <>

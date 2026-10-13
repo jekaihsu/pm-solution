@@ -1,4 +1,5 @@
 "use client";
+import { ArrowDownRight, ArrowUpRight, Minus, Plus, RotateCcw } from "lucide-react";
 import { useMemo } from "react";
 import { aggregate, applyFilters, defaultWidgets, formatNumber, type Filters, type Widget } from "@/lib/aggregate";
 import { inRange, pickExisting, sum, weeklyCounts } from "@/lib/metrics";
@@ -28,14 +29,16 @@ export function dashboardWidgets(source: SourceDef, fields: FieldMeta[], dateFie
 }
 
 function Delta({ now, prev }: { now: number; prev: number }) {
-  if (prev === 0 && now === 0) return <span className="delta">與前週持平</span>;
-  const diff = now - prev;
+  const diff = Math.round((now - prev) * 100) / 100;
   const pct = prev ? Math.round((diff / prev) * 100) : null;
-  const arrow = diff > 0 ? "▲" : diff < 0 ? "▼" : "＝";
+  const Icon = diff > 0 ? ArrowUpRight : diff < 0 ? ArrowDownRight : Minus;
   return (
-    <span className="delta">
-      {arrow} {formatNumber(Math.abs(diff))}
-      {pct !== null && diff !== 0 ? `（${diff > 0 ? "+" : "−"}${Math.abs(pct)}%）` : ""} vs 前週
+    <span className="delta-row">
+      <span className="delta">
+        <Icon size={13} strokeWidth={2} />
+        {diff === 0 ? "持平" : `${formatNumber(Math.abs(diff))}${pct !== null ? `（${Math.abs(pct)}%）` : ""}`}
+      </span>
+      <span className="muted">較前週</span>
     </span>
   );
 }
@@ -85,25 +88,25 @@ export default function SourceDashboard({
       <div className="kpis">
         <div className="kpi">
           <div className="kpi-label">{dateField ? "本期筆數" : "筆數"}</div>
-          <div className="kpi-value">{formatNumber(records.length)}</div>
-          {prev && <Delta now={records.length} prev={prev.length} />}
-          {trend && (
-            <div className="kpi-spark">
-              <Sparkline values={trend.map((t) => t.count)} labels={trend.map((t) => t.label)} />
-              <span className="muted small">近 8 週</span>
-            </div>
-          )}
+          <div className="kpi-main">
+            <div className="kpi-value">{formatNumber(records.length)}</div>
+            {trend && <Sparkline values={trend.map((t) => t.count)} labels={trend.map((t) => t.label)} />}
+          </div>
+          {prev ? <Delta now={records.length} prev={prev.length} /> : <span className="delta-row muted">未依週篩選</span>}
         </div>
         {numberFallback.map((m) => {
           const now = sum(records, m);
           const before = prev ? sum(prev, m) : null;
           return (
             <div className="kpi" key={m}>
-              <div className="kpi-label">
-                {m} <span className="muted">加總（原值，未核定）</span>
+              <div className="kpi-label" title="原始值加總，尚未核定">
+                {m} 加總
+                <span className="kpi-tag">原值</span>
               </div>
-              <div className="kpi-value">{formatNumber(Math.round(now.total * 100) / 100)}</div>
-              {before && <Delta now={Math.round(now.total * 100) / 100} prev={Math.round(before.total * 100) / 100} />}
+              <div className="kpi-main">
+                <div className="kpi-value">{formatNumber(Math.round(now.total * 100) / 100)}</div>
+              </div>
+              {before ? <Delta now={now.total} prev={before.total} /> : null}
               {now.n < records.length && <div className="kpi-sub">{records.length - now.n} 筆空白未計入</div>}
             </div>
           );
@@ -137,11 +140,13 @@ export default function SourceDashboard({
         </div>
       )}
       <div className="dash-foot">
-        <button className="btn ghost small" onClick={onReset}>
-          重設看板
+        <button className="btn ghost" onClick={onReset}>
+          <RotateCcw size={14} strokeWidth={1.75} />
+          重設
         </button>
-        <button className="btn primary small" onClick={onAdd}>
-          ＋ 新增圖表
+        <button className="btn" onClick={onAdd}>
+          <Plus size={14} strokeWidth={1.75} />
+          新增圖表
         </button>
       </div>
     </div>
