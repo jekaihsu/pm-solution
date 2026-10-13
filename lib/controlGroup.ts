@@ -29,6 +29,7 @@ export interface WorkFields {
   trade?: FieldMeta;
   person?: FieldMeta;
   sopViolation?: FieldMeta; // 日報「是否違反SOP」(filled in Lark)
+  notes: FieldMeta[]; // 備註／留言 and reason fields people write on the order
   flags: FieldMeta[];
 }
 
@@ -46,6 +47,7 @@ export function resolveWorkFields(fields: FieldMeta[], checkNames: string[] = ["
     person: pickField(fields, ["出工人", "組長", "填報人"]),
     sopViolation: fields.find((f) => /(違|违)反\s*sop/i.test(f.name)) ?? fields.find((f) => /sop/i.test(f.name)),
     flags: fields.filter((f) => f.name.startsWith("⚠")),
+    notes: fields.filter((f) => /備註|備注|留言|退回原因|覆寫原因|重工原因/.test(f.name) && f.kind !== "number"),
   };
 }
 
@@ -119,6 +121,13 @@ export function violatesSop(r: TableData["records"][number], wf: WorkFields): bo
   if (/^(否|無|没有|沒有|未違反|未违反|符合|no|false|0)$/i.test(t)) return false;
   if (/是|違反|违反|yes|true|1|有/i.test(t)) return true;
   return truthy(v);
+}
+
+// Every non-empty note on an order, labelled by field unless it is the plain 備註.
+export function orderNotes(r: TableData["records"][number], wf: WorkFields): { label: string; text: string }[] {
+  return wf.notes
+    .map((f) => ({ label: /^(備註|備注|留言)$/.test(f.name) ? "" : f.name, text: text(r.fields[f.name]).trim() }))
+    .filter((n) => n.text);
 }
 
 export function anomalies(r: TableData["records"][number], wf: WorkFields): string[] {
@@ -292,7 +301,7 @@ export function joinInternal(work: TableData, cost: TableData | undefined): { da
 export const WORK_FIELDS = [
   "組別", "工作單號", "案件編號", "工程編號", "工作編號", "可能確認單工作編號", "可能的確認單工編(若暫無確認單才需填寫)",
   "合約工項", "內業工項", "工作項目", "工項", "完成數量", "計價數量", "對外計價數量", "數量",
-  "最終營業額點數", "營業額點數", "點數", "控制組檢核", "雅雯檢核", "檢核狀態", "所屬成本單", "業別", "工作類別", "修改後數量", "修改後營業額", "修改後營業額點數", "出工人", "組長", "填報人", "~SOP",
+  "最終營業額點數", "營業額點數", "點數", "控制組檢核", "雅雯檢核", "檢核狀態", "所屬成本單", "業別", "工作類別", "修改後數量", "修改後營業額", "修改後營業額點數", "出工人", "組長", "填報人", "~SOP", "~備註", "~備注", "~留言", "~原因",
   "所屬案件", "案件", "工程名稱", "交期", "合約交期", "預定完成日", "完工期限", "到期日", "⚠*", "@dates",
 ];
 export const COST_FIELDS = ["工作日期", "內業組別", "所屬組別", "組別", "@dates"];

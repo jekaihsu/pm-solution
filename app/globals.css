@@ -664,3 +664,4 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
 @media (max-width: 900px) {
   .cg-sheet-wrap { grid-template-columns: minmax(0, 1fr); }
 }
+.cg-notes-cell { white-space: normal; min-width: 160px; max-width: 280px; line-height: 1.45; }

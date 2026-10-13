@@ -2,7 +2,7 @@
 import { ArrowDownRight, ArrowUpRight, CheckCheck, ChevronDown, ChevronRight, CircleAlert, CircleCheck, Minus } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
-import { COST_FIELDS, JOINED_DATE, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, dayOfWeek, errorRate, fixDiffs, groupRows, violatesSop, joinInternal, plannedPoints, resolveFixFields, resolveScheduleFields, resolveWorkFields, type FixFields, type GroupRow, type WorkFields } from "@/lib/controlGroup";
+import { COST_FIELDS, JOINED_DATE, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, dayOfWeek, errorRate, fixDiffs, groupRows, orderNotes, violatesSop, joinInternal, plannedPoints, resolveFixFields, resolveScheduleFields, resolveWorkFields, type FixFields, type GroupRow, type WorkFields } from "@/lib/controlGroup";
 import { inRange, resolveDateField } from "@/lib/metrics";
 import { sourceByKey, type DataVersion } from "@/lib/reports";
 import type { CellValue, TableData } from "@/lib/types";
@@ -256,6 +256,7 @@ function OrderDetail({ row, wf, checkLabel, sop, disabled, ff, dateField, onlyDa
             <th>修改（出錯）</th>
             <th>{checkLabel.replace(/（.*）/, "")}</th>
             <th>異常</th>
+            <th>備註</th>
             <th>符合 SOP</th>
           </tr>
         </thead>
@@ -294,6 +295,9 @@ function OrderDetail({ row, wf, checkLabel, sop, disabled, ff, dateField, onlyDa
                 </td>
                 <td>{!wf.flags.length ? <span className="muted">—</span> : an.length ? an.map((a) => <span key={a} className="tag">{a}</span>) : <span className="muted">無</span>}</td>
                 <td>
+                  <Notes r={r} wf={wf} />
+                </td>
+                <td>
                   {wf.sopViolation ? (
                     (() => {
                       const v = violatesSop(r, wf);
@@ -330,6 +334,22 @@ function dayCells(row: GroupRow, ff: FixFields, dateField: string, weekStart: nu
     if (fixDiffs(r, ff).length) c.errors++;
   }
   return cells;
+}
+
+function Notes({ r, wf }: { r: TableData["records"][number]; wf: WorkFields }) {
+  if (!wf.notes.length) return <span className="muted">—</span>;
+  const notes = orderNotes(r, wf);
+  if (!notes.length) return <span className="muted">—</span>;
+  return (
+    <div className="cg-notes-cell">
+      {notes.map((n, i) => (
+        <div key={i}>
+          {n.label && <span className="muted">{n.label}：</span>}
+          {n.text}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function DayCellView({ c, on, onClick }: { c: DayCell; on?: boolean; onClick?: () => void }) {
@@ -469,6 +489,7 @@ function FailPanel({ rows, wf, cfg, dateField, weekStart, onPick }: { rows: Grou
               <th>工作項目</th>
               <th className="num">工作數量</th>
               <th className="num">營業額點數</th>
+              <th>備註</th>
             </tr>
           </thead>
           <tbody>
@@ -485,6 +506,9 @@ function FailPanel({ rows, wf, cfg, dateField, weekStart, onPick }: { rows: Grou
                     <td>{wf.item ? text(o.fields[wf.item.name]) || "—" : "—"}</td>
                     <td className="num">{wf.qty ? text(o.fields[wf.qty.name]) || "—" : "—"}</td>
                     <td className="num">{wf.revenue ? text(o.fields[wf.revenue.name]) || "—" : "—"}</td>
+                    <td>
+                      <Notes r={o} wf={wf} />
+                    </td>
                   </tr>
                 );
               }),

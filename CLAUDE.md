@@ -105,6 +105,7 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 - 預排點數＝預排表（業別不是內業）點數；未填以每組每天 1 點計。
 - 出錯（被修改）＝`修改後數量` ≠ `完成數量`，或 `最終營業額點數`（若有 `修改後營業額` 優先）≠ `營業額點數`；兩邊都有值才比較。
 - SOP：日報有「是否違反SOP」欄位就用它（任一違反＝紅、全部填且無違反＝綠「SOP 完成」）；沒有欄位才用網站勾選，所有登入者可勾。
+- 備註：工作單明細與失誤明細顯示「備註／留言／退回原因／覆寫原因／重工原因」欄位。
 - 版面：預設「簡表」（老闆偏好：一組一列純數字、合計列、右側總數），可切「詳細」；點組別看單組單週；每日出錯表；點失誤率卡片看哪組、哪位出工人。
 
 **R02 內業檢查**：同 R01 六項＋業主進度；失誤率用「雅雯檢核」；預排取業別＝內業；組別與工作日期由「所屬成本單」帶入；只顯示所選週；進度 % 先不算，只顯示；天數＝距交期天數（交期欄位未定位）。
@@ -113,7 +114,7 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 
 ## 9. 待辦
 
-- [ ] 部署 `2026-10-13.9 sheet+sop-field`，看 `/api/health` 的 `sopFields` 找出「是否違反SOP」在哪張表，必要時調整 `resolveWorkFields` 的 `sopViolation`。
+- [ ] 部署最新版（`lib/version.ts` 的 APP_VERSION），看 `/api/health` 的 `sopFields` 找出「是否違反SOP」在哪張表，必要時調整 `resolveWorkFields` 的 `sopViolation`。
 - [ ] Zeabur 設定 `DATA_DIR=/app/data` 並掛載硬碟。
 - [ ] 薪水總表：把 PM週報 應用加入 Base（唯讀），確認表名與加班欄位名；設定 `HR_VIEWERS`。
 - [ ] V4 與報價 Base 的 1254302 權限。
