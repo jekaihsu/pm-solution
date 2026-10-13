@@ -55,6 +55,7 @@ interface LarkApprovalItem {
   start_time?: string;
   end_time?: string;
   reason?: string;
+  interval?: number | string; // 外出：秒
   [k: string]: unknown;
 }
 export interface LarkUserApprovals {
@@ -166,9 +167,13 @@ export function parseMissingScopes(e: { msg?: string; violations?: string[] }): 
 // ---------- 審批索引 ----------
 interface Approval {
   kind: ApprovalKind;
+  id: string; // approval_id（缺時 uniq_id）；只用來數張數，不輸出
   start: string | null;
   end: string | null;
   reason: string;
+  startRaw: string;
+  endRaw: string;
+  interval: number | null; // 秒（外出）
   covered: Set<string>; // 該審批覆蓋的日期（起訖區間；解不出才用 entry 日期）
 }
 
@@ -187,7 +192,7 @@ function normalizeApprovals(items: LarkUserApprovals[]): Map<string, Approval[]>
         // 結束時間剛好是跨日的午夜 00:00:00＝不含那一天
         if (start && end && end > start && /\d{2}:\d{2}:\d{2}$/.test(String(a.end_time)) && String(a.end_time).endsWith("00:00:00")) end = addDays(end, -1);
         const key = `${kind}|${a.approval_id ?? a.uniq_id ?? `${a.start_time}|${a.end_time}|${a.reason}`}`;
-        const cur = m.get(key) ?? { kind, start, end, reason: String(a.reason ?? ""), covered: new Set<string>() };
+        const cur = m.get(key) ?? { kind, id: String(a.approval_id ?? a.uniq_id ?? key), start, end, reason: String(a.reason ?? ""), startRaw: String(a.start_time ?? ""), endRaw: String(a.end_time ?? ""), interval: a.interval === undefined || a.interval === null || a.interval === "" || !Number.isFinite(Number(a.interval)) ? null : Number(a.interval), covered: new Set<string>() };
         // 起訖區間為準（實測 entry 的 date 會多一天）；解不出起訖才退回 entry 日期。
         if (start && end) for (let d = start; d <= end && diffDays(start, d) < 400; d = addDays(d, 1)) cur.covered.add(d);
         else if (entryDate) cur.covered.add(entryDate);
@@ -198,6 +203,23 @@ function normalizeApprovals(items: LarkUserApprovals[]): Map<string, Approval[]>
   return new Map([...byUser].map(([k, v]) => [k, [...v.values()]]));
 }
 
+// ---------- 外出／出差時間文字 ----------
+const hm = (v: string) => v.match(/(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/);
+const md = (d: string) => d.slice(5).replace("-", "/");
+const half = (h: number) => Math.round(h * 2) / 2;
+function outTimeText(startRaw: string, endRaw: string, start: string, end: string): string {
+  const s = hm(startRaw), e = hm(endRaw);
+  if (!s || !e) return start === end ? md(start) : `${md(start)}–${md(end)}`;
+  return s[1] === e[1] ? `${md(s[1])} ${s[2]}–${e[2]}` : `${md(s[1])} ${s[2]}–${md(e[1])} ${e[2]}`;
+}
+function outHours(a: { interval: number | null; startRaw: string; endRaw: string }): number {
+  if (a.interval !== null && a.interval >= 0) return half(a.interval / 3600);
+  const s = hm(a.startRaw), e = hm(a.endRaw);
+  if (!s || !e) return 0;
+  const diff = Date.parse(`${e[1]}T${e[2]}:00Z`) - Date.parse(`${s[1]}T${s[2]}:00Z`);
+  return diff > 0 ? half(diff / 3600000) : 0;
+}
+
 // ---------- 整週 view ----------
 export interface TripRow {
   name: string;
@@ -206,6 +228,29 @@ export interface TripRow {
   end: string;
   days: number;
   daysInWeek: number;
+  reason: string;
+}
+/** 外出紀錄：start/end 為日期，timeText 為「10/07 09:00–18:00」，hours 四捨五入到 0.5 小時。 */
+export interface OutRow {
+  name: string;
+  group: string;
+  start: string;
+  end: string;
+  timeText: string;
+  hours: number;
+  reason: string;
+}
+/** 出差＋外出合併清單的一列（白名單欄位）。duration：出差＝天數、外出＝小時。 */
+export interface TravelRecord {
+  kind: "trip" | "out";
+  name: string;
+  group: string;
+  start: string;
+  end: string;
+  startAt: string; // 排序用：YYYY-MM-DD HH:MM
+  timeText: string;
+  duration: number;
+  unit: "天" | "小時";
   reason: string;
 }
 export interface AttendanceSummary {
@@ -236,6 +281,9 @@ export interface AttendanceView {
   people: { name: string; group: string; days: DayCode[] }[];
   summary: AttendanceSummary;
   trips: TripRow[];
+  outs: OutRow[];
+  records: TravelRecord[];
+  recordCounts: { trips: number; outs: number };
   notes: AttendanceNotes;
 }
 export type AttendanceResponse =
@@ -271,6 +319,9 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
   const summary: AttendanceSummary = { expected: 0, present: 0, late: 0, early: 0, lack: 0, leave: 0, trip: 0, out: 0 };
   const people: AttendanceView["people"] = [];
   const trips: TripRow[] = [];
+  const outs: OutRow[] = [];
+  const records: TravelRecord[] = [];
+  const tripIds = new Set<string>(), outIds = new Set<string>(); // 張數以 approval_id 去重（多人同一張單只算一張）
   let unmapped = 0;
   const mappedIds = new Set<string>();
 
@@ -283,13 +334,28 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
     mappedIds.add(eid);
     const mine = appr.get(eid) ?? [];
     for (const a of mine) {
+      if (a.kind === "out") {
+        const covered = [...a.covered].sort();
+        const start = a.start ?? covered[0];
+        const end = a.end ?? covered[covered.length - 1];
+        if (!dates.some((d) => a.covered.has(d)) || !start || !end) continue;
+        const hours = outHours(a);
+        const timeText = outTimeText(a.startRaw, a.endRaw, start, end);
+        outIds.add(a.id);
+        outs.push({ name: p.name, group: p.group, start, end, timeText, hours, reason: truncateText(a.reason, 40) });
+        records.push({ kind: "out", name: p.name, group: p.group, start, end, startAt: `${start} ${hm(a.startRaw)?.[2] ?? "00:00"}`, timeText, duration: hours, unit: "小時", reason: truncateText(a.reason, 40) });
+        continue;
+      }
       if (a.kind !== "trip") continue;
       const inWeek = dates.filter((d) => a.covered.has(d)).length;
       const covered = [...a.covered].sort();
       const start = a.start ?? covered[0];
       const end = a.end ?? covered[covered.length - 1];
       if (!inWeek || !start || !end) continue;
-      trips.push({ name: p.name, group: p.group, start, end, days: diffDays(start, end) + 1, daysInWeek: inWeek, reason: truncateText(a.reason, 40) });
+      const days = diffDays(start, end) + 1;
+      tripIds.add(a.id);
+      trips.push({ name: p.name, group: p.group, start, end, days, daysInWeek: inWeek, reason: truncateText(a.reason, 40) });
+      records.push({ kind: "trip", name: p.name, group: p.group, start, end, startAt: `${start} ${hm(a.startRaw)?.[2] ?? "00:00"}`, timeText: start === end ? md(start) : `${md(start)}–${md(end)}`, duration: days, unit: "天", reason: truncateText(a.reason, 40) });
     }
     if (!inp.members.has(eid)) continue;
     const codes = dates.map((d): DayCode => {
@@ -312,6 +378,8 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
   const cmp = (a: string, b: string) => a.localeCompare(b, "zh-Hant");
   people.sort((a, b) => cmp(a.group, b.group) || cmp(a.name, b.name));
   trips.sort((a, b) => cmp(a.start, b.start) || cmp(a.name, b.name));
+  outs.sort((a, b) => cmp(a.start, b.start) || cmp(a.name, b.name));
+  records.sort((a, b) => cmp(a.startAt, b.startAt) || cmp(a.name, b.name));
   return {
     status: "ok",
     source: inp.source ?? "lark",
@@ -322,6 +390,9 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
     people,
     summary,
     trips,
+    outs,
+    records,
+    recordCounts: { trips: tripIds.size, outs: outIds.size },
     notes: { ...inp.notes, unmapped, outsideRoster: [...inp.members].filter((m) => !mappedIds.has(m)).length },
   };
 }

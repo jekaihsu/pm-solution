@@ -155,34 +155,37 @@ export default function AttendanceCards() {
       </section>
 
       <section className="hr-card">
-        {head(<Plane size={16} />, "出差紀錄")}
+        {head(<Plane size={16} />, "出差／外出紀錄")}
         {!ok ? (
           msg(false)
         ) : (
           <>
-            {ok.trips.length ? (
+            <p className="small">
+              出差 <b>{ok.recordCounts.trips}</b> 張、外出 <b>{ok.recordCounts.outs}</b> 張
+            </p>
+            {ok.records.length ? (
               <div className="cg-detail">
                 <table>
                   <thead>
                     <tr>
+                      <th>類型</th>
                       <th>姓名</th>
                       <th>組別</th>
-                      <th>起</th>
-                      <th>訖</th>
-                      <th className="num">天數</th>
-                      <th className="num">本週內</th>
+                      <th>起～訖</th>
+                      <th className="num">時長</th>
                       <th>事由</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {ok.trips.map((t, i) => (
+                    {ok.records.map((t, i) => (
                       <tr key={i}>
+                        <td>{t.kind === "trip" ? "出差" : "外出"}</td>
                         <td className="strong">{t.name}</td>
                         <td>{t.group}</td>
-                        <td>{t.start}</td>
-                        <td>{t.end}</td>
-                        <td className="num">{t.days}</td>
-                        <td className="num">{t.daysInWeek}</td>
+                        <td>{t.timeText}</td>
+                        <td className="num">
+                          {t.duration} {t.unit}
+                        </td>
                         <td className="att-reason">{t.reason || "—"}</td>
                       </tr>
                     ))}
@@ -190,10 +193,10 @@ export default function AttendanceCards() {
                 </table>
               </div>
             ) : (
-              <p className="muted small">本週沒有已通過的出差單。</p>
+              <p className="muted small">本週沒有已通過的出差或外出單。</p>
             )}
             <p className="muted small">
-              預設口徑，待業主確認。只計已通過；範圍＝全公司有出差單的人（不限考勤組，名冊在職且有 Lark帳號）；與所選週有重疊的出差都列出，天數含起訖日；事由原文顯示、超過 40 字截斷。
+              預設口徑，待業主確認。只計已通過；範圍＝全公司有出差或外出單的人（不限考勤組，名冊在職且有 Lark帳號）；與所選週有重疊的都列出，依開始時間排序，張數以審批單號去重。出差時長＝天數（含起訖日）；外出時長＝審批時數，四捨五入到 0.5 小時。事由原文顯示、超過 40 字截斷。出勤紀錄的統計不變（外出仍從分母扣除）。
             </p>
           </>
         )}

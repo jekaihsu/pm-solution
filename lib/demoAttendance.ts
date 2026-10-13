@@ -19,6 +19,8 @@ export function demoAttendance(weekStart: number, now: number): AttendanceRespon
   });
   const approvals: LarkUserApprovals[] = [
     { user_id: employeeIds.get(roster[0].openId), trips: [{ approval_id: "demo_trip_1", start_time: `${dates[2]} 09:00:00`, end_time: `${dates[3]} 18:00:00`, reason: "（示範）赴外縣市辦理控制測量查核" }] },
+    { user_id: employeeIds.get(roster[5].openId), outs: [{ approval_id: "demo_out_1", start_time: `${dates[4]} 09:00:00`, end_time: `${dates[4]} 12:30:00`, interval: 12600, reason: "（示範）赴客戶處交付成果" }] },
+    { user_id: employeeIds.get(roster[2].openId), outs: [{ approval_id: "demo_out_2", start_time: `${dates[1]} 13:30:00`, end_time: `${dates[1]} 17:00:00`, interval: 12600, reason: "（示範）現場會勘" }] },
   ];
   tasks.forEach((t) => {
     if (t.user_id === employeeIds.get(roster[0].openId) && (t.day === ymdInt(dates[2]) || t.day === ymdInt(dates[3]))) t.records = [R("NoNeedCheck", "NoNeedCheck", "Travel", "Travel")];

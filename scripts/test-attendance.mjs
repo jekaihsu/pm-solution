@@ -167,6 +167,82 @@ test("白名單輸出：不含 employee_id、open_id、地點、GPS、照片、�
   for (const x of [...SECRET, "某工地", "longitude", "latitude", "photo", "check_time", "user_id", "employee_id", "open_id", "T1", "approval_id"]) assert.ok(!s.includes(x), x);
 });
 
+// ---- 出差／外出紀錄（業主 2026-10-13：外出加出差都要）----
+const out = (id, s, e, interval, reason = "外出事由") => ({ approval_id: id, start_time: s, end_time: e, interval, reason, unit: 2 });
+
+test("外出：同一 approval_id 在多個項目出現只列一次；缺 approval_id 用 uniq_id", () => {
+  const o = out("O1", "2026-10-07 09:00:00", "2026-10-07 18:00:00", 32400);
+  const v = buildAttendanceView(
+    base({
+      approvals: [
+        { user_id: "emp_C", date: 20261007, outs: [o] },
+        { user_id: "emp_C", date: 20261008, outs: [o] },
+        { user_id: "emp_C", date: 20261009, outs: [{ uniq_id: "U9", start_time: "2026-10-09 13:00:00", end_time: "2026-10-09 15:00:00", interval: 7200 }] },
+        { user_id: "emp_C", date: 20261009, outs: [{ uniq_id: "U9", start_time: "2026-10-09 13:00:00", end_time: "2026-10-09 15:00:00", interval: 7200 }] },
+      ],
+    }),
+  );
+  assert.equal(v.outs.length, 2);
+  assert.deepEqual(v.recordCounts, { trips: 0, outs: 2 });
+});
+
+test("外出時長＝interval／3600 四捨五入到 0.5 小時；interval 缺時用起訖差", () => {
+  const v = buildAttendanceView(
+    base({
+      approvals: [
+        { user_id: "emp_C", outs: [out("O1", "2026-10-07 09:00:00", "2026-10-07 18:00:00", 32400)] }, // 9
+        { user_id: "emp_C", outs: [out("O2", "2026-10-08 09:00:00", "2026-10-08 10:20:00", 4800)] }, // 1.333 → 1.5
+        { user_id: "emp_C", outs: [out("O3", "2026-10-09 09:00:00", "2026-10-09 11:00:00", undefined)] }, // 起訖差 2
+        { user_id: "emp_C", outs: [out("O4", "2026-10-06 09:00:00", "2026-10-06 09:20:00", 1200)] }, // 0.333 → 0.5
+      ],
+    }),
+  );
+  const h = Object.fromEntries(v.outs.map((r) => [r.start.slice(5), r.hours]));
+  assert.deepEqual(h, { "10-07": 9, "10-08": 1.5, "10-09": 2, "10-06": 0.5 });
+  assert.equal(v.outs.find((r) => r.hours === 9).timeText, "10/07 09:00–18:00");
+});
+
+test("外出＋出差合併成一份清單，依開始時間排序，並有各自張數", () => {
+  const v = buildAttendanceView(
+    base({
+      approvals: [
+        { user_id: "emp_C", trips: [{ approval_id: "T1", start_time: "2026-10-07 09:00:00", end_time: "2026-10-08 18:00:00", reason: "出差" }] },
+        { user_id: "emp_B", outs: [out("O1", "2026-10-06 14:00:00", "2026-10-06 16:00:00", 7200)] },
+        { user_id: "emp_A", outs: [out("O2", "2026-10-07 08:00:00", "2026-10-07 09:00:00", 3600)] },
+      ],
+    }),
+  );
+  assert.deepEqual(v.records.map((r) => `${r.kind}:${r.name}`), ["out:乙", "out:甲", "trip:丙"]);
+  assert.deepEqual(v.recordCounts, { trips: 1, outs: 2 });
+  const trip = v.records.find((r) => r.kind === "trip");
+  assert.equal(trip.timeText, "10/07–10/08");
+  assert.equal(trip.duration, 2);
+  assert.equal(trip.unit, "天");
+});
+
+test("外出清單：與週不重疊不列；出勤統計不變（外出仍扣分母）", () => {
+  const v = buildAttendanceView(
+    base({
+      tasks: [task("emp_A", 20261005, [rec()]), task("emp_A", 20261006, [rec()])],
+      approvals: [
+        { user_id: "emp_A", outs: [out("O1", "2026-10-06 09:00:00", "2026-10-06 18:00:00", 32400)] },
+        { user_id: "emp_A", outs: [out("O2", "2026-09-20 09:00:00", "2026-09-20 18:00:00", 32400)] },
+      ],
+    }),
+  );
+  assert.equal(v.outs.length, 1);
+  assert.equal(v.summary.out, 1);
+  assert.equal(v.summary.expected, 1);
+});
+
+test("外出白名單輸出：不含 id、地點", () => {
+  const v = buildAttendanceView(
+    base({ approvals: [{ user_id: "emp_C", outs: [{ ...out("OUT_SECRET", "2026-10-07 09:00:00", "2026-10-07 10:00:00", 3600), uniq_id: "UQ_SECRET", location: "某工地", i18n_names: { zh: "外出" } }] }] }),
+  );
+  const s = JSON.stringify(v);
+  for (const x of [...SECRET, "OUT_SECRET", "UQ_SECRET", "某工地", "i18n", "approval_id", "uniq_id", "approve_pass_time"]) assert.ok(!s.includes(x), x);
+});
+
 test("考勤組成員＝綁定人員＋展開綁定部門－排除人員－排除部門", () => {
   const deptUsers = new Map([["od-1", ["u1", "u2", "u3"]], ["od-2", ["u3", "u4"]], ["od-x", ["u4"]]]);
   const m = resolveMembers({ bindUsers: ["u9", "u1"], bindDepts: ["od-1", "od-2"], exceptUsers: ["u2"], exceptDepts: ["od-x"] }, deptUsers);

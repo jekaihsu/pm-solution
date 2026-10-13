@@ -33,6 +33,16 @@ export interface SourceDef {
 const SALARY_ALLOW = ["發起人", "加班人", "开始时间", "加班类型", "申请状态", "薪資計算加班時數", "加班时长（小时）"];
 export const salaryField = (name: string) => SALARY_ALLOW.includes(name);
 
+// 報價 Base「報價總表」：只讀下列 33 欄（業主 2026-10-13 裁示），精確比對。
+// 契約價格（未稅／含稅）、毛利、確認單成本、預算、可請款、實收營業額、紅利等金額欄一律不向 Lark 要求。
+const QUOTES_ALLOW = [
+  "案件編號", "編號", "工程編號", "案件名稱", "工程名稱", "報價編號", "案件狀態", "狀態", "類型", "業主", "業主類型",
+  "詢價日期", "報價日期", "報價期限", "回傳單日期", "確認單回傳開會日期", "外業期限", "內業期限(圖)", "內業期限(控)", "內業期限(報)",
+  "確認單到期日", "合約開始日期", "合約結束日期", "外業確認單營業額", "控制確認單營業額", "圖資確認單營業額", "報告確認單營業額", "行政確認單營業額",
+  "PM", "案件負責人", "報價負責人", "外業負責組別", "內業負責組別",
+];
+export const quotesField = (name: string) => QUOTES_ALLOW.includes(name);
+
 // V3「人員名單」：R04 加班只拿來把發起人（備援：加班人）對到所屬組別，所以只讀這四欄，精確比對。
 // 電話、身分、帳戶、薪資、職級、備註、各種成本單連結、OpenID 同步欄一律不向 Lark 要求。
 // 欄名與 lib/people.ts 的常數一致（scripts/test-hr-overtime.mjs 會檢查）。
@@ -142,6 +152,7 @@ export const SOURCES: SourceDef[] = [
     baseToken: SALES_BASE,
     tableId: "tblENZvYAya93Twa",
     url: tableUrl(SALES_BASE, "tblENZvYAya93Twa"),
+    allowField: quotesField,
   },
   {
     key: "owner-contacts",
