@@ -15,16 +15,23 @@ export const dynamic = "force-dynamic";
 //  fields=a,b  → those names ("#fld…" = by field id); "x*" matches a prefix, "~x" any name containing x
 //                (case-insensitive), "@dates" every date field
 //  links=1     → also return each link field's record_ids (record.links); off by default
-function project(data: TableData, req: NextRequest): TableData {
+//  people=1    → also return each person field's open_ids (record.people); off by default, and
+//                honoured only for HR-restricted sources (allowPeople) so open_ids stay behind the HR gate
+function project(data: TableData, req: NextRequest, allowPeople = false): TableData {
   const wantLinks = req.nextUrl.searchParams.get("links") === "1";
+  const wantPeople = allowPeople && req.nextUrl.searchParams.get("people") === "1";
   const out = project0(data, req);
+  const keep = <V,>(m: Record<string, V> | undefined) => {
+    const kept = Object.fromEntries(Object.entries(m ?? {}).filter(([name]) => out.fields.some((f) => f.name === name)));
+    return Object.keys(kept).length ? kept : undefined;
+  };
   return {
     ...out,
     records: out.records.map((r) => {
-      const { links, ...rest } = r;
-      if (!wantLinks || !links) return rest;
-      const kept = Object.fromEntries(Object.entries(links).filter(([name]) => out.fields.some((f) => f.name === name)));
-      return Object.keys(kept).length ? { ...rest, links: kept } : rest;
+      const { links, people, ...rest } = r;
+      const l = wantLinks ? keep(links) : undefined;
+      const p = wantPeople ? keep(people) : undefined;
+      return { ...rest, ...(l ? { links: l } : {}), ...(p ? { people: p } : {}) };
     }),
   };
 }
@@ -47,7 +54,7 @@ function project0(data: TableData, req: NextRequest): TableData {
   return {
     ...data,
     fields,
-    records: data.records.map((r) => ({ id: r.id, fields: Object.fromEntries(names.map((n) => [n, r.fields[n] ?? null])), ...(r.links ? { links: r.links } : {}) })),
+    records: data.records.map((r) => ({ id: r.id, fields: Object.fromEntries(names.map((n) => [n, r.fields[n] ?? null])), ...(r.links ? { links: r.links } : {}), ...(r.people ? { people: r.people } : {}) })),
   };
 }
 
@@ -59,7 +66,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ key:
 
   if (req.nextUrl.searchParams.get("demo") === "1") {
     if (!hasDemo(key)) return NextResponse.json({ status: "no-demo" });
-    return NextResponse.json({ status: "ok", data: project(demoSourceData(src), req) });
+    return NextResponse.json({ status: "ok", data: project(demoSourceData(src), req, src.restricted === "hr") });
   }
   if (src.restricted === "hr") {
     const session = await readSession(req.cookies.get(SESSION_COOKIE)?.value);
@@ -71,12 +78,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ key:
 
   try {
     const data = await getSourceData(src, req.nextUrl.searchParams.get("refresh") === "1");
-    return NextResponse.json({ status: "ok", data: project(data, req) });
+    return NextResponse.json({ status: "ok", data: project(data, req, src.restricted === "hr") });
   } catch (err) {
     const message = (err as Error).message;
     console.error(`[source ${key}]`, message);
     const prev = lastGood<TableData>(sourceCacheKey(src));
-    if (prev) return NextResponse.json({ status: "ok", data: project({ ...prev, stale: true, error: message }, req) });
+    if (prev) return NextResponse.json({ status: "ok", data: project({ ...prev, stale: true, error: message }, req, src.restricted === "hr") });
     return NextResponse.json({ status: "error", error: message }, { status: 502 });
   }
 }

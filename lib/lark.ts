@@ -2,6 +2,7 @@
 import "server-only";
 import type { FieldMeta, FieldKind, TableData, TableMeta, CellValue } from "./types";
 import type { SourceDef } from "./reports";
+import { personRefs } from "./people";
 
 const API_BASE = (process.env.LARK_API_BASE || "https://open.larksuite.com").replace(/\/$/, "");
 const CACHE_TTL_MS = Number(process.env.CACHE_TTL_SECONDS ?? 60) * 1000;
@@ -400,14 +401,21 @@ export async function getSourceData(src: SourceDef, force = false): Promise<Tabl
           }
           const row: Record<string, CellValue> = {};
           const links: Record<string, string[]> = {}; // record_ids of link cells, kept before resolveLinks swaps them for titles
+          const people: Record<string, { id: string; name: string }[]> = {}; // open_id + name of person cells (normalizeValue keeps names only)
           for (const f of fields) {
             if (f.linkTable) {
               const ids = linkIds(item.fields[f.name]);
               row[f.name] = ids;
               if (ids) links[f.name] = [...ids];
-            } else row[f.name] = normalizeValue(item.fields[f.name], f.kind);
+            } else {
+              row[f.name] = normalizeValue(item.fields[f.name], f.kind);
+              if (f.kind === "person") {
+                const refs = personRefs(item.fields[f.name]);
+                if (refs) people[f.name] = refs;
+              }
+            }
           }
-          records.push({ id: item.record_id, fields: row, ...(Object.keys(links).length ? { links } : {}) });
+          records.push({ id: item.record_id, fields: row, ...(Object.keys(links).length ? { links } : {}), ...(Object.keys(people).length ? { people } : {}) });
         }
         pageToken = data.has_more ? data.page_token : undefined;
       } while (pageToken && records.length < MAX_RECORDS);

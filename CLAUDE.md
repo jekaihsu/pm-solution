@@ -19,7 +19,7 @@
 
 - **網站唯讀**：只讀 Lark，不寫回 Lark、不發通知。SOP 勾選只存在網站自己的硬碟（`DATA_DIR`）。
 - **機密不進 repo、不貼聊天**：`LARK_APP_SECRET`、`SESSION_SECRET` 只放在 Zeabur 環境變數或本機 `.env.local`（已被 git 忽略）。
-- **薪水總表只讀加班欄位**：`lib/reports.ts` 的 `salaryField()` 白名單，Lark 請求帶 `field_names`，底薪、總薪資、加班費、扣款、身分資料一律不讀。不要放寬。人事資料只給 `HR_VIEWERS` 名單看。
+- **薪水總表只讀加班欄位**：`lib/reports.ts` 的 `salaryField()` 白名單，Lark 請求帶 `field_names`，底薪、總薪資、加班費、扣款、身分資料一律不讀。不要放寬。人事資料只給 `HR_VIEWERS` 名單看；業主 2026-10-13 裁示全員可看，Zeabur 設 `HR_VIEWERS=*`。
 - **V3、V4 不相加、不去重**，分開顯示。
 - **V4 納入規則**：只納入建立時間 ≥ 2026-10-07 20:10:44.122（台北）的記錄；主檔（儀器、車輛）不套用。
 - **未定義的口徑不要自己發明**，頁面顯示「—／待定義」並在註腳說明。
@@ -38,15 +38,16 @@
 | `lib/lark.ts` | Lark API、快取、分頁、關聯欄位轉標題、`findFields` 診斷 |
 | `lib/controlGroup.ts` | R01／R02 口徑：失誤率、預排點數、出錯（被修改）、違反 SOP、內業成本單 join |
 | `lib/sopStore.ts` / `app/api/sop` | SOP 勾選存檔（`DATA_DIR/sop.json` + `sop-log.jsonl`） |
-| `lib/roles.ts` | `sopPermission`（預設所有登入者可勾）、`hrPermission`（`HR_VIEWERS`） |
-| `app/api/sources/[key]` | 讀單一來源；`fields=` 投影（`x*` 前綴、`~x` 包含、`#fld…` 依 field id、`@dates`）、`only=meta|dates`、`links=1`（附 link 欄的 record_id，預設不回）、`demo=1` |
+| `lib/roles.ts` | `sopPermission`（預設所有登入者可勾）、`hrPermission`（`HR_VIEWERS`：`*`＝所有登入者、open_id 清單、留空＝沒人；測試 `scripts/test-roles.mjs`） |
+| `lib/people.ts` | 公司組織架構＝V3 人員名單（`tblmlpA6nG5Ou7NQ`）的純函式：`personRefs`（Lark 人員欄 → {open_id, 名字}）、`buildPeopleDirectory`（加班人 → 所屬組別） |
+| `app/api/sources/[key]` | 讀單一來源；`fields=` 投影（`x*` 前綴、`~x` 包含、`#fld…` 依 field id、`@dates`）、`only=meta|dates`、`links=1`（附 link 欄的 record_id，預設不回）、`people=1`（附人員欄的 open_id，預設不回，且只有 `restricted:"hr"` 的來源才給）、`demo=1` |
 | `app/api/health` | 版本、硬碟、各來源預熱結果、含「SOP」欄位的位置 |
 | `components/GroupBoard.tsx` | R01／R02 看板：簡表、詳細、單組單週、每日出錯、失誤率明細、SOP |
 | `components/OwnerProgress.tsx` | R02 業主進度（進度 % 先只顯示「待定義」） |
 | `lib/adminBoard.ts` | R11 行政口徑（純函式）：成本單帶人與日期、預排以人員 record_id＋日期展開、與預排差異分區 |
 | `components/AdminBoard.tsx` | R11 行政看板：一列一人（全部人）、合計列、點人展開工作單明細 |
 | `scripts/test-admin-board.mjs` | R11 邏輯測試（`node --test`，不連 Lark） |
-| `components/HrBoard.tsx` | R04 人事：招聘暫無、出勤／出差待權限、加班取自詠翔加班（純函式在 `lib/overtime.ts`） |
+| `components/HrBoard.tsx` | R04 人事：招聘暫無、出勤／出差待權限、加班取自詠翔加班（純函式在 `lib/overtime.ts`，組別來自 `lib/people.ts`） |
 | `lib/demo.ts` | 示範資料（右下角「示範資料」開關） |
 | `lib/version.ts` | `APP_VERSION`，每次改版都要更新，用來確認部署是否生效 |
 | `scripts/inspect-lark.mjs` | 唯讀列出 Base 的表、欄位與筆數 |
@@ -62,7 +63,7 @@
 | `SESSION_SECRET` | 否 | 未設定由 App Secret 衍生 |
 | `DATA_DIR` | 是 | `/app/data`，並在 Zeabur 掛載硬碟到 `/app/data`；未設定時 health 顯示 `dataDirSet:false` |
 | `SOP_EDITORS` | 否 | 留空＝所有登入者可勾（使用者決定）；填 open_id 清單可縮小 |
-| `HR_VIEWERS` | 是（看人事） | 可看薪水總表加班的 open_id 清單；留空＝沒人能看 |
+| `HR_VIEWERS` | 是（看人事） | 誰能看人事頁（R04）：`*`＝所有登入者都能看（業主 2026-10-13 裁示，Zeabur 設 `HR_VIEWERS=*`）；open_id 清單（逗號或空白分隔）＝只有名單內的人；留空／未設定＝沒人能看（安全預設，不要改成預設全開） |
 | `CACHE_TTL_SECONDS` | 否 | 預設 60 |
 | `WARM_INTERVAL_SECONDS` | 否 | 預設 300 |
 | `AUTH_DISABLED` | 只限本機 | `1` 時免登入、SOP 可勾，**不可在 Zeabur 設定** |
@@ -143,7 +144,7 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 - link 的 record_id：`getSourceData` 另存 `record.links`（欄名→ids），`/api/sources/...?links=1` 才回傳且只含被投影的欄位；其他報表不帶此參數，回應與以前相同。
 - V4 行政表以表名自動找（V4 應用目前讀不到 1254302），頁面顯示失敗原因；V3、V4 不相加。
 
-**R04 人事**：招聘暫無；出勤、出差需開通 Lark 假勤／審批權限；加班取自薪水計算 Base 的「詠翔加班」逐筆審批單（`lib/overtime.ts`，測試 `scripts/test-hr-overtime.mjs`）：只計申請狀態「已通过」（不信 approved 旗標），依「開始時間」台北月份彙總；時數＝「薪資計算加班時數」（原始＋人工補正，缺時用原始時數）；每人平日（類型＝平日）／假日（休息日、例假日、國定假日）分開，類型空白另列待定義；組別欄用「發起人部門」，是否等同組別待確認；金額、薪資、身分等欄一律不讀。
+**R04 人事**：招聘暫無；出勤、出差需開通 Lark 假勤／審批權限；加班取自薪水計算 Base 的「詠翔加班」逐筆審批單（`lib/overtime.ts`，測試 `scripts/test-hr-overtime.mjs`）：只計申請狀態「已通过」（不信 approved 旗標），依「開始時間」台北月份彙總；時數＝「薪資計算加班時數」（原始＋人工補正，缺時用原始時數）；每人平日（類型＝平日）／假日（休息日、例假日、國定假日）分開，類型空白另列待定義；**組別依公司組織架構（業主裁示 2026-10-13「加班的各組直接參考組織架構」）**＝V3 人員名單（`v3-people`，`tblmlpA6nG5Ou7NQ`，`restricted:"hr"`，白名單只讀 `姓名` 文字／`Lark帳號` 人員欄／`所屬組別` 單選／`在職` 核取；職級、備註、各種成本單連結、`同步_OpenID` 等一律不讀）的「所屬組別」：加班人（人員欄，多值）的 open_id → 人員名單「Lark帳號」open_id → 所屬組別；對不到 open_id 時以姓名完全相同備援；同名多列時有在職就只看在職，組別仍不唯一就不猜；仍對不到歸「未對應組別」（排最後，註腳列張數）。名單沒填所屬組別的人視同對不到。離職者的過去加班仍歸他名單上的組別。加班人填多位的單整張算一列、時數不拆分，全部同組才歸該組，否則歸未對應組別（註腳列張數）。人員名單讀不到時組別顯示「—」並提示，不亂歸。不再讀「发起人部门」。`同步_OpenID` 與 `Lark帳號` 的 id 不同（另一個應用的 open_id），不能用。金額、薪資、身分等欄一律不讀。
 
 ## 9. 待辦（依順序）
 
@@ -156,7 +157,7 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
    - 需要新權限 → 問使用者。
    - 可讀且能對應記錄 → `lib/lark.ts` 加讀取與快取、`OrderDetail` 加「留言」欄。
    - 無法對應記錄 → 回報，替代方案是寫在「備註」欄（已顯示）。
-5. **薪水計算 Base 的詠翔加班**（`VwAsbezz9app3YsramgjduLYp2U`／`tblomH0DXCzXgenE`）：等業主建好 PM週報 唯讀角色後確認能讀；必要時調整 `salaryField()`（只能更嚴，不能放寬到薪資金額）；`HR_VIEWERS` 等使用者提供 open_id。
+5. **薪水計算 Base 的詠翔加班**（`VwAsbezz9app3YsramgjduLYp2U`／`tblomH0DXCzXgenE`）：等業主建好 PM週報 唯讀角色後確認能讀；必要時調整 `salaryField()`（只能更嚴，不能放寬到薪資金額）；`HR_VIEWERS=*`（業主 2026-10-13 裁示全員可看，Zeabur 設定）。表一讀得到，第一件事：實測「加班人」確實是人員欄、且 id 對得上人員名單的 Lark帳號（目前只依 B4 舊設定檔 `config/source_contract.json` 推斷＝人員欄、可多人，未實測），並看 R04 註腳的「未對應組別」張數合不合理。
 6. **V4 與報價 Base（1254302）**：盤點進階權限與角色，提出開通方案（群組＋唯讀角色）給使用者決定，不要自行修改。
 7. **R02 交期欄位**：找出案件交期所在的表與欄位，接到 `components/OwnerProgress.tsx` 的「距交期（天）」。進度 % 口徑等使用者說明，先維持「待定義」。
 8. **真實資料驗收 R01**（V3、上週）：挑兩組對 Lark 原表核對營業額點數、不通過、異常、被修改、張數；檢查註腳「不列入：…」是否合理（只應排除行政、業務、內業、IT、未對應組別）。對不上就修並附組別、工作單號。

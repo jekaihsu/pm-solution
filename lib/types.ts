@@ -23,7 +23,10 @@ export interface TableData {
   // titles that `fields[name]` holds after resolveLinks (R02 以人為單位 needs the ids to join
   // on 人員 record_id). Optional, absent when the table has no link cells or in demo data.
   // Returned by /api/sources only with links=1, and only for the projected fields.
-  records: { id: string; fields: Record<string, CellValue>; links?: Record<string, string[]> }[];
+  // `people`: for person (人員) fields only, the {id (open_id), name} pairs, index-aligned with the
+  // names that `fields[name]` holds. R04 加班 needs the open_id to map 加班人 → 人員名單 → 所屬組別.
+  // Returned by /api/sources only with people=1 and only for HR-restricted sources; absent otherwise.
+  records: { id: string; fields: Record<string, CellValue>; links?: Record<string, string[]>; people?: Record<string, { id: string; name: string }[]> }[];
   fetchedAt: number;
   source: "lark" | "demo";
   complete: boolean; // false when paging stopped early
