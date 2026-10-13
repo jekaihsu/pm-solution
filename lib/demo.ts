@@ -40,7 +40,7 @@ const innerGroups = ["圖資A", "圖資B", "報告組"];
 const adminPeople = ["陳怡君", "林雅婷", "張雅惠", "黃淑芬"]; // 虛構
 const adminItems = ["公文收發", "請款作業", "採購對帳", "文件歸檔", "出差申請"];
 const innerItems = ["數值地形圖", "縱橫斷面", "成果報告", "點位清冊"];
-// R04 加班示範：人員名單（組織架構）與加班人要能對上，也要有對不到的情形。全部虛構。
+// R04 加班示範：人員名單（組織架構）與發起人要能對上，也要有對不到的情形。全部虛構。
 const otPeople = ["王小明", "陳大文", "林志強", "張家豪", "李俊傑", "黃建宏"];
 const otPeopleGroups = [groups[0], groups[1], groups[2], groups[3], "圖資A", "報告組"];
 const otPerson = (i: number) => (i % 7 === 6 ? "周小華" : otPeople[i % 7]); // 周小華不在名單 → 未對應組別
@@ -265,7 +265,8 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
   "salary-overtime": {
     n: 36,
     spec: [
-      ["加班人", "person", (_, i) => [otPerson(i)]],
+      ["發起人", "person", (_, i) => [otPerson(i)]], // 真實資料：發起人全有填、加班人全空
+      ["加班人", "person", () => null],
       ["开始时间", "date", (_, i) => { const d = new Date(); d.setDate(10); d.setMonth(d.getMonth() - Math.floor(i / 12)); return d.getTime(); }],
       ["加班类型", "select", (r) => pick(r, ["平日", "平日", "平日", "休息日(六)", "例假日(日)", "國定假日"])],
       ["申请状态", "select", (r) => pick(r, ["已通过", "已通过", "已通过", "审批中", "已撤回"])],

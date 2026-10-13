@@ -2,7 +2,7 @@
 // Usage: node --test scripts/test-hr-overtime.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { summarizeOvertime, UNMAPPED_GROUP } from "../lib/overtime.ts";
+import { summarizeOvertime, teamSummary, teamSections, UNMAPPED_GROUP } from "../lib/overtime.ts";
 import { buildPeopleDirectory, personRefs } from "../lib/people.ts";
 import { SOURCES, salaryField, peopleField } from "../lib/reports.ts";
 
@@ -17,15 +17,24 @@ const person = (name, openId, group, active = true) => ({
 });
 const DIR = buildPeopleDirectory([person("甲", "ou_a", "圖報A"), person("乙", "ou_b", "圖報B"), person("丙", null, "水深A")]);
 
-// 一張加班單。who＝加班人（人員欄：id 是 open_id）；id 省略＝讀不到 open_id（只有名字）。
+// 一張加班單。who＝發起人（人員欄：id 是 open_id）；id 省略＝讀不到 open_id（只有名字）。
+// 真實資料：發起人 126/126 有填、加班人 126/126 空白，所以預設只填發起人；加班人用 withOvertimer 另加。
+const personCell = (who) => ({ names: who.map((w) => w.name), refs: who.map((w) => ({ id: w.id ?? "", name: w.name })) });
 const rec = (o = {}, who = [{ id: "ou_a", name: "甲" }]) => ({
   id: "r",
-  fields: { 加班人: who.map((w) => w.name), "开始时间": at(2026, 9, 3), "加班类型": "平日", "申请状态": "已通过", "薪資計算加班時數": 2, ...o },
-  ...(who.some((w) => w.id) ? { people: { 加班人: who.map((w) => ({ id: w.id ?? "", name: w.name })) } } : {}),
+  fields: { 發起人: personCell(who).names, "开始时间": at(2026, 9, 3), "加班类型": "平日", "申请状态": "已通过", "薪資計算加班時數": 2, ...o },
+  ...(who.some((w) => w.id) ? { people: { 發起人: personCell(who).refs } } : {}),
+});
+// 另外填「加班人」欄（備援欄；真實資料全空）。
+const withOvertimer = (r, who) => ({
+  ...r,
+  fields: { ...r.fields, 加班人: personCell(who).names },
+  ...(who.some((w) => w.id) ? { people: { ...(r.people ?? {}), 加班人: personCell(who).refs } } : {}),
 });
 const by = (name, o) => rec(o, [{ id: undefined, name }]); // 只有名字
 const ids = (id, name, o) => rec(o, [{ id, name }]);
 const sum = (records, dir = DIR) => summarizeOvertime(records, dir);
+const gh = (m) => m.teams.map((t) => ({ group: t.group, hours: t.total })); // 組別→合計時數（依顯示順序）
 
 test("只計已通過：審批中／已撤回／已拒絕／已刪除不算，並記錄排除筆數", () => {
   const s = sum([
@@ -64,7 +73,7 @@ test("每人平日／假日分開、各組合計；類型空白不猜", () => {
   const m = s.byMonth.get("2026-09");
   const a = m.people.find((p) => p.name === "甲");
   assert.deepEqual([a.weekday, a.holiday, a.other, a.total], [2, 12, 1, 15]);
-  assert.deepEqual(m.groups, [{ group: "圖報A", hours: 15 }, { group: "圖報B", hours: 3 }]);
+  assert.deepEqual(gh(m), [{ group: "圖報A", hours: 15 }, { group: "圖報B", hours: 3 }]);
 });
 
 test("時數：公式欄優先，缺時退回原始時數；兩者皆空不算 0", () => {
@@ -77,12 +86,10 @@ test("時數：公式欄優先，缺時退回原始時數；兩者皆空不算 0
 });
 
 test("白名單：金額、薪資、身分等欄一律不讀（精確比對）", () => {
-  for (const ok of ["加班人", "开始时间", "加班类型", "申请状态", "薪資計算加班時數", "加班时长（小时）"]) {
-    
+  for (const ok of ["發起人", "加班人", "开始时间", "加班类型", "申请状态", "薪資計算加班時數", "加班时长（小时）"]) {
     assert.equal(salaryField(ok), true, ok);
   }
-  for (const bad of ["加班費", "加班費金額", "底薪", "薪資", "每月薪資", "實領金額", "手動補正時數", "發起人", "加班事由", "加班明細", "銀行帳號", "身分證字號", "電話", "地址", "工程編號", "報價編號", "当前处理人", "加班時數費用", "发起人部门"]) {
-    
+  for (const bad of ["加班費", "加班費金額", "底薪", "薪資", "每月薪資", "實領金額", "手動補正時數", "加班事由", "加班明細", "銀行帳號", "身分證字號", "電話", "地址", "工程編號", "報價編號", "当前处理人", "加班時數費用", "发起人部门", "发起人", "發起人部門", "發起人 "]) {
     assert.equal(salaryField(bad), false, bad);
   }
 });
@@ -97,7 +104,7 @@ test("salary-overtime 來源直接指定詠翔加班的 tableId，不再用表�
 
 test("overtime.ts 的欄名常數都在 reports.ts 白名單內（防兩邊漂移）", async () => {
   const o = await import("../lib/overtime.ts");
-  for (const k of ["OT_NAME", "OT_START", "OT_TYPE", "OT_STATUS", "OT_HOURS", "OT_HOURS_RAW"]) assert.equal(salaryField(o[k]), true, k);
+  for (const k of ["OT_APPLICANT", "OT_NAME", "OT_START", "OT_TYPE", "OT_STATUS", "OT_HOURS", "OT_HOURS_RAW"]) assert.equal(salaryField(o[k]), true, k);
 });
 
 // ───────── 組別依 V3 人員名單的「所屬組別」（公司組織架構）─────────
@@ -143,14 +150,14 @@ test("組別：open_id、姓名都對不到 → 「未對應組別」，並統�
   assert.equal(s.byMonth.get("2026-09").unmapped, 1);
   assert.equal(s.byMonth.get("2026-10").unmapped, 1);
   // 未對應組別的時數仍計入合計，且排在組別列表最後
-  const g = s.byMonth.get("2026-09").groups;
+  const g = gh(s.byMonth.get("2026-09"));
   assert.deepEqual(g, [{ group: "圖報A", hours: 2 }, { group: "未對應組別", hours: 2 }]);
   assert.equal(s.byMonth.get("2026-09").total, 4);
 });
 
 test("組別：未對應組別即使時數最多也排最後", () => {
   const s = sum([ids("ou_x", "外人", { "薪資計算加班時數": 9 }), ids("ou_a", "甲", { "薪資計算加班時數": 1 })]);
-  assert.deepEqual(s.byMonth.get("2026-09").groups.map((g) => g.group), ["圖報A", "未對應組別"]);
+  assert.deepEqual(gh(s.byMonth.get("2026-09")).map((g) => g.group), ["圖報A", "未對應組別"]);
 });
 
 test("組別：人員名單有這個人但「所屬組別」空白 → 未對應組別（不猜）", () => {
@@ -184,7 +191,7 @@ test("組別：加班人填多人——整張算一列；全部同組歸該組�
   ]);
   const m = s.byMonth.get("2026-09");
   assert.equal(m.total, 6); // 每張只算一次時數
-  assert.deepEqual(m.groups, [{ group: "圖報A", hours: 2 }, { group: "未對應組別", hours: 4 }]);
+  assert.deepEqual(gh(m), [{ group: "圖報A", hours: 2 }, { group: "未對應組別", hours: 4 }]);
   assert.equal(s.multiPerson, 3);
   assert.equal(s.unmapped, 2);
 });
@@ -194,7 +201,7 @@ test("組別：只計已通過——未通過的單既不計時數也不影響�
   assert.equal(s.counted, 1);
   assert.equal(s.excludedStatus, 2);
   assert.equal(s.unmapped, 0);
-  assert.deepEqual(s.byMonth.get("2026-09").groups, [{ group: "圖報A", hours: 2 }]);
+  assert.deepEqual(gh(s.byMonth.get("2026-09")), [{ group: "圖報A", hours: 2 }]);
 });
 
 test("組別：人員名單讀不到（null）→ 不亂歸組，組別一律「—」，也不算未對應", () => {
@@ -255,4 +262,180 @@ test("personRefs：Lark 人員欄 [{id,name,en_name,email}] → 只留 {id,name}
   assert.deepEqual(personRefs({ id: "ou_c", name: "單一物件" }), [{ id: "ou_c", name: "單一物件" }]);
   // 有人缺 id 時仍與名字陣列逐項對齊（缺的給空字串）
   assert.deepEqual(personRefs([{ id: "ou_a", name: "甲" }, { name: "無id" }]), [{ id: "ou_a", name: "甲" }, { id: "", name: "無id" }]);
+});
+
+// ───────── 人＝「發起人」（加班人欄真實資料全空，只當備援）─────────
+
+// 把一張單的發起人拿掉（模擬發起人空白）。
+const noApplicant = (r) => {
+  const { 發起人: _f, ...fields } = r.fields;
+  const { 發起人: _p, ...people } = r.people ?? {};
+  return { ...r, fields: { ...fields, 發起人: null }, people };
+};
+
+test("發起人：加班人空白、發起人有值 → 以發起人計人與組別（真實資料形狀）", () => {
+  const r = ids("ou_a", "甲");
+  assert.equal(r.fields["加班人"], undefined); // 加班人欄根本沒有值
+  const s = sum([r, ids("ou_b", "乙")]);
+  assert.equal(groupOf(s, "甲"), "圖報A");
+  assert.equal(groupOf(s, "乙"), "圖報B");
+  assert.equal(s.unmapped, 0);
+  assert.equal(s.fallbackToOvertimer, 0);
+});
+
+test("發起人：加班人欄是空陣列／空字串也算空白，仍以發起人為準", () => {
+  const s = sum([{ ...ids("ou_a", "甲"), fields: { ...ids("ou_a", "甲").fields, 加班人: [] } }, { ...ids("ou_b", "乙"), fields: { ...ids("ou_b", "乙").fields, 加班人: "" } }]);
+  assert.equal(groupOf(s, "甲"), "圖報A");
+  assert.equal(groupOf(s, "乙"), "圖報B");
+});
+
+test("發起人：兩者都有 → 以發起人為準（加班人另屬別組也不理）", () => {
+  const r = withOvertimer(ids("ou_a", "甲"), [{ id: "ou_b", name: "乙" }]);
+  const s = sum([r]);
+  const m = s.byMonth.get("2026-09");
+  assert.deepEqual(m.people.map((p) => [p.name, p.group]), [["甲", "圖報A"]]);
+  assert.equal(s.fallbackToOvertimer, 0);
+  // 加班人填多位也不影響：發起人單人，不算 multiPerson
+  const s2 = sum([withOvertimer(ids("ou_a", "甲"), [{ id: "ou_b", name: "乙" }, { id: "ou_x", name: "外人" }])]);
+  assert.equal(s2.multiPerson, 0);
+  assert.equal(s2.unmapped, 0);
+  assert.equal(groupOf(s2, "甲"), "圖報A");
+});
+
+test("發起人：發起人空白才用加班人（備援），並統計張數", () => {
+  const r = noApplicant(withOvertimer(ids("ou_a", "甲"), [{ id: "ou_b", name: "乙" }]));
+  const s = sum([r, ids("ou_a", "甲")]);
+  assert.equal(groupOf(s, "乙"), "圖報B");
+  assert.equal(groupOf(s, "甲"), "圖報A");
+  assert.equal(s.fallbackToOvertimer, 1);
+});
+
+test("發起人：兩者都空白 → 仍計時數，人顯示「—」並歸未對應組別", () => {
+  const r = noApplicant(withOvertimer(ids("ou_a", "甲"), []));
+  const s = sum([r]);
+  assert.equal(s.counted, 1);
+  assert.equal(s.unmapped, 1);
+  assert.deepEqual(s.byMonth.get("2026-09").people.map((p) => [p.name, p.group]), [["—", "未對應組別"]]);
+});
+
+test("發起人：open_id 在名單用 open_id，對不到才以姓名備援，仍對不到＝未對應", () => {
+  const s = sum([ids("ou_unknown", "乙"), ids("ou_unknown2", "外人"), by("丙")]);
+  assert.equal(groupOf(s, "乙"), "圖報B");
+  assert.equal(groupOf(s, "丙"), "水深A");
+  assert.equal(groupOf(s, "外人"), "未對應組別");
+  assert.equal(s.unmapped, 1);
+});
+
+test("被排除的筆數：依申請狀態分別列出（空白另列），依筆數多到少", () => {
+  const s = sum([
+    rec({}),
+    rec({ "申请状态": "已撤回" }),
+    rec({ "申请状态": "已拒绝" }),
+    rec({ "申请状态": "已撤回" }),
+    rec({ "申请状态": "审批中" }),
+    rec({ "申请状态": null }),
+  ]);
+  assert.equal(s.excludedStatus, 5);
+  assert.deepEqual(s.excludedBy, [
+    { status: "已撤回", count: 2 },
+    { status: "已拒绝", count: 1 },
+    { status: "审批中", count: 1 },
+    { status: "（空白）", count: 1 },
+  ]);
+});
+
+// ───────── 組別總結與依組分段（純函式）─────────
+
+test("組別總結：每組一列＝人數、平日、假日、合計、張數；全部合計；未對應組別排最後（即使最多）", () => {
+  const s = sum([
+    ids("ou_a", "甲"), // 圖報A 平日 2
+    ids("ou_a", "甲"), // 圖報A 平日 2
+    ids("ou_a", "甲", { "加班类型": "休息日(六)", "薪資計算加班時數": 4 }), // 圖報A 假日 4
+    ids("ou_b", "乙", { "薪資計算加班時數": 3 }), // 圖報B 平日 3
+    ids("ou_x", "外人", { "薪資計算加班時數": 9 }), // 未對應 平日 9
+  ]);
+  const m = s.byMonth.get("2026-09");
+  const sm = teamSummary(m.people);
+  assert.deepEqual(sm.lines.map((l) => l.group), ["圖報A", "圖報B", "未對應組別"]);
+  const [a, b, u] = sm.lines;
+  assert.deepEqual([a.people, a.weekday, a.holiday, a.other, a.total, a.count], [1, 4, 4, 0, 8, 3]);
+  assert.deepEqual([b.people, b.weekday, b.holiday, b.total, b.count], [1, 3, 0, 3, 1]);
+  assert.deepEqual([u.people, u.weekday, u.holiday, u.total, u.count], [1, 9, 0, 9, 1]);
+  assert.deepEqual([sm.all.people, sm.all.weekday, sm.all.holiday, sm.all.total, sm.all.count], [3, 16, 4, 20, 5]);
+  assert.equal(sm.all.group, "全部合計");
+  // OtMonth 上已經帶著同樣的結果
+  assert.deepEqual(m.teams, sm.lines);
+  assert.deepEqual(m.all, sm.all);
+  assert.equal(m.total, 20);
+});
+
+test("組別總結：人數去重——同一人（同 open_id、顯示名不同）只算一人；跨組的同一人在全部合計只算一次", () => {
+  const s = sum([ids("ou_a", "甲"), ids("ou_a", "甲（改名）"), ids("ou_b", "乙")]);
+  const m = s.byMonth.get("2026-09");
+  assert.equal(m.people.length, 2); // 甲兩張單併成一列
+  assert.equal(m.people.find((p) => p.group === "圖報A").count, 2);
+  assert.equal(m.teams.find((l) => l.group === "圖報A").people, 1);
+  assert.equal(m.all.people, 2);
+  // 手工構造：同一人（uid 相同）出現在兩組 → 各組算 1，全部合計去重算 1；同名但不同 uid 是兩個人
+  const P = (uid, name, group, weekday, holiday, count) => ({ uid, name, group, weekday, holiday, other: 0, total: weekday + holiday, count });
+  const sm = teamSummary([P("id:1", "甲", "A", 1, 0, 1), P("id:1", "甲", "B", 2, 0, 1), P("id:2", "甲", "B", 1, 1, 2)]);
+  assert.deepEqual(sm.lines.map((l) => [l.group, l.people]), [["B", 2], ["A", 1]]);
+  assert.equal(sm.all.people, 2);
+  assert.equal(sm.all.total, 5);
+  assert.equal(sm.all.count, 4);
+});
+
+test("組別總結：同名不同人（open_id 不同）算兩人", () => {
+  const dir = buildPeopleDirectory([person("甲", "ou_a", "圖報A"), person("甲", "ou_a2", "水深B")]);
+  const s = sum([ids("ou_a", "甲"), ids("ou_a2", "甲")], dir);
+  assert.equal(s.byMonth.get("2026-09").all.people, 2);
+});
+
+test("組別總結：同組時數相同時依組名排，順序固定（切月份按鈕不跳）", () => {
+  const s = sum([ids("ou_b", "乙"), ids("ou_a", "甲")]);
+  assert.deepEqual(s.byMonth.get("2026-09").teams.map((l) => l.group), ["圖報A", "圖報B"]);
+});
+
+test("組別總結：人員名單讀不到（null）→ 只有一列「—」，不算未對應", () => {
+  const s = summarizeOvertime([ids("ou_a", "甲"), ids("ou_x", "外人")], null);
+  const m = s.byMonth.get("2026-09");
+  assert.deepEqual(m.teams.map((l) => [l.group, l.people, l.total]), [["—", 2, 4]]);
+  assert.equal(m.all.people, 2);
+});
+
+test("依組分段：順序同組別總結（未對應最後）、每段小計＝該組各人加總、組內時數大到小", () => {
+  const s = sum([
+    ids("ou_a", "甲", { "薪資計算加班時數": 1 }),
+    ids("ou_x", "外人", { "薪資計算加班時數": 9 }),
+    ids("ou_a2", "甲二", { "薪資計算加班時數": 5 }), // open_id 不在名單 → 姓名也對不到
+    by("丙", { "薪資計算加班時數": 2 }), // 水深A（姓名備援）
+  ]);
+  const m = s.byMonth.get("2026-09");
+  const secs = teamSections(m.people);
+  assert.deepEqual(secs.map((x) => x.group), m.teams.map((l) => l.group));
+  assert.equal(secs.at(-1).group, "未對應組別");
+  for (const sec of secs) {
+    assert.equal(sec.line.total, sec.people.reduce((a, p) => a + p.total, 0));
+    assert.equal(sec.line.people, sec.people.length);
+    assert.deepEqual(sec.line, m.teams.find((l) => l.group === sec.group));
+    assert.deepEqual(sec.people.map((p) => p.total), [...sec.people.map((p) => p.total)].sort((x, y) => y - x));
+  }
+  const un = secs.at(-1);
+  assert.deepEqual(un.people.map((p) => p.name), ["外人", "甲二"]); // 9 先、5 後
+  assert.equal(secs.reduce((a, x) => a + x.line.total, 0), m.all.total);
+});
+
+test("示範資料：salary-overtime 用發起人（加班人空白），能對到人員名單，也有對不到的", async () => {
+  const { demoSourceData } = await import("../lib/demo.ts");
+  const ot = demoSourceData(SOURCES.find((x) => x.key === "salary-overtime"));
+  const pp = demoSourceData(SOURCES.find((x) => x.key === "v3-people"));
+  assert.ok(ot.fields.some((f) => f.name === "發起人" && f.kind === "person"));
+  assert.ok(ot.records.every((r) => Array.isArray(r.fields["發起人"]) && r.fields["發起人"].length === 1 && r.people["發起人"][0].id));
+  assert.ok(ot.records.every((r) => !r.fields["加班人"]));
+  const s = summarizeOvertime(ot.records, buildPeopleDirectory(pp.records));
+  assert.ok(s.counted > 0);
+  assert.ok(s.unmapped > 0 && s.unmapped < s.counted);
+  const months = [...s.byMonth.values()];
+  assert.ok(months.some((m) => m.teams.some((l) => l.group === "未對應組別")));
+  for (const m of months) if (m.teams.some((l) => l.group === "未對應組別")) assert.equal(m.teams.at(-1).group, "未對應組別");
 });

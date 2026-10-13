@@ -25,14 +25,15 @@ export interface SourceDef {
 }
 
 // 薪水計算 Base 的「詠翔加班」（逐筆加班審批單）：只讀下列欄位，精確比對、不用關鍵字。
-// 金額、薪資、身分、帳號、電話、地址、事由、明細、發起人等欄一律不向 Lark 要求。
+// 金額、薪資、身分、帳號、電話、地址、事由、明細等欄一律不向 Lark 要求。
+// 「發起人」（繁體「發」，人員欄）＝這張加班單算誰的；「加班人」只當備援（發起人空白才用，真實資料全空）。
+// 簡體的「发起人部门」「当前处理人」不讀：組別改依 V3 人員名單的所屬組別（公司組織架構），部門欄不要了。
 // 「薪資計算加班時數」名稱含薪資，但它是時數公式（原始加班時數＋人工補正），不是金額。
-// 組別不讀「发起人部门」，改依 V3 人員名單的所屬組別（公司組織架構），所以部門欄也不要了。
 // 欄名與 lib/overtime.ts 的常數一致（scripts/test-hr-overtime.mjs 會檢查）。
-const SALARY_ALLOW = ["加班人", "开始时间", "加班类型", "申请状态", "薪資計算加班時數", "加班时长（小时）"];
+const SALARY_ALLOW = ["發起人", "加班人", "开始时间", "加班类型", "申请状态", "薪資計算加班時數", "加班时长（小时）"];
 export const salaryField = (name: string) => SALARY_ALLOW.includes(name);
 
-// V3「人員名單」：R04 加班只拿來把加班人對到所屬組別，所以只讀這四欄，精確比對。
+// V3「人員名單」：R04 加班只拿來把發起人（備援：加班人）對到所屬組別，所以只讀這四欄，精確比對。
 // 電話、身分、帳戶、薪資、職級、備註、各種成本單連結、OpenID 同步欄一律不向 Lark 要求。
 // 欄名與 lib/people.ts 的常數一致（scripts/test-hr-overtime.mjs 會檢查）。
 const PEOPLE_ALLOW = ["姓名", "Lark帳號", "所屬組別", "在職"];
@@ -104,7 +105,7 @@ export const SOURCES: SourceDef[] = [
   raw("v3-people", "人員名單（組織架構）", "v3", "tblmlpA6nG5Ou7NQ", {
     allowField: peopleField,
     restricted: "hr",
-    note: "R04 加班用它把加班人對到「所屬組別」（公司組織架構）；只讀姓名、Lark帳號、所屬組別、在職，其他欄位一律不讀。依 HR_VIEWERS 設定才看得到。",
+    note: "R04 加班用它把發起人（備援：加班人）對到「所屬組別」（公司組織架構）；只讀姓名、Lark帳號、所屬組別、在職，其他欄位一律不讀。依 HR_VIEWERS 設定才看得到。",
   }),
   raw("v4-schedule", "工作預排", "v4", "tblZz6Mkhv9gHrB2", { dateField: "開始日期", columns: COLS.schedule, ...DASH.schedule }),
   raw("v3-admin-work", "行政工作單", "v3", "tbl2c5CLgwPZ3Pl2", { note: "R11 用；沒有日期與人員，從「所屬成本單」帶入。" }),
@@ -160,7 +161,7 @@ export const SOURCES: SourceDef[] = [
     allowField: (n) => salaryField(n),
     restricted: "hr",
     url: tableUrl(SALARY_BASE, "tblomH0DXCzXgenE"),
-    note: "逐筆加班審批單；只讀加班人、開始時間、加班類型、申請狀態、加班時數，只計「已通过」；組別依 V3 人員名單。金額、薪資、身分等欄一律不讀。需 PM週報 在該 Base 有唯讀角色。依 HR_VIEWERS 設定才看得到。",
+    note: "逐筆加班審批單；只讀發起人（加班人為備援）、開始時間、加班類型、申請狀態、加班時數，只計「已通过」；組別依 V3 人員名單。金額、薪資、身分等欄一律不讀。需 PM週報 在該 Base 有唯讀角色。依 HR_VIEWERS 設定才看得到。",
   },
   // R07: 儀器管理系統 Base（業主 2026-10-13 提供）。與 V3／V4 的儀器費率、車輛分開，不相加、不去重。
   eqSys("equipment-system", "儀器管理系統：儀器總表（借用台帳）", "tblHZFEypeKfWOsF", "138 筆台帳，含租賃型態（月租／日租）、借用狀態（可借用／已借出）、系統封存；與「資料表」命名不同，兩者不去重。"),

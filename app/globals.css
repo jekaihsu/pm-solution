@@ -585,6 +585,13 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
 .hr-src-head .muted { font-weight: 400; }
 .hr-src > p { margin: 0; }
 .hr .cg-table { box-shadow: none; }
+/* 加班區塊：三張 KPI 卡、組別總結、人員表（比照 R02）。表格放在 .cg-sheet（可橫捲），格線子元素 min-width:0，手機不撐開整頁。 */
+.hr-src .kpis > .kpi, .hr-src .cg-teamsum, .hr-src .cg-sheet { min-width: 0; }
+.hr-src .kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.hr-src .cg-sheet td.strong { font-weight: 600; }
+@media (max-width: 700px) {
+  .hr-src .cg-sheet th, .hr-src .cg-sheet td { padding: 7px 6px; font-size: 12.5px; }
+}
 
 /* Per-order SOP */
 .cg-detail-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--border); }

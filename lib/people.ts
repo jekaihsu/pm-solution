@@ -1,4 +1,4 @@
-// 公司組織架構＝V3 日報系統的「人員名單」（tblmlpA6nG5Ou7NQ）。R04 加班用它把「加班人」對到「所屬組別」。
+// 公司組織架構＝V3 日報系統的「人員名單」（tblmlpA6nG5Ou7NQ）。R04 加班用它把「發起人」（備援：加班人）對到「所屬組別」。
 // 純函式、不 import 其他 lib 的值（node --test 可直接載入）。
 // 只讀四個欄位：姓名、Lark帳號（人員欄，含 open_id）、所屬組別、在職。電話、身分、帳戶、薪資等一律不讀
 // （reports.ts 的 peopleField 白名單；兩邊欄名由 scripts/test-hr-overtime.mjs 檢查一致）。
@@ -37,7 +37,7 @@ export interface PeopleRow {
 }
 
 export interface PeopleDirectory {
-  // 這群人（一張加班單的加班人，通常 1 位）屬於哪個組別；對不到、組別不一致、無法判斷時回 null。
+  // 這群人（一張加班單的發起人，通常 1 位）屬於哪個組別；對不到、組別不一致、無法判斷時回 null。
   groupFor(persons: { id?: string; name: string }[]): string | null;
 }
 
