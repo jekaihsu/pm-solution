@@ -685,6 +685,81 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
 .cg-notes-cell { white-space: normal; min-width: 160px; max-width: 280px; line-height: 1.45; }
 .cg-unplanned { margin-top: 12px; } .cg-unplanned > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
 .cg-unplanned { margin-top: 12px; } .cg-unplanned > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+
+/* ---------- R09 內業報告 ---------- */
+.ir > *, .ir-card > * { min-width: 0; }
+.ir-ref { margin: -4px 0 0; }
+.ir-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 16px 18px; display: grid; gap: 12px; overflow-wrap: anywhere; }
+.ir-card-head { display: flex; align-items: baseline; gap: 6px 10px; flex-wrap: wrap; color: var(--text-2); }
+.ir-card-head h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
+.ir-card p { margin: 0; }
+.ir-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.ir-kpis > .kpi { min-width: 0; padding: 12px 14px; }
+.ir-kpis .kpi-value { font-size: 24px; }
+.ir-scroll { overflow-x: auto; min-width: 0; max-width: 100%; border: 1px solid var(--border); border-radius: 10px; }
+.ir-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ir-table th { text-align: left; font-weight: 500; font-size: 12.5px; color: var(--text-2); background: var(--surface-2); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.ir-table td { padding: 8px 10px; border-bottom: 1px solid var(--border-soft); vertical-align: top; white-space: nowrap; }
+.ir-table tbody tr:last-child td { border-bottom: none; }
+.ir-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.ir-table .strong { font-weight: 600; }
+.ir-table tfoot td { background: var(--surface-2); font-weight: 600; border-top: 2px solid var(--text-2); }
+.ir-table td.ir-wrap { white-space: normal; min-width: 140px; max-width: 260px; }
+.ir-table td.ir-note { white-space: pre-wrap; min-width: 200px; max-width: 360px; line-height: 1.45; }
+.ir-kinds { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.ir-pending { border-style: dashed; background: var(--surface-2); box-shadow: none; }
+.ir .cg-notes li { min-width: 0; overflow-wrap: anywhere; }
+.warn-text { color: var(--warn); }
+@media (max-width: 700px) {
+  .ir-card { padding: 12px; }
+  .ir-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+}
+
+/* ---------- R10 外業報告（外業經理） ---------- */
+.fr { min-width: 0; }
+.fr > * { min-width: 0; }
+.fr h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.fr .kpis { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.fr .kpi { min-width: 0; overflow-wrap: anywhere; }
+.fr-lead { margin: -6px 0 0; }
+.fr-sec { display: grid; gap: 8px; min-width: 0; }
+.fr-sec > * { min-width: 0; }
+.fr-sec-head { display: flex; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; }
+.fr-scroll { overflow-x: auto; max-width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.fr-scroll table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.fr-scroll th { text-align: left; font-weight: 500; font-size: 12.5px; color: var(--text-2); background: var(--bg); padding: 9px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.fr-scroll td { padding: 8px 10px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+.fr-scroll tbody tr:last-child td { border-bottom: none; }
+.fr-scroll .num { text-align: right; font-variant-numeric: tabular-nums; }
+.fr-scroll tfoot td { font-weight: 600; border-top: 2px solid var(--text-2); }
+.fr-nowrap { white-space: nowrap; }
+.fr-name { min-width: 150px; max-width: 260px; overflow-wrap: anywhere; }
+.fr-dup { margin-left: 6px; height: 18px; font-size: 11px; }
+.fr-desc { min-width: 220px; max-width: 440px; max-height: 9.5em; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.fr-desc > div + div { margin-top: 4px; }
+.fr-link { display: inline-flex; align-items: center; gap: 3px; color: var(--text-2); text-decoration: underline; }
+.fr-pending { padding: 12px 14px; border: 1px dashed var(--border); border-radius: 12px; background: var(--surface); display: grid; gap: 6px; }
+.fr-pending p { margin: 0; font-size: 13px; color: var(--text-2); }
+.fr .cg-notes li { align-items: flex-start; }
+.fr .cg-notes svg { flex: none; margin-top: 2px; }
+@media (max-width: 720px) {
+  .fr .kpis { grid-template-columns: 1fr 1fr; }
+}
+
 /* R02 組別總結 */
 .cg-teamsum { display: grid; gap: 8px; min-width: 0; }
 .cg-sheet tr.cg-on td { background: var(--hover); box-shadow: inset 0 -2px 0 var(--primary); }
+
+/* R04 出勤／出差 */
+.att-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 8px; }
+.att-kpi { display: grid; gap: 2px; padding: 8px 12px; background: var(--surface-2); border-radius: 10px; }
+.att-kpi span { font-size: 11.5px; color: var(--text-2); }
+.att-kpi b { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.att-tag { display: inline-block; min-width: 40px; padding: 2px 6px; border-radius: 6px; font-size: 12px; background: var(--surface-2); color: var(--text-2); }
+.att-tag.ok { background: var(--good-soft); color: var(--good); }
+.att-tag.warn { background: var(--warn-soft); color: var(--warn); }
+.att-tag.bad { background: var(--bad-soft); color: var(--bad); }
+.att-tag.dim { background: transparent; color: var(--muted); }
+.cg-sheet .att-name { text-align: left; font-weight: 600; background: var(--surface-2); }
+.cg-sheet th small { display: block; font-weight: 400; color: var(--text-2); }
+.att-reason { white-space: normal !important; min-width: 160px; max-width: 280px; }

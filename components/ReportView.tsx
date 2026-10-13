@@ -6,6 +6,8 @@ import { showSource, useShell } from "./AppShell";
 import GroupBoard, { BOARDS } from "./GroupBoard";
 import EquipmentBoard from "./EquipmentBoard";
 import AdminBoard from "./AdminBoard";
+import InternalReport from "./InternalReport";
+import FieldReport from "./FieldReport";
 import HrBoard from "./HrBoard";
 import EmptyState from "./EmptyState";
 import SourcePanel from "./SourcePanel";
@@ -61,9 +63,9 @@ export default function ReportView({ report }: { report: ReportDef }) {
         </div>
       )}
 
-      {report.id === "R01" || report.id === "R02" || report.id === "R04" || report.id === "R07" || report.id === "R11" ? (
+      {report.id === "R01" || report.id === "R02" || report.id === "R04" || report.id === "R07" || report.id === "R09" || report.id === "R10" || report.id === "R11" ? (
         <>
-          {report.id === "R04" ? <HrBoard /> : report.id === "R07" ? <EquipmentBoard /> : report.id === "R11" ? <AdminBoard /> : <GroupBoard key={report.id} cfg={report.id === "R01" ? BOARDS.r01 : BOARDS.r02} />}
+          {report.id === "R04" ? <HrBoard /> : report.id === "R07" ? <EquipmentBoard /> : report.id === "R09" ? <InternalReport /> : report.id === "R10" ? <FieldReport /> : report.id === "R11" ? <AdminBoard /> : <GroupBoard key={report.id} cfg={report.id === "R01" ? BOARDS.r01 : BOARDS.r02} />}
           <details className="raw-data" onToggle={(e) => setRawOpen((e.target as HTMLDetailsElement).open)}>
             <summary>查看原始資料表</summary>
             {rawOpen && (
