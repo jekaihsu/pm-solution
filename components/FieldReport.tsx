@@ -59,7 +59,7 @@ export default function FieldReport() {
       <div>
         <h2>{wk}預排及實際完成檢討（外業）</h2>
         <p className="muted small">
-          {wk} {week.label}・比對預排及實際完成的案件，判斷預排是否失誤；修改預排須在 Lark 備註說明原因
+          {wk} {week.label}・比對預排及實際完成的工程，判斷預排是否失誤；修改預排須在 Lark 備註說明原因
         </p>
       </div>
       {globalVersion === "all" && (
@@ -102,9 +102,6 @@ export default function FieldReport() {
   if (report.hiddenGroups.length) notes.push(`不列入（非外業組）：${report.hiddenGroups.map((h) => `${/^rec/.test(h.group) ? "未對應組別" : h.group}（${h.orders} 張）`).join("、")}`);
   if (work.data?.stale) notes.push("工作單為上次成功讀取的快照");
 
-  // 案件編號重複（record 不同）的列要標出來，免得被當成同一案。
-  const noCount = new Map<string, number>();
-  for (const c of report.cases) noCount.set(c.no, (noCount.get(c.no) ?? 0) + 1);
   const caseResults = ["有排有做", "有排未做", "未排有做"] as const;
   const caseRows = caseFilter === "全部" ? report.cases : report.cases.filter((c) => c.result === caseFilter);
   const excKinds = ["未排有做", "有排未做", "工作單異常"] as const;
@@ -137,10 +134,10 @@ export default function FieldReport() {
           </div>
         </div>
         <div className="kpi">
-          <div className="kpi-label">案件交集數</div>
+          <div className="kpi-label">工程交集數</div>
           <div className="kpi-value">{report.scheduleOn ? s.caseOverlap : "—"}</div>
           <div className="kpi-sub">
-            預排 {report.scheduleOn ? s.planCases : "—"} 案・出工 {s.actualCases} 案
+            預排 {report.scheduleOn ? s.planCases : "—"} 工程・出工 {s.actualCases} 工程
           </div>
         </div>
       </div>
@@ -150,8 +147,8 @@ export default function FieldReport() {
 
       <div className="fr-sec">
         <div className="fr-sec-head">
-          <h3>預排 vs 實際（以案件為單位）</h3>
-          <span className="muted small">一案一列；同組同日同案才算吻合</span>
+          <h3>預排 vs 實際（以工程為單位）</h3>
+          <span className="muted small">一工程一列；同組同日同工程才算吻合</span>
         </div>
         {report.scheduleOn && (
           <Chips
@@ -165,7 +162,7 @@ export default function FieldReport() {
           <table>
             <thead>
               <tr>
-                <th>案件編號</th>
+                <th>工程編號</th>
                 <th>工程名稱</th>
                 <th>結果</th>
                 <th>預排組別</th>
@@ -182,7 +179,7 @@ export default function FieldReport() {
                 <tr key={c.caseId}>
                   <td className="fr-nowrap">
                     {c.no}
-                    {(noCount.get(c.no) ?? 0) > 1 && <span className="pill pill-warn fr-dup" title="案件編號重複，以不同案件記錄分開計算">編號重複</span>}
+                    {c.dup && <span className="pill pill-warn fr-dup" title="同一工程內有完整案件編號相同的不同案件記錄（或占位碼重複）">編號重複</span>}
                   </td>
                   <td className="fr-name">{c.name || dash}</td>
                   <td>
@@ -200,7 +197,7 @@ export default function FieldReport() {
               {!caseRows.length && (
                 <tr>
                   <td colSpan={10} className="muted">
-                    這週沒有符合的案件
+                    這週沒有符合的工程
                   </td>
                 </tr>
               )}
@@ -341,7 +338,7 @@ export default function FieldReport() {
           <CircleAlert size={14} /> 外業以「組」為單位；預排只取業別＝外業，ROV 組一律算外業；預排組名去尾「組」比對（水深A組＝水深A）。排除行政、業務、內業、資訊組與未對應組別。
         </li>
         <li>
-          <CircleAlert size={14} /> 工作單與預排的案件用案件記錄（record_id）比對，不用案件編號文字（有編號重複與全 0 占位碼，會標「編號重複」）。工程編號合併規則（是否取案件編號前 7 碼）待確認，目前以案件記錄為單位。
+          <CircleAlert size={14} /> 工作單與預排以「工程」為單位比對：工程編號＝案件編號前 7 碼（C115016、C115016A、C115016-2-1 同屬工程 C115016），案件先用 link record_id 查出案件編號再取前 7 碼。空白、全 0 占位碼（C000000）、格式不符的案件不合併，一案一列；工程內有完整編號相同的不同記錄會標「編號重複」。
         </li>
         <li>
           <CircleAlert size={14} /> 組日＝一組一天。預排日晚於今天的不納入（尚未到期不算「沒做」）；條類型為休假的預排不算；預排沒填案件的只算組日，不進案件比對。預排日期依欄位 id 取，不看欄名。

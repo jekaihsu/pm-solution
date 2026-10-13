@@ -2,7 +2,8 @@
 // Usage: node --test scripts/test-internal-report.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildInternalReport, mergeDayRuns } from "../lib/internalReport.ts";
+import { buildInternalReport, mergeDayRuns, engineeringCode } from "../lib/internalReport.ts";
+import { engineeringCode as fieldEngineeringCode } from "../lib/fieldReport.ts";
 
 const DAY = 86400000;
 const TZ = 8 * 3600000;
@@ -256,13 +257,13 @@ test("同人同案連續日期合併成一列（起～迄、天數）；不同�
   const b = run(work([]), cost([]), s, casesTable([["k1", "C100001", "甲工程"], ["k2", "C100002", "乙工程"]]));
   const rows = b.exceptions.filter((e) => e.kinds[0] === "有排未填");
   assert.equal(rows.length, 3);
-  const r1 = rows.find((r) => r.caseId === "k1" && r.days === 3);
+  const r1 = rows.find((r) => r.caseId === "P:C100001" && r.days === 3);
   assert.equal(r1.from, dayNo(0));
   assert.equal(r1.to, dayNo(2));
   assert.equal(r1.name, "甲工程");
   assert.equal(r1.code, "C100001");
-  assert.ok(rows.find((r) => r.caseId === "k1" && r.days === 1 && r.from === dayNo(4)));
-  assert.ok(rows.find((r) => r.caseId === "k2" && r.days === 2));
+  assert.ok(rows.find((r) => r.caseId === "P:C100001" && r.days === 1 && r.from === dayNo(4)));
+  assert.ok(rows.find((r) => r.caseId === "P:C100002" && r.days === 2));
 });
 
 // ================= 案件比對 =================
@@ -283,16 +284,16 @@ test("案件結果：有排有做／有排未做／未排有做，用案件 reco
   ]);
   const b = run(w, c, s, casesTable([["k1", "C100001", "甲工程"], ["k2", "C100002", "乙工程"], ["k3", "C100003", "丙工程"]]));
   const byId = (id) => b.cases.find((r) => r.caseId === id);
-  assert.equal(byId("k1").result, "有排有做");
-  assert.equal(byId("k1").plannedDays, 2);
-  assert.equal(byId("k1").actualDays, 1); // 只有週一這天有 k1 的工作單
-  assert.equal(byId("k1").orders, 2);
-  assert.equal(byId("k1").revenue, 1.5);
-  assert.equal(byId("k2").result, "有排未做");
-  assert.equal(byId("k2").plannedDays, 2);
-  assert.equal(byId("k2").orders, 0);
-  assert.equal(byId("k3").result, "未排有做");
-  assert.equal(byId("k3").name, "丙工程");
+  assert.equal(byId("P:C100001").result, "有排有做");
+  assert.equal(byId("P:C100001").plannedDays, 2);
+  assert.equal(byId("P:C100001").actualDays, 1); // 只有週一這天有 k1 的工作單
+  assert.equal(byId("P:C100001").orders, 2);
+  assert.equal(byId("P:C100001").revenue, 1.5);
+  assert.equal(byId("P:C100002").result, "有排未做");
+  assert.equal(byId("P:C100002").plannedDays, 2);
+  assert.equal(byId("P:C100002").orders, 0);
+  assert.equal(byId("P:C100003").result, "未排有做");
+  assert.equal(byId("P:C100003").name, "丙工程");
   assert.deepEqual(b.caseSummary, { planned: 2, plannedWithOrders: 1, plannedNoOrders: 1, actual: 2, unplanned: 1 });
 });
 
@@ -376,4 +377,272 @@ test("輸出不含任何成本欄位（出工成本、人力成本、方案日�
   const b = run(work([{ no: "W1", costId: "C1", caseId: "k1", code: "C100001", pts: 1 }]), c, sched([{ s: 0, ppl: [A], cases: [K1] }]));
   const json = JSON.stringify(b);
   for (const word of ["4900", "出工成本", "人力成本", "方案日成本", "加班費", "雜支"]) assert.ok(!json.includes(word), word);
+});
+
+// ================= 工程編號＝案件編號前 7 碼（業主 2026-10-13）=================
+test("engineeringCode：trim、轉大寫、取前 7 碼；第 8 碼是數字不取；C000000 與不符格式回 null；R09 與 R10 規則一致", () => {
+  const cases = [
+    ["C115016", "C115016"], ["C115016A", "C115016"], ["C115016-2-1", "C115016"], [" c115223 ", "C115223"], ["B115032-5-2A", "B115032"],
+    ["C114070-1D", "C114070"], ["C111308A", "C111308"], ["C115101-A", "C115101"], ["b110532-1A", "B110532"], ["Z999999Z", "Z999999"], ["A115074", "A115074"],
+    // 第 8 碼是數字：多半是打錯的編號（A1150174 是 A115074 打錯），不可被取成別的工程
+    ["A1150174", null], ["C1150019", null], ["C11501600", null],
+    ["C000000", null], ["c000000-1", null], ["115526", null], ["報編115509-01", null], ["休假", null], ["", null], ["  ", null], [null, null], [undefined, null], ["C11501", null], ["B11503", null],
+  ];
+  for (const [input, want] of cases) {
+    assert.equal(engineeringCode(input), want, `R09 ${JSON.stringify(input)}`);
+    assert.equal(fieldEngineeringCode(input), want, `R10 ${JSON.stringify(input)}`);
+  }
+});
+
+const PARENT = ["kp", "C115016"];
+const projTable = () => casesTable([["kp", "C115016", "母案工程"], ["kc", "C115016-2-1", "子案工程"], ["kc2", "C115016A", "母案工程"]]);
+const oneOrder = (extra) => ({ no: "W1", costId: "C1", ...extra });
+
+test("母案＋子案合併成同一工程：預排連母案、工作單連子案 → 一列「有排有做」，不是兩列異常", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "kc", code: "C115016-2-1", pts: 1.5 })]);
+  const s = sched([{ s: 0, ppl: [A], cases: [PARENT] }]);
+  const b = run(w, c, s, projTable());
+  assert.equal(b.cases.length, 1);
+  const row = b.cases[0];
+  assert.equal(row.caseId, "P:C115016");
+  assert.equal(row.code, "C115016");
+  assert.equal(row.result, "有排有做");
+  assert.equal(row.plannedDays, 1);
+  assert.equal(row.actualDays, 1);
+  assert.equal(row.orders, 1);
+  assert.equal(row.revenue, 1.5);
+  assert.deepEqual(b.caseSummary, { planned: 1, plannedWithOrders: 1, plannedNoOrders: 0, actual: 1, unplanned: 0 });
+  assert.equal(b.exceptions.length, 0);
+});
+
+test("同一工程底下多個案件：不同名稱標「第一個等 n 案」；營業額、人日、張數以工程彙總", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }, { id: "C2", day: 1, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "kc", code: "C115016-2-1", pts: 1 }), { no: "W2", costId: "C2", caseId: "kc2", code: "C115016A", pts: 2 }]);
+  const s = sched([{ s: 0, e: 1, ppl: [A], cases: [PARENT] }]);
+  const b = run(w, c, s, projTable());
+  assert.equal(b.cases.length, 1);
+  assert.equal(b.cases[0].revenue, 3);
+  assert.equal(b.cases[0].orders, 2);
+  assert.equal(b.cases[0].actualDays, 2);
+  assert.equal(b.cases[0].name, "母案工程等 3 案"); // 本週涉及 kp（預排）、kc、kc2（工作單）三筆案件記錄
+});
+
+test("案件編號小寫、前後空白也視為同一工程（c115223 ＝ C115223）", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "ka", code: " c115223 ", pts: 1 })]);
+  const s = sched([{ s: 0, ppl: [A], cases: [["kb", "C115223-1"]] }]);
+  const b = run(w, c, s, casesTable([["ka", " c115223 ", "小寫案"], ["kb", "C115223-1", "後綴案"]]));
+  assert.equal(b.cases.length, 1);
+  assert.equal(b.cases[0].code, "C115223");
+  assert.equal(b.cases[0].result, "有排有做");
+});
+
+test("C000000 占位碼兩筆不合併：各自一列（鍵＝record_id）並標編號重複", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "z2", code: "C000000", pts: 1 })]);
+  const s = sched([{ s: 0, ppl: [A], cases: [["z1", "C000000"]] }]);
+  const b = run(w, c, s, casesTable([["z1", "C000000", "占位一"], ["z2", "C000000", "占位二"]]));
+  assert.equal(b.cases.length, 2);
+  const z1 = b.cases.find((r) => r.caseId === "z1");
+  const z2 = b.cases.find((r) => r.caseId === "z2");
+  assert.equal(z1.result, "有排未做");
+  assert.equal(z2.result, "未排有做");
+  assert.equal(z1.dup, true);
+  assert.equal(z2.dup, true);
+});
+
+test("不符格式（6 位數字 115526、空白）不合併：一案一列，用 record_id", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "n2", code: "115526-1", pts: 1 })]);
+  const s = sched([{ s: 0, ppl: [A], cases: [["n1", "115526"], ["n3", ""]] }]);
+  const b = run(w, c, s, casesTable([["n1", "115526", "六碼"], ["n2", "115526-1", "六碼後綴"], ["n3", "", "空白編號"]]));
+  assert.equal(b.cases.length, 3);
+  assert.deepEqual(b.cases.map((r) => r.caseId).sort(), ["n1", "n2", "n3"]);
+  assert.equal(b.cases.find((r) => r.caseId === "n1").result, "有排未做");
+  assert.equal(b.cases.find((r) => r.caseId === "n2").result, "未排有做");
+  assert.equal(b.cases.find((r) => r.caseId === "n1").dup, false);
+});
+
+test("完整編號重複的兩筆記錄（C115093 ×2）合併到同一工程，且仍標編號重複", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "d2", code: "C115093", pts: 1 })]);
+  const s = sched([{ s: 0, ppl: [A], cases: [["d1", "C115093"]] }]);
+  const b = run(w, c, s, casesTable([["d1", "C115093", "甲案"], ["d2", "C115093", "乙案"], ["d3", "C115094", "他案"]]));
+  assert.equal(b.cases.length, 1);
+  assert.equal(b.cases[0].result, "有排有做");
+  assert.equal(b.cases[0].dup, true);
+  assert.equal(b.cases[0].name, "甲案等 2 案");
+});
+
+test("沒有案件表（示範資料／讀不到）：用標題文字套同一規則", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ code: "C115016-2-1", pts: 1 })]);
+  w.records[0].fields["所屬案件"] = ["C115016-2-1"];
+  const s = sched([{ s: 0, ppl: [A], cases: [["x", "C115016"]] }]);
+  s.records[0].links = undefined;
+  const b = run(w, c, s, undefined);
+  assert.equal(b.cases.length, 1);
+  assert.equal(b.cases[0].caseId, "P:C115016");
+  assert.equal(b.cases[0].result, "有排有做");
+});
+
+test("異常與人工確認以工程分組：同人同工程不同子案的已退回單、連續日期合併成一列", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }, { id: "C2", day: 1, who: "甲", whoId: "pA" }]);
+  const w = work([
+    { no: "W1", costId: "C1", caseId: "kc", code: "C115016-2-1", pts: 1, status: "已退回" },
+    { no: "W2", costId: "C2", caseId: "kc2", code: "C115016A", pts: 1, status: "已退回" },
+  ]);
+  const b = run(w, c, sched([{ s: 0, e: 1, ppl: [A], cases: [PARENT] }]), projTable());
+  const rows = b.exceptions.filter((e) => e.kinds.includes("已退回"));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].caseId, "P:C115016");
+  assert.equal(rows[0].code, "C115016");
+  assert.equal(rows[0].days, 2);
+});
+
+// ================= 第 8 碼是數字不合併／案件表空白編號／本週涉及的案件／無案件表編號重複 =================
+test("第 8 碼是數字的打錯編號（A1150174）不併進 A115017：各自一列，用 record_id", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "x1", code: "A1150174", pts: 1 })]);
+  const s = sched([{ s: 0, ppl: [A], cases: [["x2", "A115017"]] }]);
+  const b = run(w, c, s, casesTable([["x1", "A1150174", "打錯案"], ["x2", "A115017", "正確案"]]));
+  assert.deepEqual(b.cases.map((r) => r.caseId).sort(), ["P:A115017", "x1"]);
+  assert.equal(b.cases.find((r) => r.caseId === "x1").code, "A1150174");
+  assert.equal(b.cases.find((r) => r.caseId === "x1").result, "未排有做");
+});
+
+test("案件表查得到該記錄、但編號空白：維持 record_id，不退回用 link 標題合併", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "kp", code: "C115016", pts: 1 })]);
+  const s = sched([{ s: 0, ppl: [A], cases: [["z", "C115016"]] }]); // link 標題寫 C115016，但案件表裡 z 的編號是空白
+  const b = run(w, c, s, casesTable([["z", "", "空白編號"], ["kp", "C115016", "母案"]]));
+  assert.deepEqual(b.cases.map((r) => r.caseId).sort(), ["P:C115016", "z"]);
+  assert.equal(b.cases.find((r) => r.caseId === "z").result, "有排未做");
+  assert.equal(b.cases.find((r) => r.caseId === "P:C115016").result, "未排有做");
+});
+
+test("案件表寫 C000000、link 標題寫 C115016：以案件表為準，不合併（釘住取值順序）", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "kp", code: "C115016", pts: 1 })]);
+  const s = sched([{ s: 0, ppl: [A], cases: [["z", "C115016"]] }]);
+  const b = run(w, c, s, casesTable([["z", "C000000", "占位"], ["kp", "C115016", "母案"]]));
+  assert.deepEqual(b.cases.map((r) => r.caseId).sort(), ["P:C115016", "z"]);
+});
+
+test("記錄不在案件表裡：才用 link 標題文字備援合併", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "gone", code: "C115016-2", pts: 1 })]);
+  const s = sched([{ s: 0, ppl: [A], cases: [["gone2", "C115016"]] }]);
+  const b = run(w, c, s, casesTable([["other", "C200001", "別案"]]));
+  assert.equal(b.cases.length, 1);
+  assert.equal(b.cases[0].caseId, "P:C115016");
+  assert.equal(b.cases[0].result, "有排有做");
+});
+
+const bigContract = () =>
+  casesTable([["kp", "C115016", "母案工程"], ["k1", "C115016-1", "舊子案甲"], ["k2", "C115016-2", "舊子案乙"], ["k3", "C115016-3", "舊子案丙"], ["kq", "C115016A", "舊子案丁"]]);
+
+test("工程名稱只看本週涉及的案件：開口契約大工程只涉及母案 → 名稱就是母案名稱，不顯示「等 n 案」", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "kp", code: "C115016", pts: 1 })]);
+  const b = run(w, c, sched([{ s: 0, ppl: [A], cases: [PARENT] }]), bigContract());
+  assert.equal(b.cases.length, 1);
+  assert.equal(b.cases[0].name, "母案工程");
+  assert.equal(b.cases[0].dup, false);
+});
+
+test("工程名稱「等 n 案」的 n＝本週涉及的不重複案件記錄數；名稱取編號排序最前（母案）", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "k3", code: "C115016-3", pts: 1 })]);
+  const b = run(w, c, sched([{ s: 0, ppl: [A], cases: [["k2", "C115016-2"], PARENT] }]), bigContract());
+  assert.equal(b.cases.length, 1);
+  assert.equal(b.cases[0].name, "母案工程等 3 案");
+});
+
+test("編號重複只看本週涉及的案件：涉及的那筆編號在案件表出現兩次才標", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "kp", code: "C115016", pts: 1 })]);
+  const tbl = casesTable([["kp", "C115016", "母案"], ["kp2", "C115016", "同編號另一筆"]]);
+  const b = run(w, c, sched([{ s: 0, ppl: [A], cases: [PARENT] }]), tbl);
+  assert.equal(b.cases[0].dup, true);
+});
+
+test("沒有案件表時，畫面上兩列顯示相同完整編號要標編號重複（C000000 ×2）", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "y", code: "C000000", pts: 1 })]);
+  const s = sched([{ s: 0, ppl: [A], cases: [["x", "C000000"]] }, { s: 0, ppl: [A], cases: [["w", "C100009"]] }]);
+  const b = run(w, c, s, undefined);
+  assert.equal(b.cases.length, 3);
+  assert.deepEqual(b.cases.filter((r) => r.dup).map((r) => r.caseId).sort(), ["x", "y"]);
+});
+
+// ================= 第二輪審查：編號重複統一規則／名稱備援／等 n 案不重複計／無人員預排不算涉及 =================
+const dupRun = (workRows, planRows, tbl) => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  return run(work(workRows.map((r) => oneOrder(r))), c, sched(planRows), tbl);
+};
+
+test("無案件表、工作單連 r2、預排連 r1、標題都是 C115016：合併成 P:C115016 一列且標編號重複", () => {
+  const b = dupRun([{ caseId: "r2", code: "C115016", pts: 1 }], [{ s: 0, ppl: [A], cases: [["r1", "C115016"]] }], undefined);
+  assert.equal(b.cases.length, 1);
+  assert.equal(b.cases[0].caseId, "P:C115016");
+  assert.equal(b.cases[0].dup, true);
+});
+
+test("有案件表、兩個不在表裡的 record_id 標題都是 C000000：各自一列、都標編號重複", () => {
+  const b = dupRun([{ caseId: "g1", code: "C000000", pts: 1 }], [{ s: 0, ppl: [A], cases: [["g2", "C000000"]] }], casesTable([["o", "C200001", "別案"]]));
+  assert.equal(b.cases.length, 2);
+  assert.deepEqual(b.cases.map((r) => r.dup), [true, true]);
+});
+
+test("編號重複大小寫、前後空白不敏感（無案件表 c115016 ＝ C115016；有案件表 c115016 在表裡出現兩次）", () => {
+  const b1 = dupRun([{ caseId: "r2", code: " c115016 ", pts: 1 }], [{ s: 0, ppl: [A], cases: [["r1", "C115016"]] }], undefined);
+  assert.equal(b1.cases[0].dup, true);
+  const b2 = dupRun([{ caseId: "kp", code: "C115016", pts: 1 }], [{ s: 0, ppl: [A], cases: [["kp", "C115016"]] }], casesTable([["kp", "c115016", "母案"], ["kp2", "C115016", "另一筆"]]));
+  assert.equal(b2.cases[0].dup, true);
+});
+
+test("同工程內「本週沒涉及」的記錄編號重複 → 不標；沒重複的也不誤標", () => {
+  const tbl = casesTable([["kp", "C115016", "母案"], ["kx", "C115016-1", "子案甲"], ["ky", "C115016-1", "子案乙"], ["kz", "C115016-9", "子案丙"]]);
+  const b = dupRun([{ caseId: "kz", code: "C115016-9", pts: 1 }], [{ s: 0, ppl: [A], cases: [["kp", "C115016"]] }], tbl);
+  assert.equal(b.cases.length, 1);
+  assert.equal(b.cases[0].dup, false);
+});
+
+test("記錄不在案件表：名稱用案件表「完整編號唯一」備援（不是空白）；沒 link 只有編號文字也一樣", () => {
+  const tbl = casesTable([["kp", "C115016", "母案工程"]]);
+  const b1 = dupRun([{ caseId: "gone", code: "C115016", pts: 1 }], [{ s: 0, ppl: [A], cases: [["gone", "C115016"]] }], tbl);
+  assert.equal(b1.cases[0].name, "母案工程");
+  const b2 = dupRun([{ code: "C115016", pts: 1 }], [{ s: 0, ppl: [A], cases: [["kp", "C115016"]] }], tbl);
+  assert.equal(b2.cases[0].name, "母案工程");
+  // 不合併的單列（6 位數字）也靠編號備援
+  const b3 = dupRun([{ caseId: "gone", code: "115526", pts: 1 }], [{ s: 0, ppl: [A], cases: [["gone", "115526"]] }], casesTable([["n1", "115526", "六碼案"]]));
+  assert.equal(b3.cases[0].name, "六碼案");
+});
+
+test("「等 n 案」不重複計同一案：W1 連 KP、W2 沒 link 但編號文字 C115016 → 不顯示「等 2 案」", () => {
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }, { id: "C2", day: 1, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "kp", code: "C115016", pts: 1 }), { no: "W2", costId: "C2", code: "C115016", pts: 1 }]);
+  const b = run(w, c, sched([{ s: 0, ppl: [A], cases: [PARENT] }]), projTable());
+  assert.equal(b.cases.length, 1);
+  assert.equal(b.cases[0].name, "母案工程");
+  // 無案件表：record_id 與同編號文字也只算 1
+  const b2 = run(w, c, sched([{ s: 0, ppl: [A], cases: [PARENT] }]), undefined);
+  assert.equal(b2.cases[0].dup, false);
+});
+
+test("R09 預排條沒有人員：不算涉及（不影響名稱的「等 n 案」，也不進案件列）", () => {
+  const tbl = casesTable([["kp", "C115016", "母案工程"], ["kq", "C115016-1", "子案工程"]]);
+  const c = cost([{ id: "C1", day: 0, who: "甲", whoId: "pA" }]);
+  const w = work([oneOrder({ caseId: "kq", code: "C115016-1", pts: 1 })]);
+  const b = run(w, c, sched([{ s: 0, ppl: [], cases: [["kp", "C115016"]] }]), tbl);
+  assert.equal(b.cases.length, 1);
+  assert.equal(b.cases[0].name, "子案工程");
+});
+
+test("R09 合併路徑：沒 link 的文字標題用案件表編號補名稱（t: 標題）", () => {
+  const tbl = casesTable([["kp", "C115016", "母案工程"], ["kc", "C115016-2", "子案工程"]]);
+  const b = dupRun([{ code: "C115016-2", pts: 1 }], [{ s: 0, ppl: [A], cases: [["kp", "C115016"]] }], tbl);
+  assert.equal(b.cases[0].name, "母案工程等 2 案");
 });

@@ -220,20 +220,20 @@ export default function InternalReport() {
         </div>
       </div>
 
-      {/* 2. 預排 vs 實際（案件） */}
+      {/* 2. 預排 vs 實際（工程） */}
       <div className="ir-card">
         <div className="ir-card-head">
-          <h3>2. 預排 vs 實際（案件）</h3>
+          <h3>2. 預排 vs 實際（工程）</h3>
           <span className="muted small">
-            預排 {cs.planned} 案：有工作單 {cs.plannedWithOrders}、沒做 {cs.plannedNoOrders}・實際有工作單 {cs.actual} 案，其中 {cs.unplanned} 案沒排
+            預排 {cs.planned} 工程：有工作單 {cs.plannedWithOrders}、沒做 {cs.plannedNoOrders}・實際有工作單 {cs.actual} 工程，其中 {cs.unplanned} 工程沒排
           </span>
         </div>
-        <Chips<CaseResult> label="案件結果" options={CASE_FILTERS} value={caseFilter} onPick={setCaseFilter} count={caseCount} />
+        <Chips<CaseResult> label="工程結果" options={CASE_FILTERS} value={caseFilter} onPick={setCaseFilter} count={caseCount} />
         <div className="ir-scroll">
           <table className="ir-table">
             <thead>
               <tr>
-                <th>案件編號</th>
+                <th>工程編號</th>
                 <th>工程名稱</th>
                 <th className="num">預排人日</th>
                 <th className="num">實際人日</th>
@@ -245,7 +245,10 @@ export default function InternalReport() {
             <tbody>
               {caseRows.map((c) => (
                 <tr key={c.caseId}>
-                  <td className="strong">{c.code}</td>
+                  <td className="strong">
+                    {c.code}
+                    {c.dup && <span className="pill pill-warn" title="同一工程內有完整案件編號相同的不同案件記錄（或占位碼重複）"> 編號重複</span>}
+                  </td>
                   <td className="ir-wrap">{c.name || dash}</td>
                   <td className="num">{c.plannedDays || dash}</td>
                   <td className="num">{c.actualDays || dash}</td>
@@ -259,7 +262,7 @@ export default function InternalReport() {
               {!caseRows.length && (
                 <tr>
                   <td colSpan={7} className="muted">
-                    {report.cases.length ? "此分類沒有案件" : "這週沒有預排或工作單"}
+                    {report.cases.length ? "此分類沒有工程" : "這週沒有預排或工作單"}
                   </td>
                 </tr>
               )}
@@ -329,15 +332,17 @@ export default function InternalReport() {
         </p>
       </div>
 
-      {/* 4. 待定義 */}
+      {/* 4. 待定義（節點期限、節點狀態、確認單營業額／執行比例只會在 V4 才有，V3 不呈現） */}
+      {version === "v4" && (
       <div className="ir-card ir-pending">
         <div className="ir-card-head">
           <Hourglass size={16} />
           <h3>待定義：圖資／報告節點期限與執行比例</h3>
         </div>
         <p>口徑待業主說明（確認單營業額來源為工程確認單，目前 V4／報價 Base 尚未開放讀取）。</p>
-        <p className="muted small">待定義項目：圖資／報告的期限（n+2、N+2、N+1）、節點狀態（未逾期／預計逾期／已逾期／無工作）、確認單營業額與執行比例。口徑確定前不計算、不顯示數字。</p>
+        <p className="muted small">待定義項目：圖資／報告的期限（n+2、N+2、N+1）、節點狀態（未逾期／預計逾期／已逾期／無工作）、確認單營業額與執行比例。這些項目 V4 才有，待依 V4 邏輯實作；口徑確定前不計算、不顯示數字。</p>
       </div>
+      )}
 
       <ul className="cg-notes">
         <li>
@@ -347,10 +352,10 @@ export default function InternalReport() {
           <CircleAlert size={14} /> 實際人日＝所選週內成本單的不重複（人，日期），沒有工作單的成本單也算。組別只顯示（取成本單的內業組別），不參與比對；本週在兩個組別填單的人，名字後面接組別。
         </li>
         <li>
-          <CircleAlert size={14} /> 人日達成率＝吻合 ÷ 預排人日，是人日口徑，不是營業額或案件口徑。
+          <CircleAlert size={14} /> 人日達成率＝吻合 ÷ 預排人日，是人日口徑，不是營業額或工程口徑。
         </li>
         <li>
-          <CircleAlert size={14} /> 案件以案件記錄為單位，案件編號直接取案件記錄的編號（工程編號是否取前 7 碼，業主未回覆，先不裁）。同人同日排或做了多案時各案各算 1 天，所以案件人日、第 3 項天數的合計可能大於上方人日。
+          <CircleAlert size={14} /> 案件以「工程」為單位：工程編號＝案件編號前 7 碼（C115016、C115016A、C115016-2-1 同屬工程 C115016），案件先用 link record_id 查出案件編號再取前 7 碼；空白、全 0 占位碼（C000000）、格式不符的案件不合併，一案一列；工程內有完整編號相同的不同記錄會標「編號重複」。同人同日排或做了多個工程時各工程各算 1 天，所以工程人日、第 3 項天數的合計可能大於上方人日。
         </li>
         <li>
           <CircleAlert size={14} /> 第 3 項同人同案連續（日曆連續）日期合併成 起～迄；「說明」顯示工作單備註原文（有排未填顯示預排備註）。V3、V4 分開看，不相加。

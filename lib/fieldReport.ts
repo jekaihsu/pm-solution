@@ -1,15 +1,24 @@
 // R10 外業報告（外業經理用）— 預排 vs 實際（以案件為單位）、上週異常與人工確認案件、檢核待辦。
 // 口徑（沿用 R01，業主已裁示）：
 //  - 外業以「組」為單位；預排只取業別＝外業，ROV 組一律算外業；預排組名去尾「組」比對（水深A組＝水深A）。
-//  - 工作單與預排的案件比對用「案件 record_id」（link），不可用案件編號文字（有編號重複與全 0 占位碼）。
-//    讀不到 record_id（示範資料）才退回用案件標題文字。
+//  - 工作單與預排的案件以「工程」為單位比對（業主 2026-10-13：工程編號＝案件編號前 7 碼；C115016、C115016A、C115016-2-1 同屬工程 C115016）。
+//    案件先用 link record_id 查案件表取得案件編號，再套 engineeringCode：符合 ^[A-Z]\d{6}(?!\d)（trim、轉大寫，第 8 碼是數字不取）
+//    且不是 C000000 → 工程鍵＝前 7 碼；否則（空白、C000000、格式不符）不合併，一案一列（鍵＝record_id）。
+//    案件表查得到該記錄 → 只認案件表的編號（空白就不合併）；記錄不在案件表、或沒有案件表 → 才用標題／編號文字備援。
+//    工程名稱與「等 n 案」只看本週預排或工作單實際連到的案件記錄。「編號重複」＝本週涉及的案件中，有任一筆的完整編號在案件表出現 ≥2 筆；
+//    沒有案件表時改看畫面上是否有兩列以上顯示相同完整編號。
 //  - 週＝週一至週日（Asia/Taipei）；排除行政／業務／內業／資訊組與未對應組別（同 R01 的 keepGroup）。
 //  - 組日＝（組別, 日期）；吻合＝同組同日同案。預排日晚於今天的不算（尚未到期，不能說「沒做」）。
-//  - 工程編號是否合併成案件編號前 7 碼：業主還沒回覆，先以案件記錄為單位。
 //  - 期限（N+1/N+2）與節點狀態沒有口徑，這裡完全不算。
 // 這個檔案不 import 其他 lib 檔：Node 直跑 .ts 時模組間不能省副檔名、tsconfig 又不允許 .ts 副檔名，
 // 所以 groupKey／ROV／keepGroup 在這裡各存一份，scripts/test-field-report.mjs 會對照 controlGroup.ts 與 GroupBoard.tsx 防止走樣。
 import type { CellValue, FieldMeta, TableData } from "./types";
+
+// 工程編號＝案件編號前 7 碼（R09 的 lib/internalReport.ts 另存一份同規則，測試比對兩者輸出一致）。
+export function engineeringCode(no: string | null | undefined): string | null {
+  const m = /^[A-Z]\d{6}(?!\d)/.exec(String(no ?? "").trim().toUpperCase());
+  return m && m[0] !== "C000000" ? m[0] : null;
+}
 
 type Rec = TableData["records"][number];
 const DAY = 86400000;
@@ -49,8 +58,9 @@ export type CaseResult = "有排有做" | "有排未做" | "未排有做" | "預
 export type ExceptionKind = "未排有做" | "有排未做" | "工作單異常";
 
 export interface CaseRow {
-  caseId: string; // record_id（讀不到時為 t:標題）
-  no: string; // 案件編號
+  caseId: string; // 工程鍵 P:前7碼；不合併的案件為 record_id（讀不到時為 t:標題）
+  no: string; // 工程編號（前 7 碼；不合併的案件為案件編號原文）
+  dup?: boolean; // 工程內有完整案件編號相同的不同記錄（或 C000000 等占位碼重複）
   name: string; // 案件名稱（工程簡稱）
   planGroups: string[]; // 預排組別
   actualGroups: string[]; // 實際出工組別
@@ -174,7 +184,8 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
 
   // ---- 案件資料（record_id → 編號、名稱）----
   const caseMeta = new Map<string, { no: string; name: string }>();
-  const caseByNo = new Map<string, { no: string; name: string } | null>(); // 只在沒有 record_id 時用標題備援
+  const caseByNo = new Map<string, { id: string; no: string; name: string } | null>(); // 完整編號（trim、大寫）→ 案件表唯一記錄（出現不只一筆＝null）；記錄不在表或只有編號文字時備援
+  const codeCount = new Map<string, number>(); // 完整案件編號（trim、大寫）出現次數
   if (cases) {
     const prim = cases.fields.find((f) => f.primary) ?? cases.fields[0];
     const fNo = pick(cases.fields, ["案件編號"]) ?? prim;
@@ -182,7 +193,9 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
     for (const r of cases.records) {
       const m = { no: fNo ? text(r.fields[fNo.name]).trim() : "", name: fName ? text(r.fields[fName.name]).trim() : "" };
       caseMeta.set(r.id, m);
-      if (m.no) caseByNo.set(m.no, caseByNo.has(m.no) ? null : m);
+      const full = m.no.toUpperCase();
+      if (full) caseByNo.set(full, caseByNo.has(full) ? null : { id: r.id, ...m });
+      if (full) codeCount.set(full, (codeCount.get(full) ?? 0) + 1);
     }
   }
   const labels = new Map<string, string>(); // groupKey → 顯示名（工作單上的寫法優先）
@@ -256,17 +269,87 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
   const metaCache = new Map<string, { no: string; name: string }>();
   const hints = new Map<string, string>(); // caseKey → 標題／編號文字
   for (const o of orders) if (o.caseKey !== NO_CASE && !hints.has(o.caseKey)) hints.set(o.caseKey, o.caseNo || o.caseTitle);
+  const involved = new Map<string, Set<string>>(); // 工程鍵 → 本週預排或工作單實際連到的案件鍵（record_id 或 t:標題）
+  const allKeys = new Set<string>(); // 本週涉及的全部案件鍵（含不合併的單列）
+  const fullCode = (key: string) => {
+    const meta = caseMeta.get(key);
+    return (meta ? meta.no : hints.get(key) ?? "").trim().toUpperCase();
+  };
+  // 本週涉及的「不重複案件」與編號重複：同一案件以 record_id 與純文字各出現一次只算 1（文字能在案件表以完整編號找到唯一記錄就視同那筆；找不到就看有沒有同編號的 record_id；都沒有以完整編號去重）。
+  let resolvedCache: { entOf: Map<string, string>; dupCodes: Set<string> } | null = null;
+  const resolved = () => {
+    if (resolvedCache) return resolvedCache;
+    const entOf = new Map<string, string>();
+    const idByCode = new Map<string, string>();
+    for (const k of [...allKeys].sort()) if (!k.startsWith("t:")) {
+      const c = fullCode(k);
+      if (c && !idByCode.has(c)) idByCode.set(c, k);
+    }
+    for (const k of allKeys) {
+      if (!k.startsWith("t:")) {
+        entOf.set(k, k);
+        continue;
+      }
+      const c = fullCode(k);
+      entOf.set(k, !c ? k : caseByNo.get(c)?.id ?? idByCode.get(c) ?? `c:${c}`);
+    }
+    // 編號重複：(i) 涉及的某筆完整編號在案件表出現 ≥2 筆；(ii) 涉及的不同案件（不同 record_id）卻有相同完整編號（不在案件表的 record_id 也算）
+    const entsByCode = new Map<string, Set<string>>();
+    const dupCodes = new Set<string>();
+    for (const k of allKeys) {
+      const c = fullCode(k);
+      if (!c) continue;
+      if ((codeCount.get(c) ?? 0) > 1) dupCodes.add(c);
+      if (!entsByCode.has(c)) entsByCode.set(c, new Set());
+      entsByCode.get(c)!.add(entOf.get(k)!);
+    }
+    for (const [c, ents] of entsByCode) if (ents.size > 1) dupCodes.add(c);
+    return (resolvedCache = { entOf, dupCodes });
+  };
+  const nameByCode = (code: string) => caseByNo.get(code)?.name ?? "";
   const metaOf = (key: string) => {
     if (key === NO_CASE) return { no: NO_CASE_LABEL, name: "" };
     const hit = metaCache.get(key);
     if (hit) return hit;
+    const { entOf } = resolved();
+    if (key.startsWith("P:")) {
+      // 工程：編號＝前 7 碼；名稱只取本週實際涉及的案件（依案件編號排序第一個有名稱的），涉及不只一案時加「等 n 案」（同一案件只算 1）
+      const ents = new Map<string, { code: string; name: string }>();
+      for (const k of involved.get(key) ?? []) {
+        const e = entOf.get(k)!;
+        if (ents.has(e)) continue;
+        const meta = caseMeta.get(e);
+        const code = fullCode(k);
+        ents.set(e, { code, name: meta ? meta.name : nameByCode(code) });
+      }
+      const members = [...ents].map(([e, v]) => ({ e, ...v })).sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : a.e < b.e ? -1 : 1));
+      const first = members.find((m) => m.name)?.name ?? "";
+      const out = { no: key.slice(2), name: members.length > 1 && first ? `${first}等 ${members.length} 案` : first };
+      metaCache.set(key, out);
+      return out;
+    }
     const byId = caseMeta.get(key);
     const hint = hints.get(key) ?? "";
-    const byNo = !byId && hint ? caseByNo.get(hint) : null;
+    const byNo = !byId && hint ? caseByNo.get(hint.trim().toUpperCase()) : null;
     const m = byId ?? byNo ?? { no: hint || key, name: "" };
     const out = { no: m.no || hint || key, name: m.name };
     metaCache.set(key, out);
     return out;
+  };
+  const dupOfRow = (key: string) => {
+    const { dupCodes } = resolved();
+    return [...(key.startsWith("P:") ? involved.get(key) ?? [] : [key])].some((k) => dupCodes.has(fullCode(k)));
+  };
+  // 案件鍵 → 工程鍵：案件表查得到該記錄 → 只認案件表的編號（空白就不合併）；查不到或沒有案件表 → 才用標題／編號文字。
+  const projOf = (key: string) => {
+    if (key === NO_CASE) return key;
+    allKeys.add(key);
+    const pc = engineeringCode(fullCode(key));
+    if (!pc) return key;
+    const pk = `P:${pc}`;
+    if (!involved.has(pk)) involved.set(pk, new Set());
+    involved.get(pk)!.add(key);
+    return pk;
   };
 
   // ---- 預排（外業＋ROV）→ 組日×案件 ----
@@ -318,6 +401,14 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
     } else notes.push("預排表找不到組別或真起日欄位（以 field id 比對），無法比對預排");
   } else notes.push("預排表讀不到，無法比對預排（只列實際出工與檢核）");
   if (planNoGroup) notes.push(`${planNoGroup} 條外業預排沒填組別，不列入`);
+
+  // ---- 案件 → 工程（工作單與預排都改用工程鍵；之後的比對、彙總、異常列全部以工程為單位）----
+  for (const o of orders) o.caseKey = projOf(o.caseKey);
+  for (const [k, t] of [...plan]) {
+    plan.delete(k);
+    t.caseKey = projOf(t.caseKey);
+    plan.set(`${t.g}|${t.day}|${t.caseKey}`, t);
+  }
 
   // ---- 組日 ----
   const act = new Map<string, FOrder[]>(); // g|day|case → 工作單
@@ -382,6 +473,7 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
       points: ptsBy.get(key)?.points ?? 0,
       orders: ptsBy.get(key)?.orders ?? 0,
       result,
+      dup: dupOfRow(key),
     };
   });
   caseRows.sort((a, b) => order[a.result] - order[b.result] || b.points - a.points || a.no.localeCompare(b.no));

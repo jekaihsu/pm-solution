@@ -5,7 +5,12 @@
 //  - 內業工作單沒有組別與日期，經「所屬成本單」link 的 record_id 帶入（成本單單號有重複，不用單號文字）。
 //    link 完全讀不到（示範資料）才用成本單標題備援，且標題不唯一就不猜。
 //  - 預排日期一律用 field id（真起日 fldMXOggGP、真訖日 fldjWv1xST），不照欄名。
-//  - 案件比對用案件 record_id；案件編號直接用案件記錄的編號（是否取前 7 碼業主未回覆，先不裁）。
+//  - 案件以「工程」為單位比對（業主 2026-10-13：工程編號＝案件編號前 7 碼；C115016、C115016A、C115016-2-1 同屬工程 C115016）。
+//    案件先用 link record_id 查案件表取得案件編號，再套 engineeringCode：符合 ^[A-Z]\d{6}(?!\d)（trim、轉大寫，第 8 碼是數字不取）
+//    且不是 C000000 → 工程鍵＝前 7 碼；否則（空白、C000000、格式不符）不合併，一案一列（鍵＝record_id）。
+//    案件表查得到該記錄 → 只認案件表的編號（空白就不合併）；記錄不在案件表、或沒有案件表 → 才用 link 標題文字備援。
+//    工程名稱與「等 n 案」只看本週預排或工作單實際連到的案件記錄。「編號重複」＝本週涉及的案件中，有任一筆的完整編號在案件表出現 ≥2 筆；
+//    沒有案件表時改看畫面上是否有兩列以上顯示相同完整編號。
 //  - 同人同案連續（日曆連續）日期合併成 起～迄。
 //  - 圖資／報告的期限、節點狀態、確認單營業額與執行比例口徑尚未定義，這裡不算。
 // 輸出刻意不含任何成本欄位（出工成本、人力成本、方案日成本、加班費、雜支）：輸入的欄位也不向伺服器要。
@@ -83,9 +88,16 @@ export interface PersonRow {
   revenue: number;
 }
 
+// 工程編號＝案件編號前 7 碼（R10 的 lib/fieldReport.ts 另存一份同規則，測試比對兩者輸出一致）。
+export function engineeringCode(no: string | null | undefined): string | null {
+  const m = /^[A-Z]\d{6}(?!\d)/.exec(String(no ?? "").trim().toUpperCase());
+  return m && m[0] !== "C000000" ? m[0] : null;
+}
+
 export interface CaseRow {
-  caseId: string;
-  code: string;
+  caseId: string; // 工程鍵 P:前7碼；不合併的案件為 record_id（讀不到時為 t:標題）
+  code: string; // 工程編號（前 7 碼；不合併的案件為案件編號原文）
+  dup?: boolean; // 工程內有完整案件編號相同的不同記錄（或 C000000 等占位碼重複）
   name: string;
   plannedDays: number;
   actualDays: number;
@@ -164,27 +176,47 @@ export function buildInternalReport(p: { work: TableData; cost?: TableData; sche
   const inWin = (d: number) => d >= winFirst && d <= winLast;
   const people = makePeople();
 
-  // ---- 案件資料（案件編號＝案件記錄主欄；工程名稱＝案件名稱）----
+  // ---- 案件資料（案件編號＝案件記錄主欄；工程名稱＝案件名稱；工程＝案件編號前 7 碼）----
   const caseById = new Map<string, { code: string; name: string }>();
-  const caseByCode = new Map<string, { code: string; name: string }>();
+  const caseByCode = new Map<string, { id: string; code: string; name: string } | null>(); // 完整編號（trim、大寫）→ 案件表唯一記錄（出現不只一筆＝null）；記錄不在表或只有編號文字時備援
+  const codeCount = new Map<string, number>(); // 完整案件編號（trim、大寫）出現次數
   if (caseTable) {
     const primary = caseTable.fields.find((f) => f.primary) ?? named(caseTable.fields, ["案件編號"]);
     const nameField = named(caseTable.fields, ["案件名稱", "工程名稱"]);
     for (const c of caseTable.records) {
       const info = { code: primary ? text(c.fields[primary.name]).trim() : "", name: nameField ? text(c.fields[nameField.name]).trim() : "" };
       caseById.set(c.id, info);
-      if (info.code && !caseByCode.has(info.code)) caseByCode.set(info.code, info);
+      const full = info.code.toUpperCase();
+      if (full) {
+        caseByCode.set(full, caseByCode.has(full) ? null : { id: c.id, ...info });
+        codeCount.set(full, (codeCount.get(full) ?? 0) + 1);
+      }
     }
   } else notes.push("案件資料讀不到，工程名稱先留白（只顯示案件編號）");
-  const caseInfo = new Map<string, { code: string; name: string }>();
+  const caseInfo = new Map<string, { code: string; name: string; dup?: boolean }>();
+  const involved = new Map<string, Set<string>>(); // 工程鍵 → 本週實際涉及的案件鍵（record_id 或 t:標題）
+  const involvedRefs = new Map<string, { id?: string; title: string }>(); // 案件鍵 → 原始參照（含不合併的單列）
+  const fullCodeOf = (rawKey: string) => {
+    const ref = involvedRefs.get(rawKey)!;
+    const byId = ref.id ? caseById.get(ref.id) : undefined;
+    return (byId ? byId.code : ref.title).trim().toUpperCase();
+  };
   const caseKeyOf = (ref: { id?: string; title: string }) => {
-    const key = ref.id ?? (ref.title ? `t:${ref.title}` : "__nocase");
-    if (!caseInfo.has(key)) {
-      const byId = ref.id ? caseById.get(ref.id) : undefined;
-      const code = byId?.code || ref.title || (key === "__nocase" ? NO_CASE : key);
-      caseInfo.set(key, { code, name: byId?.name ?? caseByCode.get(code)?.name ?? "" });
+    if (!ref.id && !ref.title) {
+      if (!caseInfo.has("__nocase")) caseInfo.set("__nocase", { code: NO_CASE, name: "" });
+      return "__nocase";
     }
-    return key;
+    const rawKey = ref.id ?? `t:${ref.title}`;
+    if (!involvedRefs.has(rawKey)) involvedRefs.set(rawKey, ref);
+    // 案件表查得到這筆記錄 → 只認案件表的編號（空白就不合併）；查不到或沒有案件表 → 才用 link 標題文字
+    const pc = engineeringCode(fullCodeOf(rawKey));
+    if (pc) {
+      const key = `P:${pc}`;
+      if (!involved.has(key)) involved.set(key, new Set());
+      involved.get(key)!.add(rawKey);
+      return key;
+    }
+    return rawKey;
   };
 
   // ---- 成本單：人、日期、內業組別 ----
@@ -316,13 +348,14 @@ export function buildInternalReport(p: { work: TableData; cost?: TableData; sche
         const trade = sf.trade ? text(r.fields[sf.trade.name]) : "";
         const groups = sf.group ? (Array.isArray(r.fields[sf.group.name]) ? (r.fields[sf.group.name] as string[]) : [text(r.fields[sf.group.name])]).filter(Boolean) : [];
         if (!(groups.length ? groups.some((g) => keepInternal(trade, g)) : keepInternal(trade, ""))) continue; // 非內業或 ROV
+        const who = refs(r, sf.person.name).filter((w) => w.id || w.title);
+        if (!who.length) continue; // 沒有人員的預排條不貢獻人日，也不算涉及案件
         const caseRefs = refs(r, sf.case?.name);
         if (!caseRefs.length) planRowsNoCase++;
         const caseKeys = caseRefs.length ? caseRefs.map(caseKeyOf) : [caseKeyOf({ title: "" })];
         const note = sf.note ? text(r.fields[sf.note.name]).trim() : "";
         const seen = new Set<string>();
-        for (const w of refs(r, sf.person.name)) {
-          if (!w.id && !w.title) continue;
+        for (const w of who) {
           const pk = people.key(w.id, w.title);
           if (seen.has(pk)) continue;
           seen.add(pk);
@@ -393,6 +426,53 @@ export function buildInternalReport(p: { work: TableData; cost?: TableData; sche
   };
 
   // ---- 每案一列 ----
+  // 工程的名稱與編號重複：只看本週實際涉及的案件（依案件編號排序第一個有名稱的；涉及不只一案才加「等 n 案」，同一案件只算 1）
+  // 同一案件：record_id 就是它自己；純文字能在案件表以完整編號找到唯一記錄就視同那筆，找不到就看有沒有同編號的 record_id，都沒有以完整編號去重。
+  const entOf = new Map<string, string>();
+  {
+    const idByCode = new Map<string, string>();
+    for (const k of [...involvedRefs.keys()].sort()) if (!k.startsWith("t:")) {
+      const c = fullCodeOf(k);
+      if (c && !idByCode.has(c)) idByCode.set(c, k);
+    }
+    for (const k of involvedRefs.keys()) {
+      const c = fullCodeOf(k);
+      entOf.set(k, !k.startsWith("t:") || !c ? k : caseByCode.get(c)?.id ?? idByCode.get(c) ?? `c:${c}`);
+    }
+  }
+  // 編號重複（R09／R10 相同）：(i) 涉及的某筆完整編號在案件表出現 ≥2 筆；(ii) 涉及的不同案件（不同 record_id）卻有相同完整編號（不在案件表的 record_id 也算）
+  const dupCodes = new Set<string>();
+  {
+    const entsByCode = new Map<string, Set<string>>();
+    for (const k of involvedRefs.keys()) {
+      const c = fullCodeOf(k);
+      if (!c) continue;
+      if ((codeCount.get(c) ?? 0) > 1) dupCodes.add(c);
+      if (!entsByCode.has(c)) entsByCode.set(c, new Set());
+      entsByCode.get(c)!.add(entOf.get(k)!);
+    }
+    for (const [c, ents] of entsByCode) if (ents.size > 1) dupCodes.add(c);
+  }
+  const nameOfRaw = (rawKey: string) => {
+    const ref = involvedRefs.get(rawKey)!;
+    const byId = ref.id ? caseById.get(ref.id) : undefined;
+    return byId ? byId.name : caseByCode.get(fullCodeOf(rawKey))?.name ?? "";
+  };
+  for (const [key, m] of involved) {
+    const ents = new Map<string, { code: string; name: string }>();
+    for (const k of m) {
+      const e = entOf.get(k)!;
+      if (!ents.has(e)) ents.set(e, { code: fullCodeOf(k), name: caseById.get(e)?.name ?? nameOfRaw(k) });
+    }
+    const list = [...ents].sort(([ea, a], [eb, b]) => (a.code < b.code ? -1 : a.code > b.code ? 1 : ea < eb ? -1 : 1)).map(([, v]) => v);
+    const first = list.find((x) => x.name)?.name ?? "";
+    caseInfo.set(key, { code: key.slice(2), name: list.length > 1 && first ? `${first}等 ${list.length} 案` : first, dup: [...m].some((k) => dupCodes.has(fullCodeOf(k))) });
+  }
+  for (const [rawKey, ref] of involvedRefs) {
+    if (caseInfo.has(rawKey) || [...involved.values()].some((m) => m.has(rawKey))) continue;
+    const byId = ref.id ? caseById.get(ref.id) : undefined;
+    caseInfo.set(rawKey, { code: byId?.code || ref.title || rawKey, name: nameOfRaw(rawKey), dup: dupCodes.has(fullCodeOf(rawKey)) });
+  }
   const casePlan = new Map<string, Set<string>>(); // 案件 → 預排的（人，日）
   for (const [pk, byDay] of planCases) for (const [d, byCase] of byDay) for (const ck of byCase.keys()) casePlan.set(ck, (casePlan.get(ck) ?? new Set()).add(`${pk}|${d}`));
   const caseActual = new Map<string, { days: Set<string>; orders: number; revenue: number }>();
@@ -417,6 +497,7 @@ export function buildInternalReport(p: { work: TableData; cost?: TableData; sche
       caseId: key,
       code: info.code,
       name: info.name,
+      dup: Boolean(info.dup),
       plannedDays: planned,
       actualDays: a?.days.size ?? 0,
       orders: a?.orders ?? 0,

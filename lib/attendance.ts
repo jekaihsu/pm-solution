@@ -5,15 +5,20 @@ import { LarkApiError, getSourceData, larkReadApi } from "./lark";
 import { PEOPLE_ACCOUNT, PEOPLE_ACTIVE, PEOPLE_GROUP, PEOPLE_NAME } from "./people";
 import { sourceByKey } from "./reports";
 import {
+  attendanceErrorText,
   buildAttendanceView,
   buildRoster,
+  fieldCostError,
+  fieldCostWarning,
   mapPool,
+  parseFieldCost,
   parseMissingScopes,
   resolveMembers,
   taipeiDate,
   weekDates,
   ymdInt,
   type AttendanceResponse,
+  type FieldCostInput,
   type LarkUserApprovals,
   type LarkUserTask,
   type RosterPerson,
@@ -153,13 +158,25 @@ function absorb(p: Perm, err: unknown, fallback: string[]) {
   else p.other ??= err as Error;
 }
 
+// 外業成本單（V3）：只取 工作日期、組長、實際出工人（欄位優先用 field id）。失敗只留固定文案＋錯誤碼，不外洩路徑或 token。
+async function fieldCost(dates: string[], force: boolean): Promise<FieldCostInput> {
+  const src = sourceByKey("v3-field-cost");
+  if (!src) return { rows: [], error: "找不到外業成本單來源" };
+  try {
+    return parseFieldCost(await getSourceData(src, force), dates);
+  } catch (e) {
+    return { rows: [], error: fieldCostError(e) };
+  }
+}
+
 async function compute(weekStart: number, now: number, force: boolean): Promise<AttendanceResponse> {
   const dates = weekDates(weekStart);
   const today = taipeiDate(now);
   const rosterSrc = sourceByKey("v3-people");
   if (!rosterSrc) return { status: "error", error: "找不到人員名單來源" };
   const rows = (await getSourceData(rosterSrc)).records as unknown as RosterRow[];
-  const { people: roster, inService, noAccount } = buildRoster(rows, { name: PEOPLE_NAME, group: PEOPLE_GROUP, active: PEOPLE_ACTIVE, account: PEOPLE_ACCOUNT });
+  const fieldCostP = fieldCost(dates, force);
+  const { people: roster, noAccountPeople, inService, noAccount } = buildRoster(rows, { name: PEOPLE_NAME, group: PEOPLE_GROUP, active: PEOPLE_ACTIVE, account: PEOPLE_ACCOUNT });
 
   const perm: Perm = { missing: new Set() };
   const [em, gm] = await Promise.allSettled([employeeIdMap(roster.map((r: RosterPerson) => r.openId), force), groupMembers(force)]);
@@ -174,7 +191,7 @@ async function compute(weekStart: number, now: number, force: boolean): Promise<
     }
     return { status: "needs-permission", missing: [...perm.missing], hint: "請管理員在 PM週報 開發者後台開通上列權限並發布新版本；通訊錄權限範圍需設為全部成員。" };
   }
-  if (perm.other) return { status: "error", error: perm.other.message };
+  if (perm.other) return { status: "error", error: attendanceErrorText(perm.other) };
   const employeeIds = (em as PromiseFulfilledResult<Map<string, string>>).value;
   const { members, groupCount } = (gm as PromiseFulfilledResult<{ members: Set<string>; groupCount: number }>).value;
 
@@ -186,11 +203,13 @@ async function compute(weekStart: number, now: number, force: boolean): Promise<
       dates[0] > today || !memberIds.length ? Promise.resolve({ tasks: [], invalid: 0 }) : queryTasks(memberIds, dates[0], last),
       queryApprovals(allIds, dates[0], dates[6]),
     ]);
-    return buildAttendanceView({ weekStart, now, roster, employeeIds, members, tasks: t.tasks, approvals, notes: { rosterInService: inService, noAccount, groupCount, invalidIds: t.invalid } });
+    const view = buildAttendanceView({ weekStart, now, roster, noAccountPeople, employeeIds, members, tasks: t.tasks, approvals, notes: { rosterInService: inService, noAccount, groupCount, invalidIds: t.invalid }, fieldCost: await fieldCostP });
+    if (fieldCostWarning(view)) console.warn(`[attendance] 外業成本單可能沒讀完整 error=${view.notes.fieldError ?? "-"} sheets=${view.notes.fieldSheets} emptyLinks=${view.notes.fieldEmptyLinks} allEmpty=${view.notes.fieldAllEmpty} noDate=${view.notes.fieldNoDate} matched=${view.notes.fieldMatched} unmatched=${view.notes.fieldUnmatched}`);
+    return view;
   } catch (e) {
     absorb(perm, e, SCOPES.task);
     if (perm.missing.size) return { status: "needs-permission", missing: [...perm.missing], hint: "請管理員在 PM週報 開發者後台開通上列權限並發布新版本。" };
-    return { status: "error", error: (e as Error).message };
+    return { status: "error", error: attendanceErrorText(e) };
   }
 }
 
@@ -198,10 +217,11 @@ export async function getAttendance(weekStart: number, opts: { force?: boolean; 
   const now = opts.now ?? Date.now();
   const monday = Date.parse(`${weekDates(weekStart)[0]}T00:00:00+08:00`);
   const isCurrent = weekDates(monday).includes(taipeiDate(now)) && taipeiDate(now) <= weekDates(monday)[6];
-  const ttl = (v: AttendanceResponse) => (v.status === "ok" ? (isCurrent ? 5 * 60000 : 6 * H) : 60000);
+  // 失敗、權限沒開、外業成本單可能沒讀完整：只快取 1 分鐘，下次開頁會重讀
+  const ttl = (v: AttendanceResponse) => (v.status === "ok" && !fieldCostWarning(v) ? (isCurrent ? 5 * 60000 : 6 * H) : 60000);
   try {
     return await memo(`att:week:${monday}`, ttl, () => compute(monday, now, !!opts.force), opts.force);
   } catch (e) {
-    return { status: "error", error: (e as Error).message };
+    return { status: "error", error: attendanceErrorText(e) };
   }
 }
