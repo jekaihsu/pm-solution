@@ -138,6 +138,12 @@ export function anomalies(r: TableData["records"][number], wf: WorkFields): stri
   return wf.flags.filter((f) => truthy(r.fields[f.name])).map((f) => f.name.replace(/^⚠/, ""));
 }
 
+// 業主裁示（2026-10-13）：ROV 組是外業。預排列的組別是 ROV（大小寫、結尾「組」不拘）
+// 一律算外業，不管業別欄填什麼；其他組照舊用業別判斷。
+export const isRovGroup = (g: string) => groupKey(g).toUpperCase() === "ROV";
+export const keepFieldSchedule = (trade: string, group: string) => isRovGroup(group) || trade.trim() === "外業";
+export const keepInternalSchedule = (trade: string, group: string) => !isRovGroup(group) && /內業/.test(trade);
+
 export interface ScheduleFields {
   trade?: FieldMeta; // 業別
   group?: FieldMeta;
@@ -161,7 +167,7 @@ export function resolveScheduleFields(fields: FieldMeta[]): ScheduleFields {
 // Planned points per group inside [start, end). A schedule row with points
 // spreads them over its days; a group-day with no filled points anywhere counts
 // as 1 point — once per group per day, however many jobs or people are booked.
-export function plannedPoints(data: TableData | undefined, sf: ScheduleFields, start: number, end: number, keepTrade?: (trade: string) => boolean) {
+export function plannedPoints(data: TableData | undefined, sf: ScheduleFields, start: number, end: number, keepTrade?: (trade: string, group: string) => boolean) {
   const out = new Map<string, { points: number; days: number; defaulted: number }>();
   if (!data || !sf.group || !sf.start) return out;
   const TZ = 8 * 3600000; // business days are Asia/Taipei dates
@@ -171,7 +177,7 @@ export function plannedPoints(data: TableData | undefined, sf: ScheduleFields, s
   // One bucket per groupKey, named as the schedule first wrote it.
   const names = new Map<string, string>();
   const canon = (g: string) => {
-    const k = groupKey(g);
+    const k = groupKey(g).toUpperCase(); // ROV／rov 同一組
     if (!names.has(k)) names.set(k, g);
     return names.get(k)!;
   };
@@ -182,7 +188,6 @@ export function plannedPoints(data: TableData | undefined, sf: ScheduleFields, s
   };
 
   for (const r of data.records) {
-    if (keepTrade && !keepTrade(sf.trade ? text(r.fields[sf.trade.name]) : "")) continue;
     const s = r.fields[sf.start.name];
     if (typeof s !== "number") continue;
     const e0 = sf.end ? r.fields[sf.end.name] : null;
@@ -194,7 +199,11 @@ export function plannedPoints(data: TableData | undefined, sf: ScheduleFields, s
     const from = Math.max(first, winFirst);
     const to = Math.min(last, winLast);
     if (to < from) continue;
-    const groups = (Array.isArray(r.fields[sf.group.name]) ? (r.fields[sf.group.name] as string[]) : [text(r.fields[sf.group.name])]).filter(Boolean).map(canon);
+    const trade = sf.trade ? text(r.fields[sf.trade.name]) : "";
+    const groups = (Array.isArray(r.fields[sf.group.name]) ? (r.fields[sf.group.name] as string[]) : [text(r.fields[sf.group.name])])
+      .filter(Boolean)
+      .filter((g) => !keepTrade || keepTrade(trade, g))
+      .map(canon);
     const filled = sf.points ? r.fields[sf.points.name] : null;
     for (const g of groups) {
       for (let d = from; d <= to; d++) {
@@ -231,6 +240,7 @@ export interface GroupRow {
   anomalyCount: number;
   anomalyKinds: Map<string, number>;
   planned?: { points: number; days: number; defaulted: number };
+  crews?: GroupRow[]; // 拆組出工時各組長一列（只用於顯示，合計不含）
 }
 
 export function groupRows(records: TableData["records"], wf: WorkFields, planned: Map<string, { points: number; days: number; defaulted: number }>): GroupRow[] {
@@ -308,6 +318,76 @@ export function joinInternal(work: TableData, cost: TableData | undefined): { da
   return { data: { ...work, fields: [...work.fields, ...extra], records }, joined, costLink: link.name };
 }
 
+// 拆組出工：同一組別、同一工作日期，工作單所屬成本單的「組長」有 ≥2 個不同的人，
+// 該組視為拆組。拆組的組每位組長一列（組長空白歸「未填組長」）；沒拆組或讀不到
+// 成本單就原樣回傳。子列只供顯示，合計仍是組別列，不重複計算。
+export function splitCrews(rows: GroupRow[], wf: WorkFields, workFields: FieldMeta[], cost: TableData | undefined, dateField: string): GroupRow[] {
+  const link = pickField(workFields, ["所屬成本單"]);
+  if (!cost || !link) return rows;
+  const primary = cost.fields.find((f) => f.primary) ?? cost.fields[0];
+  const cLeader = pickField(cost.fields, ["組長"]);
+  if (!primary || !cLeader) return rows;
+  const cDate = pickField(cost.fields, ["工作日期"], ["date"]);
+  // 成本單「單號」標題常重複（同組同日多張），所以優先用成本單的「工作單列」對到工作單號；
+  // 標題只在唯一時才當備援。
+  const cOrders = pickField(cost.fields, ["工作單列"]);
+  const byOrderNo = new Map<string, TableData["records"][number]>();
+  const byTitle = new Map<string, TableData["records"][number] | null>();
+  for (const r of cost.records) {
+    const key = text(r.fields[primary.name]);
+    if (key) byTitle.set(key, byTitle.has(key) ? null : r);
+    byTitle.set(r.id, r);
+    const list = cOrders ? r.fields[cOrders.name] : null;
+    if (Array.isArray(list)) for (const no of list) byOrderNo.set(String(no), r);
+  }
+  const TZ = 8 * 3600000;
+  const NONE = "未填組長";
+  const leaderOf = (o: TableData["records"][number]) => {
+    const no = wf.orderNo ? text(o.fields[wf.orderNo.name]) : "";
+    let c = no ? byOrderNo.get(no) : undefined;
+    if (!c) {
+      const ref = o.fields[link.name];
+      const keys = Array.isArray(ref) ? ref : ref ? [String(ref)] : [];
+      c = keys.map((k) => byTitle.get(String(k))).find(Boolean) ?? undefined;
+    }
+    return { c, name: c ? text(c.fields[cLeader.name]).trim() : "" };
+  };
+  return rows.map((row) => {
+    const perDay = new Map<number | string, Set<string>>();
+    const byOrder = new Map<TableData["records"][number], string>();
+    for (const o of row.orders) {
+      const { c, name } = leaderOf(o);
+      byOrder.set(o, name || NONE);
+      if (!name) continue;
+      const t = (cDate && c && typeof c.fields[cDate.name] === "number" ? c.fields[cDate.name] : o.fields[dateField]) as CellValue;
+      const day = typeof t === "number" ? Math.floor((t + TZ) / DAY) : "?";
+      if (!perDay.has(day)) perDay.set(day, new Set());
+      perDay.get(day)!.add(name);
+    }
+    if (![...perDay.values()].some((s) => s.size >= 2)) return row;
+    const buckets = new Map<string, TableData["records"]>();
+    for (const o of row.orders) {
+      const k = byOrder.get(o)!;
+      if (!buckets.has(k)) buckets.set(k, []);
+      buckets.get(k)!.push(o);
+    }
+    const crews = [...buckets.entries()]
+      .sort((a, b) => (a[0] === NONE ? 1 : b[0] === NONE ? -1 : 0) || a[0].localeCompare(b[0]))
+      .map(([k, orders]) => ({ ...groupRows(orders, wf, new Map())[0], group: k === NONE ? `${row.group}・${NONE}` : `${row.group}・${k}組` }));
+    return { ...row, crews };
+  });
+}
+
+// 「與預排差異」只算有預排點數的組。沒預排的組（有工作單但預排表沒排）另列，
+// 不進合計差異；頁首卡片仍用全部組。
+export function partitionByPlan(rows: GroupRow[]) {
+  const planned = rows.filter((r) => r.planned && r.planned.points > 0);
+  const unplanned = rows.filter((r) => !planned.includes(r));
+  const revenue = planned.reduce((s, r) => s + r.revenue, 0);
+  const points = planned.reduce((s, r) => s + (r.planned?.points ?? 0), 0);
+  return { planned, unplanned, revenue, points, diff: revenue - points, unplannedOrders: unplanned.reduce((s, r) => s + r.orders.length, 0) };
+}
+
 // Field names the dashboards request from the server (see /api/sources projection).
 export const WORK_FIELDS = [
   "組別", "工作單號", "案件編號", "工程編號", "工作編號", "可能確認單工作編號", "可能的確認單工編(若暫無確認單才需填寫)",
@@ -316,6 +396,7 @@ export const WORK_FIELDS = [
   "所屬案件", "案件", "工程名稱", "交期", "合約交期", "預定完成日", "完工期限", "到期日", "⚠*", "@dates",
 ];
 export const COST_FIELDS = ["工作日期", "內業組別", "所屬組別", "組別", "@dates"];
+export const FIELD_COST_FIELDS = ["工作日期", "組別", "組長", "工作單列", "@dates"];
 export const SCHEDULE_FIELDS = [
   "業別", "組別", "開始日期", "日期", "預排開始日", "預排日期", "結束日期", "預排結束日",
   "預排點數", "預排營業額點數", "營業額點數", "點數", "案件", "案件編號", "工程編號", "@dates",
