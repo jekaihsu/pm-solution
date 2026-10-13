@@ -112,6 +112,8 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 
 **R02 內業檢查**：同 R01 六項＋業主進度；失誤率用「雅雯檢核」；預排取業別＝內業；組別與工作日期由「所屬成本單」帶入；只顯示所選週；進度 % 先不算，只顯示；天數＝距交期天數（交期欄位未定位）。
 
+**R07 儀器車輛管理詳情**（`components/EquipmentBoard.tsx`）：三塊——儀器管理系統（清單、可用、送修／停用、月租型）；月租型儀器＋車輛在所選週有沒有檢查（未檢查＝紅，檢查結果異常另計）；TAF 與自校驗（TAF 依最近一次有效期限：逾期紅、30 天內黃；自校顯示最近一次日期與結果）。來源 `equipment-system`／`equipment-inspection`／`equipment-calibration` 尚未定位；清單未接入前暫用 V3 儀器費率。欄位用名稱自動辨識（見檔案內 `masterFields` 等）。
+
 **R04 人事**：招聘暫無；出勤、出差需開通 Lark 假勤／審批權限；加班取自薪水總表（以月為單位）。
 
 ## 9. 待辦（依順序）
@@ -131,4 +133,5 @@ node --env-file=.env.local scripts/inspect-lark.mjs [baseToken]   # 看表與欄
 8. **真實資料驗收 R01**（V3、上週）：挑兩組對 Lark 原表核對營業額點數、不通過、異常、被修改、張數；檢查註腳「不列入：…」是否合理（只應排除行政、業務、內業、IT、未對應組別）。對不上就修並附組別、工作單號。
 9. **手機版檢查**：用瀏覽器 390px 寬看 R01、R02、R04，不能有水平捲動整頁。
 10. **出勤、出差**：需要 Lark 假勤／審批權限與可看名單，等使用者決定。
+12. **R07 儀器管理系統**：向使用者要「儀器管理系統」的 Base 連結（或看 `/api/health` 的 `equipmentFields` 找含 TAF／校正／校驗／點檢／月租 的表），在 `lib/reports.ts` 填入 `equipment-system`、`equipment-inspection`、`equipment-calibration` 的 `baseToken` 與 `tableId`；欄位名稱不同就改 `EquipmentBoard.tsx` 的候選名稱。PM週報 應用需能讀該 Base（權限先問使用者）。確認檢查頻率（每週或每月）與自校驗週期。
 11. ~~圖文說明書~~：已補 R01／R02／R04 與最上方操作動畫（2026-10-13）。之後功能有改，請同步更新說明書截圖。

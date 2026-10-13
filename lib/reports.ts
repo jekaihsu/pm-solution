@@ -136,6 +136,11 @@ export const SOURCES: SourceDef[] = [
     url: `${LARK_WEB}/base/${SALARY_BASE}`,
     note: "只讀加班時數／天數與人員、組別、月份欄位；底薪、總薪資等其他欄位一律不讀。僅 HR_VIEWERS 名單可看。",
   },
+  // R07: 儀器管理系統. Not located yet — set baseToken + tableId (or tableName) once
+  // the Base is known; the board finds its fields by name.
+  { key: "equipment-system", name: "儀器管理系統（儀器清單）", note: "尚未定位：請提供儀器管理系統的 Base 連結。" },
+  { key: "equipment-inspection", name: "月租儀器／車輛檢查紀錄", note: "尚未定位：請提供檢查紀錄所在的 Base／資料表。" },
+  { key: "equipment-calibration", name: "TAF／自校驗紀錄", note: "尚未定位：請提供 TAF 與自校驗紀錄所在的 Base／資料表。" },
   {
     key: "contact-log",
     name: "業主聯繫紀錄",
@@ -218,9 +223,9 @@ export const REPORTS: ReportDef[] = [
     id: "R07",
     slug: "r07",
     name: "儀器車輛管理詳情",
-    purpose: "掌握儀器／車輛可用狀態、抽檢異常與改善進度。",
-    sources: ["v3-equipment", "v4-equipment", "v4-vehicles"],
-    mustHave: ["儀器抽檢", "車內整理", "設備損壞與改善"],
+    purpose: "掌握儀器／車輛可用狀態、月租儀器與車輛是否有檢查，以及 TAF 與自校驗是否到期。",
+    sources: ["equipment-system", "equipment-inspection", "equipment-calibration", "v3-equipment", "v4-equipment", "v4-vehicles"],
+    mustHave: ["儀器管理系統", "月租型儀器與車輛是否有檢查", "TAF 與自校驗檢核紀錄"],
     pending: ["資產範圍與同物異名去重", "停用／送修及保養日曆定義"],
   },
   {

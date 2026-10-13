@@ -17,6 +17,22 @@ const weekStart = () => {
 // Spread over the last ~8 weeks so trends and week-over-week deltas have data.
 const inWeeks = (r: () => number) => weekStart() - 49 * day + Math.floor(r() * 63) * day;
 
+const DEMO_GEAR: [string, string, string, string][] = [
+  ["全站儀 TS-01", "EQ-001", "全站儀", "自有"],
+  ["全站儀 TS-02", "EQ-002", "全站儀", "月租"],
+  ["GNSS R10-A", "EQ-003", "GNSS", "月租"],
+  ["GNSS R10-B", "EQ-004", "GNSS", "自有"],
+  ["水準儀 DL-01", "EQ-005", "水準儀", "月租"],
+  ["掃描儀 RTC-1", "EQ-006", "掃描儀", "月租"],
+  ["全站儀 TS-03", "EQ-007", "全站儀", "自有"],
+  ["GNSS R12", "EQ-008", "GNSS", "月租"],
+  ["水準儀 DL-02", "EQ-009", "水準儀", "自有"],
+  ["測距儀 LD-1", "EQ-010", "測距儀", "自有"],
+  ["工程車 ABC-1234", "CAR-01", "車輛", "公司車"],
+  ["工程車 BCD-2345", "CAR-02", "車輛", "公司車"],
+  ["工程車 CDE-3456", "CAR-03", "車輛", "月租"],
+  ["工程車 DEF-4567", "CAR-04", "車輛", "公司車"],
+];
 const groups = ["外業一組", "外業二組", "外業三組", "外業四組"];
 const projects = ["P-2601", "P-2602", "P-2603", "P-2604", "P-2605", "P-2606"];
 const items = ["地形測量", "控制測量", "放樣", "地籍調查"];
@@ -113,6 +129,38 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["種類", "select", (r) => pick(r, ["全站儀", "GNSS", "水準儀", "車輛"])],
       ["狀態", "select", (r) => pick(r, ["可用", "可用", "送修", "停用"])],
       ["日租金", "number", (r) => (r() > 0.3 ? Math.round(500 + r() * 3000) : null)],
+    ],
+  },
+  "equipment-system": {
+    n: 14,
+    spec: [
+      ["儀器名稱", "text", (_, i) => DEMO_GEAR[i][0]],
+      ["儀器編號", "text", (_, i) => DEMO_GEAR[i][1]],
+      ["種類", "select", (_, i) => DEMO_GEAR[i][2]],
+      ["租賃方式", "select", (_, i) => DEMO_GEAR[i][3]],
+      ["狀態", "select", (r) => pick(r, ["可用", "可用", "可用", "可用", "使用中", "使用中", "送修", "停用"])],
+      ["保管組別", "select", (r) => pick(r, groups)],
+    ],
+  },
+  "equipment-inspection": {
+    n: 18,
+    spec: [
+      ["檢查對象", "select", (_, i) => DEMO_GEAR.filter((g) => g[3] === "月租" || g[2] === "車輛")[i % 8][0]],
+      ["檢查日期", "date", (r) => inWeeks(r)],
+      ["檢查結果", "select", (r) => pick(r, ["正常", "正常", "正常", "異常"])],
+      ["檢查人", "select", (r) => pick(r, ["王小明", "陳大文", "林志強"])],
+      ["備註", "text", (r) => (r() > 0.75 ? pick(r, ["腳架鬆動已鎖緊", "車內雜物已清", "電池老化，申請更換"]) : null)],
+    ],
+  },
+  "equipment-calibration": {
+    n: 20,
+    spec: [
+      ["儀器", "select", (_, i) => DEMO_GEAR[i % 10][0]],
+      ["校驗類型", "select", (_, i) => (i < 10 ? "TAF" : "自校")],
+      ["校驗日期", "date", (r) => Date.now() - Math.round(30 + r() * 330) * day],
+      ["有效期限", "date", (r, i) => (i < 10 ? Date.now() + Math.round(-20 + r() * 200) * day : null)],
+      ["結果", "select", (r) => pick(r, ["合格", "合格", "合格", "不合格"])],
+      ["證書編號", "text", (_, i) => (i < 10 ? `TAF-${2600 + i}` : null)],
     ],
   },
   quotes: {
