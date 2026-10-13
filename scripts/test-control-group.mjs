@@ -158,7 +158,7 @@ test("預排 ROV 組一律算外業：R01 有、R02 沒有，不論業別", () =
 });
 
 // 成本單「單號」標題會重複（同組同日多張）→ 用成本單的「工作單列」對到工作單號，不靠標題
-import { partitionByPlan } from "../lib/controlGroup.ts";
+import { planDiffTotals } from "../lib/controlGroup.ts";
 
 test("成本單標題重複時，用工作單列對應工作單號仍能拆組", () => {
   const cf2 = [...cf, field("工作單列", "multiselect")];
@@ -177,17 +177,18 @@ test("成本單標題重複時，用工作單列對應工作單號仍能拆組",
   assert.deepEqual(out[0].crews.map((c) => [c.group, c.revenue]).sort(), [["水深A・乙組", 5], ["水深A・甲組", 1]].sort());
 });
 
-test("與預排差異只算有預排的組；沒預排的組分開、不進合計差異", () => {
+test("主表列出全部組；營業額含全部，差異只算有預排的組", () => {
   const wfA = [field("組別", "text"), field("最終營業額點數", "number")];
   const w = table(wfA, [{ 組別: "A", 最終營業額點數: 5 }, { 組別: "B", 最終營業額點數: 10 }]);
   const s = table(schedule.fields, [{ 業別: "外業", 組別: "A組", 開始日期: at(0), 結束日期: at(1) }]);
   const planned = plannedPoints(s, resolveScheduleFields(s.fields), weekStart, weekEnd);
   const rows = groupRows(w.records, resolveWorkFields(wfA), planned);
-  const p = partitionByPlan(rows);
-  assert.deepEqual(p.planned.map((r) => r.group), ["A"]);
-  assert.deepEqual(p.unplanned.map((r) => r.group), ["B"]);
-  assert.equal(p.revenue, 5);
+  const p = planDiffTotals(rows);
+  assert.deepEqual(p.rows.map((r) => r.group).sort(), ["A", "B"]);
+  assert.equal(p.revenue, 15);
+  assert.equal(p.orders, 2);
   assert.equal(p.points, 2);
   assert.equal(p.diff, 3);
-  assert.equal(p.unplannedOrders, 1);
+  assert.equal(p.n, 1);
+  assert.equal(rows.find((r) => r.group === "B").planned, undefined);
 });

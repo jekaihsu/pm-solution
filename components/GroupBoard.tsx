@@ -2,7 +2,7 @@
 import { ArrowDownRight, ArrowUpRight, CheckCheck, ChevronDown, ChevronRight, CircleAlert, CircleCheck, Minus } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
-import { COST_FIELDS, FIELD_COST_FIELDS, JOINED_DATE, keepFieldSchedule, keepInternalSchedule, partitionByPlan, personRows, plannedByPerson, resolvePersonScheduleFields, splitCrews, sumRows, teamSections, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, dayOfWeek, errorRate, fixDiffs, groupRows, orderNotes, violatesSop, joinInternal, plannedPoints, resolveFixFields, resolveScheduleFields, resolveWorkFields, type FixFields, type GroupRow, type ScheduleFields, type WorkFields } from "@/lib/controlGroup";
+import { COST_FIELDS, FIELD_COST_FIELDS, JOINED_DATE, keepFieldSchedule, keepInternalSchedule, planDiffTotals, personRows, plannedByPerson, resolvePersonScheduleFields, splitCrews, sumRows, teamSections, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, dayOfWeek, errorRate, fixDiffs, groupRows, orderNotes, violatesSop, joinInternal, plannedPoints, resolveFixFields, resolveScheduleFields, resolveWorkFields, type FixFields, type GroupRow, type ScheduleFields, type WorkFields } from "@/lib/controlGroup";
 import { inRange, resolveDateField } from "@/lib/metrics";
 import { sourceByKey, type DataVersion } from "@/lib/reports";
 import type { CellValue, TableData } from "@/lib/types";
@@ -535,16 +535,16 @@ function FailPanel({ rows, wf, cfg, dateField, weekStart, onPick }: { rows: Grou
 
 // 簡表: the boss's preferred layout — one row per group, plain counts, a 合計 row
 // and a summary block underneath. Clicking a group opens it.
-function SheetTable({ rows, unplanned, wf, ff, hasCheck, hasFix, onPick }: { rows: GroupRow[]; unplanned: GroupRow[]; wf: WorkFields; ff: FixFields; hasCheck: boolean; hasFix: boolean; onPick: (g: string) => void }) {
+function SheetTable({ rows, planOn, wf, ff, hasCheck, hasFix, onPick }: { rows: GroupRow[]; planOn: boolean; wf: WorkFields; ff: FixFields; hasCheck: boolean; hasFix: boolean; onPick: (g: string) => void }) {
   // 以人為單位（R02）：依內業組別分段，每組一列小計，下面是該組的人。
-  const byPerson = [...rows, ...unplanned].some((r) => r.personId);
+  const byPerson = rows.some((r) => r.personId);
   const mk = (r: GroupRow) => {
     const fixed = r.orders.filter((o) => fixDiffs(o, ff).length).length;
     const sop = wf.sopViolation ? sopSummary(r, wf) : null;
     return { r, fixed, viol: sop ? sop.viol : null, diff: r.planned && wf.revenue ? r.revenue - r.planned.points : null };
   };
   const data = rows.map(mk);
-  const dataUn = unplanned.map(mk);
+  const pd = planDiffTotals(rows);
   const sum = (f: (d: (typeof data)[number]) => number) => data.reduce((s, d) => s + f(d), 0);
   const t = {
     orders: sum((d) => d.r.orders.length),
@@ -554,10 +554,10 @@ function SheetTable({ rows, unplanned, wf, ff, hasCheck, hasFix, onPick }: { row
     fixed: sum((d) => d.fixed),
     viol: sum((d) => d.viol ?? 0),
     revenue: sum((d) => d.r.revenue),
-    planned: sum((d) => d.r.planned?.points ?? 0),
-    hasPlan: data.some((d) => d.r.planned),
+    planned: pd.points,
+    hasPlan: pd.n > 0,
   };
-  const all = [...data, ...dataUn];
+  const all = data;
   const A = {
     orders: all.reduce((s, d) => s + d.r.orders.length, 0),
     checked: all.reduce((s, d) => s + d.r.pass + d.r.fail, 0),
@@ -578,7 +578,7 @@ function SheetTable({ rows, unplanned, wf, ff, hasCheck, hasFix, onPick }: { row
                   <td>{hasFix ? n(d.fixed, true) : "—"}</td>
                   <td>{n(d.viol, true)}</td>
                   <td>{wf.revenue ? n(d.r.revenue) : "—"}</td>
-                  <td>{d.r.planned ? n(d.r.planned.points) : "—"}</td>
+                  <td>{d.r.planned ? n(d.r.planned.points) : planOn ? "未排" : "—"}</td>
                   <td>
                     <Diff value={d.diff} />
                   </td>
@@ -604,7 +604,8 @@ function SheetTable({ rows, unplanned, wf, ff, hasCheck, hasFix, onPick }: { row
     if (!byPerson) return list.map((d) => renderRow(d));
     return teamSections(list.map((d) => d.r)).flatMap((sec) => {
       teamPeople.set(sec.total, sec.rows.length);
-      return [renderRow(mk(sec.total), "team"), ...sec.rows.map((r) => renderRow(mk(r), "person"))];
+      const td = planDiffTotals(sec.rows);
+      return [renderRow({ ...mk(sec.total), diff: td.n && wf.revenue ? td.diff : null }, "team"), ...sec.rows.map((r) => renderRow(mk(r), "person"))];
     });
   };
   const firstHead = byPerson ? "組別／人員" : "組別";
@@ -631,7 +632,7 @@ function SheetTable({ rows, unplanned, wf, ff, hasCheck, hasFix, onPick }: { row
           </tbody>
           <tfoot>
             <tr>
-              <td className="cg-sheet-name">合計（有預排的{byPerson ? "人" : "組"}）</td>
+              <td className="cg-sheet-name">合計（全部 {rows.length} {byPerson ? "人" : "組"}）</td>
               <td>{t.orders}</td>
               <td>{hasCheck ? t.checked : "—"}</td>
               <td>{hasCheck ? n(t.fail, true) : "—"}</td>
@@ -641,25 +642,13 @@ function SheetTable({ rows, unplanned, wf, ff, hasCheck, hasFix, onPick }: { row
               <td>{wf.revenue ? n(t.revenue) : "—"}</td>
               <td>{t.hasPlan ? n(t.planned) : "—"}</td>
               <td>
-                <Diff value={t.hasPlan && wf.revenue ? t.revenue - t.planned : null} />
+                <Diff value={t.hasPlan && wf.revenue ? pd.diff : null} />
+                {planOn && <div className="muted small">只算有預排的 {pd.n} {byPerson ? "人" : "組"}</div>}
               </td>
             </tr>
           </tfoot>
         </table>
       </div>
-      {unplanned.length > 0 && (
-        <details className="cg-unplanned">
-          <summary>沒有預排的{byPerson ? "人" : "組"}（{unplanned.length} {byPerson ? "列" : "組"}・{unplanned.reduce((s, r) => s + r.orders.length, 0)} 張工作單）</summary>
-          <div className="cg-sheet">
-            <table>
-              <thead>
-                <tr><th>{firstHead}</th><th>工作單</th><th>已檢核</th><th>不通過</th><th>失誤率</th><th>被修改</th><th>違反 SOP</th><th>營業額點數</th><th>預排點數</th><th>與預排差異</th></tr>
-              </thead>
-              <tbody>{renderBody(dataUn)}</tbody>
-            </table>
-          </div>
-        </details>
-      )}
       <table className="cg-sheet-sum">
         <tbody>
           <tr><td>工作單總數</td><td>{A.orders}</td></tr>
@@ -905,7 +894,8 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const { wf, ff, sf, rows, hidden, totals, join, dateField } = view;
   // 排程表讀得到才分「有預排／沒預排」；讀不到時全部留在主表。
   const planOn = sched.status === "ok" && Boolean(sf.group && sf.start);
-  const part = planOn ? partitionByPlan(rows) : { ...partitionByPlan([]), planned: rows };
+  const part = planDiffTotals(rows);
+  const dupNames = new Set(rows.map((r) => r.group).filter((g, i, a) => a.indexOf(g) !== i));
   const sopViol = wf.sopViolation ? rows.flatMap((r) => r.orders.filter((o) => violatesSop(o, wf)).map((o) => ({ key: rk(r), group: rowLabel(r), order: o }))) : [];
   const byPerson = cfg.unit === "person";
   const unit = byPerson ? "人" : "組";
@@ -958,6 +948,10 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
                   <div>
                     <dt>營業額點數</dt>
                     <dd>{wf.revenue ? round1(r.revenue) : "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>預排點數</dt>
+                    <dd>{r.planned ? round1(r.planned.points) : planOn ? "未排" : "—"}</dd>
                   </div>
                   <div>
                     <dt>與預排差異</dt>
@@ -1022,7 +1016,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
                         {wf.revenue && r.revenueBlank > 0 && <span className="muted small"> ({r.revenueBlank} 空白)</span>}
                       </td>
                       <td className="num" title={r.planned?.defaulted ? `${r.planned.defaulted} 天未填點數，以每天 1 點計` : undefined}>
-                        {r.planned ? formatNumber(Math.round(r.planned.points * 10) / 10) : "—"}
+                        {r.planned ? formatNumber(Math.round(r.planned.points * 10) / 10) : planOn ? "未排" : "—"}
                         {r.planned?.defaulted ? <span className="muted small">*</span> : null}
                       </td>
                       <td className="num">
@@ -1171,7 +1165,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
             {teamSections(rows).map((sec) => (
               <optgroup key={sec.team} label={sec.team}>
                 {sec.rows.map((r) => (
-                  <option key={rk(r)} value={rk(r)}>{r.group}</option>
+                  <option key={rk(r)} value={rk(r)}>{dupNames.has(r.group) ? `${r.group}・${r.team}` : r.group}</option>
                 ))}
               </optgroup>
             ))}
@@ -1212,17 +1206,11 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
         </div>
       )}
 
-      {!focus && rows.length > 0 && layout === "sheet" && <SheetTable rows={part.planned} unplanned={part.unplanned} wf={wf} ff={ff} hasCheck={hasCheck} hasFix={hasFix} onPick={(g) => pick(g)} />}
+      {!focus && rows.length > 0 && layout === "sheet" && <SheetTable rows={rows} planOn={planOn} wf={wf} ff={ff} hasCheck={hasCheck} hasFix={hasFix} onPick={(g) => pick(g)} />}
 
       {!(focus || rows.length === 0 || layout === "sheet") && (
         <>
-          {detailView(part.planned)}
-          {part.unplanned.length > 0 && (
-            <details className="cg-unplanned">
-              <summary>沒有預排的{unit}（{part.unplanned.length} {byPerson ? "列" : "組"}・{part.unplannedOrders} 張工作單）</summary>
-              {detailView(part.unplanned)}
-            </details>
-          )}
+          {detailView(rows)}
         </>
       )}
 
@@ -1230,7 +1218,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
 
       <p className="cg-foot">
         失誤率＝{cfg.checkLabel}「不通過」÷ 已檢核（未檢核不計）。{byPerson ? `一列一個人（內業成本單的填報人），依成本單的內業組別分段，每組一列小計；同一人在不同內業組別填單時，每組各一列。預排點數＝預排表${cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}依「人員＋日期」比對（組別不參與，預排「人員」欄多人逐人展開，休假條不算），有填「預估營業額點數」就分攤到每天，未填以每人每天 1 點計（同人同日多條只算一次，標 *）；預排日期認欄位 id，不看欄名。` : `預排點數＝預排表${cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}點數欄，未填以每組每天 1 點計（標 *）。`}差異＝營業額點數（原值）− 預排點數。
-        {cfg.keepWorkTrade && view.wf.trade && ` 只計${cfg.workLabel}中業別不是內業的工作單。`}{hidden.length > 0 && ` 不列入：${hidden.map((h) => `${/^rec/.test(h.group) ? "未對應組別" : h.group}（${h.orders} 張）`).join("、")}。`}{cfg.costKey && " 組別與工作日期取自所屬內業成本單。"}{byPerson ? " 與預排差異只算有預排點數的人（組小計與合計列同）；沒有預排的人收在下方「沒有預排的人」，不進合計差異；頁首卡片仍含全部人。" : " 與預排差異只算有預排點數的組（合計列同）；沒有預排的組收在下方「沒有預排的組」，不進合計差異；頁首卡片仍含全部組。"}{cfg.crewKey && " 拆組判定：所選週內，同一組別、同一工作日期，工作單所屬外業成本單的「組長」有 2 個以上不同的人，該組視為拆組出工，依組長分列子隊（組長空白歸「未填組長」）；預排表沒有分隊，預排點數只掛在組別合計列；子列不重複計入合計；讀不到成本單時不拆組。"}出錯＝工作單的{[ff.qtyFixed && `「${ff.qtyFixed.name}」≠「${ff.qtyOrig?.name ?? "數量"}」`, ff.revFixed && ff.revOrig && ff.revFixed !== ff.revOrig && `「${ff.revFixed.name}」≠「${ff.revOrig.name}」`].filter(Boolean).join(" 或 ") || "修改後數值與原填不同"}（兩邊都有值才比較）。{wf.sopViolation ? `SOP 取自日報「${wf.sopViolation.name}」：有任一張違反顯示紅色，全部填寫且沒有違反顯示綠色「SOP 完成」。` : "SOP 由控制組成員在每張工作單上勾選（展開組別），整組都勾完才顯示綠色「SOP 完成」；記錄勾選人與時間，不寫回 Lark。"}
+        {cfg.keepWorkTrade && view.wf.trade && ` 只計${cfg.workLabel}中業別不是內業的工作單。`}{hidden.length > 0 && ` 不列入：${hidden.map((h) => `${/^rec/.test(h.group) ? "未對應組別" : h.group}（${h.orders} 張）`).join("、")}。`}{cfg.costKey && " 組別與工作日期取自所屬內業成本單。"}{" 主表列出全部組與人（沒預排的預排顯示「未排」）；工作單、營業額等合計含全部，與預排差異只算有預排的組／人。"}{cfg.crewKey && " 拆組判定：所選週內，同一組別、同一工作日期，工作單所屬外業成本單的「組長」有 2 個以上不同的人，該組視為拆組出工，依組長分列子隊（組長空白歸「未填組長」）；預排表沒有分隊，預排點數只掛在組別合計列；子列不重複計入合計；讀不到成本單時不拆組。"}出錯＝工作單的{[ff.qtyFixed && `「${ff.qtyFixed.name}」≠「${ff.qtyOrig?.name ?? "數量"}」`, ff.revFixed && ff.revOrig && ff.revFixed !== ff.revOrig && `「${ff.revFixed.name}」≠「${ff.revOrig.name}」`].filter(Boolean).join(" 或 ") || "修改後數值與原填不同"}（兩邊都有值才比較）。{wf.sopViolation ? `SOP 取自日報「${wf.sopViolation.name}」：有任一張違反顯示紅色，全部填寫且沒有違反顯示綠色「SOP 完成」。` : "SOP 由控制組成員在每張工作單上勾選（展開組別），整組都勾完才顯示綠色「SOP 完成」；記錄勾選人與時間，不寫回 Lark。"}
         {view.records.length > 0 && ` 資料至 ${formatDate(Math.max(...view.records.map((r) => (r.fields[view.dateField] as number) ?? 0)))}。`}
       </p>
 

@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 // 人員版邏輯放在 controlGroup.ts 的「R02 以人為單位」區段（Node 直跑 .ts 時模組間不能省副檔名，所以不另開檔）。
-import { groupRows, joinInternal, partitionByPlan, plannedPoints, resolveScheduleFields, resolveWorkFields, JOINED_GROUP, JOINED_PERSON, keepInternalSchedule, plannedByPerson, personRows, resolvePersonScheduleFields, teamSections } from "../lib/controlGroup.ts";
+import { groupRows, joinInternal, planDiffTotals, plannedPoints, resolveScheduleFields, resolveWorkFields, JOINED_GROUP, JOINED_PERSON, keepInternalSchedule, plannedByPerson, personRows, resolvePersonScheduleFields, teamSections } from "../lib/controlGroup.ts";
 
 const DAY = 86400000;
 const TZ = 8 * 3600000;
@@ -156,12 +156,17 @@ test("預排依人員 record_id＋日期掛到當天填報的組；沒預排的�
   assert.equal(get("圖報A", "pA").planned.points, 1);
   assert.equal(get("控制", "pB").planned.points, 1);
   assert.equal(get("圖報B", "pC").planned, undefined);
-  const part = partitionByPlan(rows);
-  assert.deepEqual(part.unplanned.map((r) => r.personId), ["pC"]);
-  assert.equal(part.planned.length, 3);
+  const part = planDiffTotals(rows);
+  assert.equal(part.rows.length, 4); // 全部人都在主表
+  assert.equal(part.n, 3); // 差異只算有預排的 3 人
   assert.equal(part.points, 3);
-  assert.equal(part.revenue, 3 + 4 + 0.5);
-  assert.equal(part.diff, 7.5 - 3);
+  assert.equal(part.diff, 3 + 4 + 0.5 - 3);
+  assert.equal(part.orders, rows.reduce((s, r) => s + r.orders.length, 0));
+  assert.equal(part.revenue, rows.reduce((s, r) => s + r.revenue, 0));
+  const sec = teamSections(rows).find((x) => x.team === "圖報B");
+  assert.equal(sec.rows.length, 1);
+  assert.equal(sec.total.orders.length, 1); // 沒預排的人也算進組小計
+  assert.equal(planDiffTotals(sec.rows).n, 0);
 });
 
 test("有預排但整週沒工作單的人也有一列（用預排組別當歸屬）", () => {

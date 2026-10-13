@@ -392,14 +392,20 @@ export function splitCrews(rows: GroupRow[], wf: WorkFields, workFields: FieldMe
   });
 }
 
-// 「與預排差異」只算有預排點數的組。沒預排的組（有工作單但預排表沒排）另列，
-// 不進合計差異；頁首卡片仍用全部組。
-export function partitionByPlan(rows: GroupRow[]) {
+// 主表列出全部組／人（含沒預排的，預排顯示「未排」）。工作單、營業額等合計含全部列；
+// 「與預排差異」只算有預排點數的列：Σ(營業額−預排) over planned rows，n＝有預排的列數。
+export function planDiffTotals(rows: GroupRow[]) {
   const planned = rows.filter((r) => r.planned && r.planned.points > 0);
-  const unplanned = rows.filter((r) => !planned.includes(r));
-  const revenue = planned.reduce((s, r) => s + r.revenue, 0);
+  const plannedRevenue = planned.reduce((s, r) => s + r.revenue, 0);
   const points = planned.reduce((s, r) => s + (r.planned?.points ?? 0), 0);
-  return { planned, unplanned, revenue, points, diff: revenue - points, unplannedOrders: unplanned.reduce((s, r) => s + r.orders.length, 0) };
+  return {
+    rows,
+    revenue: rows.reduce((s, r) => s + r.revenue, 0),
+    orders: rows.reduce((s, r) => s + r.orders.length, 0),
+    points,
+    diff: plannedRevenue - points,
+    n: planned.length,
+  };
 }
 
 // =====================================================================================

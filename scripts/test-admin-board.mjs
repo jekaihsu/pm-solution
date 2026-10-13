@@ -60,7 +60,7 @@ const work = (rows) =>
   table(workFields, rows.map((r) => ({ fields: { 工作單號: r.no, 所屬成本單: [r.costTitle ?? "x"], 行政工項: [r.item ?? "公文"], 件數: 1, 最終營業額點數: r.pts, 備註: null, "⚠負值": r.warn ?? "" }, links: r.costId ? { 所屬成本單: [r.costId] } : undefined })));
 
 const run = (w, c, s) => buildAdminBoard({ work: w, cost: c, sched: s, start: weekStart, end: weekEnd });
-const rowOf = (b, id) => [...b.planned, ...b.unplanned].find((r) => r.personId === id);
+const rowOf = (b, id) => b.rows.find((r) => r.personId === id);
 
 test("同人同日兩條預排只算 1 點", () => {
   const s = sched([
@@ -135,7 +135,7 @@ test("成本單標題重複時，用「工作單列」仍對得正確", () => {
   assert.equal(rowOf(b, "P2").orders[0].date, at(3));
 });
 
-test("沒預排的人進 unplanned，不進合計差異；有預排沒工作單的人留在主表", () => {
+test("主表列全部人；工作單／營業額含全部，差異只算有預排的人", () => {
   const c = cost([
     { id: "C1", title: "T1", day: 0, who: "甲", whoId: "P1", orders: ["W1"] },
     { id: "C2", title: "T2", day: 0, who: "乙", whoId: "P2", orders: ["W2"] },
@@ -149,11 +149,13 @@ test("沒預排的人進 unplanned，不進合計差異；有預排沒工作單�
     { people: ["丙"], ids: ["P3"], start: 1 },
   ]);
   const b = run(w, c, s);
-  assert.deepEqual(b.planned.map((r) => r.personId).sort(), ["P1", "P3"]);
-  assert.deepEqual(b.unplanned.map((r) => r.personId), ["P2"]);
-  assert.equal(b.totals.revenue, 2); // 乙的 7 不進合計
+  assert.deepEqual(b.rows.map((r) => r.personId).sort(), ["P1", "P2", "P3"]);
+  assert.equal(b.rows.find((r) => r.personId === "P2").plan, undefined);
+  assert.equal(b.totals.orders, 2);
+  assert.equal(b.totals.revenue, 9); // 全部人
   assert.equal(b.totals.points, 2);
-  assert.equal(b.totals.diff, 0);
+  assert.equal(b.totals.diff, 0); // 只算有預排的人（甲 2−2、丙 0−0）
+  assert.equal(b.totals.plannedN, 2);
   assert.equal(b.stats.overlapDays, 1);
 });
 
@@ -165,14 +167,14 @@ test("⚠ 亮燈（非空字串）算異常張數；排程讀不到時不分區"
   ]);
   const b = run(w, c, undefined);
   assert.equal(rowOf(b, "P1").anomalyCount, 1);
-  assert.equal(b.unplanned.length, 0);
-  assert.equal(b.planned.length, 1);
+  assert.equal(b.rows.length, 1);
+  assert.equal(b.totals.plannedN, 0);
 });
 
 test("週外的成本單不算；對不到成本單的工作單單獨計數", () => {
   const c = cost([{ id: "C1", title: "T1", day: 9, who: "甲", whoId: "P1" }]);
   const w = work([{ no: "W1", pts: 1, costId: "C1" }, { no: "W2", pts: 1, costId: "NOPE" }]);
   const b = run(w, c, sched([]));
-  assert.equal(b.planned.length + b.unplanned.length, 0);
+  assert.equal(b.rows.length, 0);
   assert.equal(b.stats.unmatchedOrders, 1);
 });

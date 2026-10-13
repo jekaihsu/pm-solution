@@ -3,7 +3,7 @@
 //  - 預排取 業別＝行政；比對主鍵＝人員 record_id ＋ 日期，組別不參與。
 //  - 預排點數：有填就用（按起訖天數平均分攤，一人一份）；沒填則每人每天 1 點，
 //    同人同日多條只算一次，且該人該日已有填點數的條就不再補。
-//  - 與預排差異只算「有預排」的人；沒預排的人另列，不進合計差異。
+//  - 與預排差異只算「有預排」的人；主表列全部人（沒預排顯示「未排」），合計含全部人，差異只算有預排的人。
 //  - 失誤率先不算（行政沒有檢核欄），待定義。
 import type { CellValue, FieldMeta, TableData } from "./types";
 
@@ -52,9 +52,7 @@ export interface AdminRow {
 
 export interface AdminBoard {
   rows: AdminRow[];
-  planned: AdminRow[];
-  unplanned: AdminRow[];
-  totals: { orders: number; days: number; revenue: number; points: number; diff: number; anomalies: number; overtime: number };
+  totals: { orders: number; days: number; revenue: number; points: number; diff: number; plannedN: number; anomalies: number; overtime: number };
   stats: { orders: number; costSheets: number; people: number; revenue: number; planPersonDays: number; planPeople: number; overlapDays: number; unmatchedOrders: number };
   notes: string[];
 }
@@ -240,18 +238,17 @@ export function buildAdminBoard(p: { work: TableData; cost?: TableData; sched?: 
 
   // ---- 分區與合計 ----
   const all = [...rows.values()].sort((a, b) => b.revenue - a.revenue || a.name.localeCompare(b.name));
-  const planned = planOn ? all.filter((r) => r.plan && r.plan.points > 0) : all;
-  const unplanned = planOn ? all.filter((r) => !planned.includes(r)) : [];
-  const sum = (f: (r: AdminRow) => number) => planned.reduce((s, r) => s + f(r), 0);
+  // 主表列全部人；合計含全部人，只有預排點數與差異限有預排的人。
+  const planned = planOn ? all.filter((r) => r.plan && r.plan.points > 0) : [];
+  const sum = (f: (r: AdminRow) => number) => all.reduce((s, r) => s + f(r), 0);
   const revenue = sum((r) => r.revenue);
-  const points = sum((r) => r.plan?.points ?? 0);
+  const points = planned.reduce((s, r) => s + (r.plan?.points ?? 0), 0);
+  const plannedDiff = planned.reduce((s, r) => s + r.revenue, 0) - points;
   let overlapDays = 0;
   for (const [k, ds] of planDays) for (const d of rows.get(k)?.dates ?? []) if (ds.has(d)) overlapDays++;
   return {
     rows: all,
-    planned,
-    unplanned,
-    totals: { orders: sum((r) => r.orders.length), days: sum((r) => r.days), revenue, points, diff: revenue - points, anomalies: sum((r) => r.anomalyCount), overtime: sum((r) => r.overtime) },
+    totals: { orders: sum((r) => r.orders.length), days: sum((r) => r.days), revenue, points, diff: plannedDiff, plannedN: planned.length, anomalies: sum((r) => r.anomalyCount), overtime: sum((r) => r.overtime) },
     stats: {
       orders: all.reduce((s, r) => s + r.orders.length, 0),
       costSheets,

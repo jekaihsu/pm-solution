@@ -82,7 +82,7 @@ function PersonRows({ rows, open, toggle, planOn }: { rows: AdminRow[]; open: Se
           <td>{r.orders.length}</td>
           <td>{r.days}</td>
           <td>{r1(r.revenue)}</td>
-          <td>{r.plan ? r1(r.plan.points) : dash}</td>
+          <td>{r.plan ? r1(r.plan.points) : planOn ? "未排" : dash}</td>
           <td>
             <Diff value={diff} />
           </td>
@@ -189,7 +189,6 @@ export default function AdminBoard() {
   if (cost.status !== "ok") notes.push(`行政成本單${STATUS_TEXT[cost.status]}${cost.error ? `：${cost.error}` : ""}`);
   if (board.stats.unmatchedOrders) notes.push(`${board.stats.unmatchedOrders} 張工作單對不到成本單（沒有人與日期，不列入任何人）`);
   const t = board.totals;
-  const unplannedOrders = board.unplanned.reduce((s, r) => s + r.orders.length, 0);
 
   return (
     <section className="cg">
@@ -199,8 +198,8 @@ export default function AdminBoard() {
           <table>
             {HEAD}
             <tbody>
-              <PersonRows rows={board.planned} open={open} toggle={toggle} planOn={planOn} />
-              {!board.planned.length && (
+              <PersonRows rows={board.rows} open={open} toggle={toggle} planOn={planOn} />
+              {!board.rows.length && (
                 <tr>
                   <td colSpan={COLS} className="muted">
                     這週沒有人員資料
@@ -210,13 +209,14 @@ export default function AdminBoard() {
             </tbody>
             <tfoot>
               <tr>
-                <td className="cg-sheet-name">{planOn ? "合計（有預排的人）" : "合計"}</td>
+                <td className="cg-sheet-name">合計（全部 {board.rows.length} 人）</td>
                 <td>{t.orders}</td>
                 <td>{t.days}</td>
                 <td>{r1(t.revenue)}</td>
                 <td>{planOn ? r1(t.points) : dash}</td>
                 <td>
-                  <Diff value={planOn ? t.diff : null} />
+                  <Diff value={planOn && t.plannedN ? t.diff : null} />
+                  {planOn && <div className="muted small">只算有預排的 {t.plannedN} 人</div>}
                 </td>
                 <td>{t.anomalies}</td>
                 <td>{r1(t.overtime)}</td>
@@ -249,21 +249,6 @@ export default function AdminBoard() {
           </tbody>
         </table>
       </div>
-      {planOn && board.unplanned.length > 0 && (
-        <details className="cg-unplanned">
-          <summary>
-            沒有預排的人（{board.unplanned.length} 人・{unplannedOrders} 張工作單）
-          </summary>
-          <div className="cg-sheet">
-            <table>
-              {HEAD}
-              <tbody>
-                <PersonRows rows={board.unplanned} open={open} toggle={toggle} planOn={planOn} />
-              </tbody>
-            </table>
-          </div>
-        </details>
-      )}
       <ul className="cg-notes">
         <li>
           <CircleAlert size={14} /> 預排取業別＝行政，以「人員＋日期」比對（組別不參與）；預排點數沒填的，每人每天 1 點（同人同日只算一次），有填就用填的值。
