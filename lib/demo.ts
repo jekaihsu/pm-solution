@@ -57,6 +57,23 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["單號", "text", (_, i) => `IC-${i}`],
       ["工作日期", "date", (r) => inWeeks(r)],
       ["內業組別", "select", (r) => pick(r, innerGroups)],
+      ["填報人", "select", (r) => pick(r, ["王小明", "李小華", "陳大文", "林美玲"])],
+      ["是否加班", "checkbox", (r) => r() > 0.7],
+      ["加班時數", "number", (r) => (r() > 0.5 ? Math.round(r() * 4 * 2) / 2 : null)],
+      ["加班類型", "select", (r) => pick(r, ["平日加班", "假日加班", null])],
+    ],
+  },
+  "field-cost": {
+    n: 80,
+    spec: [
+      ["單號", "text", (_, i) => `FC-${i}`],
+      ["工作日期", "date", (r) => inWeeks(r)],
+      ["組別", "select", (r) => pick(r, groups)],
+      ["填報人", "select", (r) => pick(r, ["張志強", "黃建國", "吳家豪", "劉俊傑"])],
+      ["是否加班", "checkbox", (r) => r() > 0.6],
+      ["加班時數", "number", (r) => (r() > 0.4 ? Math.round(r() * 5 * 2) / 2 : null)],
+      ["加班類型", "select", (r) => pick(r, ["平日加班", "假日加班", "夜測"])],
+      ["是否過夜", "checkbox", (r) => r() > 0.85],
     ],
   },
   "internal-work": {

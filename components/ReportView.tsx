@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { sourceByKey, type ReportDef } from "@/lib/reports";
 import { showSource, useShell } from "./AppShell";
 import GroupBoard, { BOARDS } from "./GroupBoard";
+import HrBoard from "./HrBoard";
 import EmptyState from "./EmptyState";
 import SourcePanel from "./SourcePanel";
 
@@ -57,9 +58,9 @@ export default function ReportView({ report }: { report: ReportDef }) {
         </div>
       )}
 
-      {report.id === "R01" || report.id === "R02" ? (
+      {report.id === "R01" || report.id === "R02" || report.id === "R04" ? (
         <>
-          <GroupBoard key={report.id} cfg={report.id === "R01" ? BOARDS.r01 : BOARDS.r02} />
+          {report.id === "R04" ? <HrBoard /> : <GroupBoard key={report.id} cfg={report.id === "R01" ? BOARDS.r01 : BOARDS.r02} />}
           <details className="raw-data">
             <summary>查看原始資料表</summary>
             <div className="raw-data-body">

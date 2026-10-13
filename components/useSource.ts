@@ -12,7 +12,7 @@ export interface SourceState {
 }
 
 export function useSource(key: string): SourceState {
-  const { demo, tick } = useShell();
+  const { demo, tick, manual } = useShell();
   // Tag each result with the source + mode it belongs to, so a switch never shows the
   // previous table's data while the new one loads.
   const tag = `${key}|${demo ? "demo" : "live"}`;
@@ -22,7 +22,7 @@ export function useSource(key: string): SourceState {
     let cancelled = false;
     const qs = new URLSearchParams();
     if (demo) qs.set("demo", "1");
-    if (tick > 0) qs.set("refresh", "1");
+    if (tick > 0 && manual) qs.set("refresh", "1");
     fetch(`/api/sources/${key}?${qs}`)
       .then((r) => r.json())
       .then((j) => !cancelled && setState({ status: j.status, data: j.data, error: j.error, tag }))
@@ -30,7 +30,7 @@ export function useSource(key: string): SourceState {
     return () => {
       cancelled = true;
     };
-  }, [key, demo, tick, tag]);
+  }, [key, demo, tick, tag, manual]);
 
   return state.tag === tag ? state : { status: "loading" };
 }

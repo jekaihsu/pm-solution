@@ -11,7 +11,8 @@ interface Ctx {
   setWeekOffset: (n: number) => void;
   demo: boolean;
   setDemo: (b: boolean) => void;
-  tick: number; // bumps on manual refresh
+  tick: number; // bumps on every refresh (auto or manual)
+  manual: boolean; // last bump came from the refresh button → bypass the server cache
   refresh: () => void;
   version: VersionFilter;
 }
@@ -36,6 +37,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [demo, setDemo] = useState(false);
   const [version, setVersion] = useState<VersionFilter>("all");
   const [tick, setTick] = useState(0);
+  const [manual, setManual] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [user, setUser] = useState<{ name: string; avatar?: string } | null>(null);
   const pathname = usePathname();
@@ -48,12 +50,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       .catch(() => {});
   }, []);
   useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), AUTO_REFRESH_MS);
+    const t = setInterval(() => {
+      setManual(false);
+      setTick((n) => n + 1);
+    }, AUTO_REFRESH_MS);
     return () => clearInterval(t);
   }, []);
 
   const week = weekRange(offset);
-  const ctx: Ctx = { week, setWeekOffset, demo, setDemo, tick, refresh: () => setTick((n) => n + 1), version };
+  const ctx: Ctx = { week, setWeekOffset, demo, setDemo, tick, refresh: () => {
+      setManual(true);
+      setTick((n) => n + 1);
+    },
+    manual,
+    version,
+  };
 
   return (
     <ShellContext.Provider value={ctx}>

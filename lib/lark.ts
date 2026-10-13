@@ -4,7 +4,7 @@ import type { FieldMeta, FieldKind, TableData, TableMeta, CellValue } from "./ty
 import type { SourceDef } from "./reports";
 
 const API_BASE = (process.env.LARK_API_BASE || "https://open.larksuite.com").replace(/\/$/, "");
-const CACHE_TTL_MS = Number(process.env.CACHE_TTL_SECONDS ?? 30) * 1000;
+const CACHE_TTL_MS = Number(process.env.CACHE_TTL_SECONDS ?? 60) * 1000;
 
 export function isLarkConfigured(): boolean {
   return Boolean(process.env.LARK_APP_ID && process.env.LARK_APP_SECRET);
@@ -61,12 +61,42 @@ async function larkFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 const cache = new Map<string, { value: unknown; expiresAt: number }>();
 
-async function cached<T>(key: string, fn: () => Promise<T>, force = false): Promise<T> {
+const inflight = new Map<string, Promise<unknown>>();
+
+// Fresh hit → served. Stale hit → served immediately while one background refresh
+// runs (stale-while-revalidate). No hit or force → waits for the fetch. Concurrent
+// callers for the same key share one fetch.
+async function cached<T>(key: string, fn: () => Promise<T>, force = false, ttl = CACHE_TTL_MS): Promise<T> {
   const hit = cache.get(key);
   if (!force && hit && hit.expiresAt > Date.now()) return hit.value as T;
-  const value = await fn();
-  cache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
-  return value;
+  const run = () => {
+    let p = inflight.get(key) as Promise<T> | undefined;
+    if (!p) {
+      p = fn()
+        .then((value) => {
+          cache.set(key, { value, expiresAt: Date.now() + ttl });
+          return value;
+        })
+        .finally(() => inflight.delete(key));
+      inflight.set(key, p);
+    }
+    return p;
+  };
+  if (!force && hit) {
+    run().catch((err) => console.error(`[refresh ${key}]`, (err as Error).message));
+    return hit.value as T;
+  }
+  return run();
+}
+
+// Runs async jobs with at most `limit` in flight.
+async function pool<T>(items: T[], limit: number, job: (item: T) => Promise<void>) {
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) await job(items[next++]);
+    }),
+  );
 }
 
 // Last successful value for a key, kept after expiry so a failed refresh can
@@ -249,9 +279,9 @@ function inferLookupKinds(fields: FieldMeta[], records: TableData["records"]) {
 
 // Replaces linked record ids with the linked records' primary-field text.
 async function resolveLinks(baseToken: string, fields: FieldMeta[], records: TableData["records"]) {
-  for (const f of fields.filter((x) => x.linkTable)) {
+  await pool(fields.filter((x) => x.linkTable), 4, async (f) => {
     const ids = [...new Set(records.flatMap((r) => (r.fields[f.name] as string[] | null) ?? []))];
-    if (!ids.length) continue;
+    if (!ids.length) return;
     try {
       const names = await linkTitles(baseToken, f.linkTable!, ids);
       for (const r of records) {
@@ -261,7 +291,7 @@ async function resolveLinks(baseToken: string, fields: FieldMeta[], records: Tab
     } catch (err) {
       console.error(`[link ${f.name}]`, (err as Error).message); // keep ids if the linked table can't be read
     }
-  }
+  });
 }
 
 async function linkTitles(baseToken: string, tableId: string, ids: string[]): Promise<Map<string, string>> {
@@ -269,18 +299,20 @@ async function linkTitles(baseToken: string, tableId: string, ids: string[]): Pr
   const known = (cache.get(key)?.value as Map<string, string> | undefined) ?? new Map<string, string>();
   const missing = ids.filter((id) => !known.has(id));
   if (missing.length) {
-    const tFields = await listFields(baseToken, tableId);
+    const tFields = await cached(`fields:${baseToken}:${tableId}`, () => listFields(baseToken, tableId), false, 30 * 60 * 1000);
     const primary = tFields.find((x) => x.primary) ?? tFields[0];
-    for (let i = 0; i < missing.length; i += 100) {
+    const batches: string[][] = [];
+    for (let i = 0; i < missing.length; i += 100) batches.push(missing.slice(i, i + 100));
+    await pool(batches, 4, async (batch) => {
       const data = await larkFetch<{ records?: { record_id: string; fields: Record<string, unknown> }[] }>(
         `/bitable/v1/apps/${baseToken}/tables/${tableId}/records/batch_get`,
-        { method: "POST", body: JSON.stringify({ record_ids: missing.slice(i, i + 100) }) },
+        { method: "POST", body: JSON.stringify({ record_ids: batch }) },
       );
       for (const rec of data.records ?? []) {
         const v = normalizeValue(rec.fields[primary.name], primary.kind === "number" ? "number" : "text");
         known.set(rec.record_id, v === null || v === "" ? rec.record_id : String(v));
       }
-    }
+    });
     cache.set(key, { value: known, expiresAt: Date.now() + 10 * 60 * 1000 });
   }
   return known;
