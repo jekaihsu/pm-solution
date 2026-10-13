@@ -84,10 +84,13 @@ function raw(key: string, name: string, version: DataVersion, table: string, ext
   };
 }
 
-// 儀器管理系統 Base：PM週報 應用已實測可讀全部 5 張表。
+// 儀器管理系統 Base（22 張表）：PM週報 應用目前落在內建 Reader 角色，只讀得到 5 張表（資料表、儀器總表、車輛、預約申請單、歸還單）；
+// 其餘表（日租、月租、借單明細、維護履歷×2、TAF，以及維護履歷的關聯選項表）要等「PM週報唯讀」角色開放，沒開放前讀取會失敗，頁面會顯示原因。
 const EQUIP_BASE = "YHqcbb8MHa4VdGsA0UnjajNDpgd";
 // 預約單／歸還單不讀申請人、處理人等人員欄位。
 const BOOKING_FIELD = (name: string) => !/发起人|当前处理人|审批节点|审批流程/.test(name);
+// 其餘儀器表用白名單：只讀口徑需要的欄位，不讀申請人、價格、附件、備註。
+const only = (names: string[]) => (name: string) => names.includes(name);
 function eqSys(key: string, name: string, table: string, note: string, extra: Partial<SourceDef> = {}): SourceDef {
   return { key, name, baseToken: EQUIP_BASE, tableId: table, url: tableUrl(EQUIP_BASE, table), note, ...extra };
 }
@@ -167,13 +170,35 @@ export const SOURCES: SourceDef[] = [
     note: "逐筆加班審批單；只讀發起人（加班人為備援）、開始時間、加班類型、申請狀態、加班時數，只計「已通过」；組別依 V3 人員名單。金額、薪資、身分等欄一律不讀。需 PM週報 在該 Base 有唯讀角色。依 HR_VIEWERS 設定才看得到。",
   },
   // R07: 儀器管理系統 Base（業主 2026-10-13 提供）。與 V3／V4 的儀器費率、車輛分開，不相加、不去重。
-  eqSys("equipment-system", "儀器管理系統：儀器總表（借用台帳）", "tblHZFEypeKfWOsF", "138 筆台帳，含租賃型態（月租／日租）、借用狀態（可借用／已借出）、系統封存；與「資料表」命名不同，兩者不去重。"),
-  eqSys("equipment-rates", "儀器管理系統：資料表（儀器費率清單）", "tblZmvrjDC5Q3sIp", "含日租金、啟用、狀態（正常／送修-損壞／出險）；與「儀器總表」是兩份清單，不去重、不相加。"),
+  eqSys("equipment-system", "儀器管理系統：儀器總表（正式清單）", "tblHZFEypeKfWOsF", "正式儀器清單（業主同事 2026-10-13 確認），編號＝「ID」欄。借用狀態（可借用／已借出）、rent_type 月租型／日租型、系統封存＝已下架。只讀 ID、設備、設備類別、rent_type、owner_group、狀態、系統封存（不讀價格、購入成本）。", {
+    allowField: only(["ID", "設備", "設備類別", "rent_type", "owner_group", "狀態", "系統封存"]),
+  }),
+  eqSys("equipment-daily", "儀器管理系統：日租儀器（狀態）", "tbl4DLVKuXf4yaEy", "可借用／異常／保養中 的狀態來源（日租）。136 列中 106 列是空白占位列（無 ID、無狀態），不算。以 ID 對儀器總表。需 PM週報唯讀角色開放此表。", {
+    allowField: only(["ID", "狀態", "rent_type", "設備類別"]),
+  }),
+  eqSys("equipment-monthly", "儀器管理系統：月租儀器（狀態）", "tblvIt8V2ZHnqAFX", "可借用／異常／保養中 的狀態來源（月租）。以 ID 對儀器總表。不使用「(測試)儀器 月租儀器 副本」。需 PM週報唯讀角色開放此表。", {
+    allowField: only(["ID", "狀態", "rent_type", "設備類別"]),
+  }),
   eqSys("equipment-vehicles", "儀器管理系統：車輛", "tblYUUwi0MEGuLZ0", "保養到期、保險到期取自本表；與 V4 車輛主檔分開，不相加。", { columns: ["車牌", "狀態", "current_mileage", "next_maintenance", "insurance_date", "insurance_company", "maintenance_company"] }),
   eqSys("equipment-bookings", "儀器管理系統：儀器預約申請單", "tblVLETpvLxMNwaC", "借出以「已通过」且借出日期落在所選週計；已撤回另計。不讀申請人、處理人欄位。", { allowField: BOOKING_FIELD, dateField: "借出日期" }),
-  eqSys("equipment-returns", "儀器管理系統：儀器管理歸還單", "tbl2qFvPOihhe3R1", "歸還以「已通过」且歸還日期落在所選週計；已撤回另計。不讀申請人、處理人欄位。", { allowField: BOOKING_FIELD, dateField: "歸還日期" }),
-  { key: "equipment-inspection", name: "月租儀器／車輛檢查紀錄", note: "尚未定位：請提供檢查紀錄所在的 Base／資料表。" },
-  { key: "equipment-calibration", name: "TAF／自校驗紀錄", note: "尚未定位：請提供 TAF 與自校驗紀錄所在的 Base／資料表。" },
+  eqSys("equipment-returns", "儀器管理系統：儀器管理歸還單", "tbl2qFvPOihhe3R1", "歸還以「已通过」且歸還日期落在所選週計；已撤回另計。借出未歸還用「借出儀器/車輛」比對（該欄值前面帶申請人姓名，只用於比對、頁面不顯示）。不讀申請人、處理人欄位。", {
+    allowField: only(["申请状态", "借出儀器/車輛", "歸還日期", "設備類別1", "申请编号"]),
+    dateField: "歸還日期",
+  }),
+  eqSys("equipment-loans", "儀器管理系統：儀器借單明細", "tbl5qdqsc4W7zYsS", "借出未歸還的來源：識別欄為 借出儀器/車輛、日租ID、月租ID、車牌（依序取第一個有值）。不讀發起人。需 PM週報唯讀角色開放此表。", {
+    allowField: only(["借出儀器/車輛", "日租ID", "月租ID", "車牌", "借出日期", "預計歸還日期", "所屬組別", "設備類別", "是否已歸還"]),
+  }),
+  eqSys("equipment-maintenance", "儀器管理系統：儀器 維護履歷", "tblDaO9z94PSjuVq", "維修／保養日期、費用、廠家；與儀器的關聯是人工選「設備類別」(link→「- 儀器維護相關 選項」)。需 PM週報唯讀角色開放此表與其關聯選項表。", {
+    allowField: only(["設備類別", "維修/保養日期", "費用", "維修/保養廠家", "備註"]),
+  }),
+  eqSys("equipment-taf", "儀器管理系統：儀器 TAF", "tblnq7QP6Zqcp6rA", "TAF 紀錄（業主同事 2026-10-13 確認）；欄位只有 TAF日期、TAF文件、備註與關聯儀器，沒有有效期限欄。需 PM週報唯讀角色開放此表與其關聯選項表。", {
+    allowField: only(["設備類別", "TAF日期", "備註"]),
+  }),
+  eqSys("equipment-vehicle-maintenance", "儀器管理系統：車輛 維護履歷", "tbl2PlmDyO1ciy2E", "車輛維修／保養日期、費用、廠家；與車輛的關聯是人工選「車牌」(link→「- 車輛維護相關 選項」)。需 PM週報唯讀角色開放此表與其關聯選項表。", {
+    allowField: only(["車牌", "維修/保養日期", "費用", "維修/保養廠家", "備註"]),
+  }),
+  // 「資料表」：業主同事說是某位同事自己拉的、來源不明，不再當主要來源；R07 主畫面不顯示，只留在「查看原始資料表」。
+  eqSys("equipment-rates", "儀器管理系統：資料表（非正式、來源不明）", "tblZmvrjDC5Q3sIp", "非正式、來源不明（某同事自己拉的）；R07 主畫面不使用，只供查看原始資料。含日租金、啟用、狀態。"),
   {
     key: "contact-log",
     name: "業主聯繫紀錄",
@@ -256,10 +281,10 @@ export const REPORTS: ReportDef[] = [
     id: "R07",
     slug: "r07",
     name: "儀器車輛管理詳情",
-    purpose: "掌握儀器／車輛可用狀態、月租儀器與車輛是否有檢查，以及 TAF 與自校驗是否到期。",
-    sources: ["equipment-system", "equipment-rates", "equipment-vehicles", "equipment-bookings", "equipment-returns", "equipment-inspection", "equipment-calibration", "v3-equipment", "v4-equipment", "v4-vehicles"],
-    mustHave: ["儀器管理系統", "月租型儀器與車輛是否有檢查", "TAF 與自校驗檢核紀錄"],
-    pending: ["資產範圍與同物異名去重（儀器總表與資料表兩份清單不去重）", "借出未歸還：預約單與歸還單沒有明確對應鍵，待定義", "停用／送修及保養日曆定義"],
+    purpose: "掌握儀器／車輛可用狀態（可借用／異常／保養中）、借出未歸還，以及維護履歷與 TAF 紀錄。",
+    sources: ["equipment-system", "equipment-daily", "equipment-monthly", "equipment-vehicles", "equipment-bookings", "equipment-returns", "equipment-loans", "equipment-maintenance", "equipment-taf", "equipment-vehicle-maintenance", "v3-equipment", "v4-equipment", "v4-vehicles", "equipment-rates"],
+    mustHave: ["儀器清單（儀器總表＋日租／月租狀態）", "借出未歸還", "維護履歷（儀器、車輛）與 TAF 紀錄", "車輛保養與保險提醒"],
+    pending: ["檢查頻率（每週／每月）與「是否有檢查」合格率：業主未定義，只列紀錄", "TAF 有效期限：「儀器 TAF」沒有有效期限欄，先不判到期", "維護履歷／TAF 與儀器的關聯是人工選的，沒選的列不歸屬儀器"],
   },
   {
     id: "R08",

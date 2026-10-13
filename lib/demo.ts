@@ -33,6 +33,9 @@ const DEMO_GEAR: [string, string, string, string][] = [
   ["工程車 CDE-3456", "CAR-03", "車輛", "月租"],
   ["工程車 DEF-4567", "CAR-04", "車輛", "公司車"],
 ];
+// 示範：DEMO_GEAR 前 10 台儀器，月租 vs 非月租。
+const MONTHLY_IDX = [1, 2, 4, 5, 7];
+const DAILY_IDX = [0, 3, 6, 8, 9];
 const groups = ["外業一組", "外業二組", "外業三組", "外業四組"];
 const projects = ["P-2601", "P-2602", "P-2603", "P-2604", "P-2605", "P-2606"];
 const items = ["地形測量", "控制測量", "放樣", "地籍調查"];
@@ -192,17 +195,46 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["日租金", "number", (r) => (r() > 0.3 ? Math.round(500 + r() * 3000) : null)],
     ],
   },
-  // 儀器管理系統 Base（示範）：儀器總表（借用台帳）。欄位同真實表：設備類別、ID、設備、rent_type、owner_group、狀態、系統封存。
+  // 儀器管理系統 Base（示範）：儀器總表（正式清單）。欄位同真實表：ID、設備、設備類別、rent_type、owner_group、狀態、系統封存。
   "equipment-system": {
-    n: 14,
+    n: 10,
     spec: [
       ["設備類別", "text", (_, i) => DEMO_GEAR[i][2]],
       ["ID", "text", (_, i) => DEMO_GEAR[i][1]],
       ["設備", "text", (_, i) => DEMO_GEAR[i][0]],
       ["rent_type", "select", (_, i) => (DEMO_GEAR[i][3] === "月租" ? "月租型" : "日租型")],
       ["owner_group", "select", (r) => pick(r, groups)],
-      ["狀態", "select", (r) => pick(r, ["可借用", "可借用", "可借用", "已借出"])],
-      ["系統封存", "checkbox", (_, i) => (i === 13 ? true : null)],
+      ["狀態", "select", (_, i) => (i === 6 ? "已借出" : "可借用")],
+      ["系統封存", "checkbox", () => false],
+    ],
+  },
+  // 日租儀器：自有（非月租）的 5 台 + 2 列空白占位列（真實表有大量空白占位列）。
+  "equipment-daily": {
+    n: 7,
+    spec: [
+      ["ID", "text", (_, i) => (i < DAILY_IDX.length ? DEMO_GEAR[DAILY_IDX[i]][1] : null)],
+      ["狀態", "select", (_, i) => (i < DAILY_IDX.length ? (DAILY_IDX[i] === 3 ? "異常" : "可借用") : null)],
+      ["rent_type", "select", (_, i) => (i < DAILY_IDX.length ? "日租型" : null)],
+    ],
+  },
+  "equipment-monthly": {
+    n: 5,
+    spec: [
+      ["ID", "text", (_, i) => DEMO_GEAR[MONTHLY_IDX[i]][1]],
+      ["狀態", "select", (_, i) => (MONTHLY_IDX[i] === 5 ? "保養中" : "可借用")],
+      ["rent_type", "select", () => "月租型"],
+    ],
+  },
+  // 借單明細：識別欄在 日租ID／月租ID／車牌；歸還單的「借出儀器/車輛」前面帶申請人姓名（示範用「示範人員」）。
+  "equipment-loans": {
+    n: 7,
+    spec: [
+      ["日租ID", "text", (_, i) => (i < 4 ? DEMO_GEAR[DAILY_IDX[i]][0] : null)],
+      ["月租ID", "text", (_, i) => (i === 4 ? DEMO_GEAR[MONTHLY_IDX[0]][0] : null)],
+      ["車牌", "text", (_, i) => (i === 5 ? "DEMO-100" : null)],
+      ["借出日期", "date", (_, i) => (i === 6 ? null : Date.now() - (9 - i) * day)],
+      ["所屬組別", "select", (_, i) => groups[i % groups.length]],
+      ["設備類別", "select", (_, i) => (i === 5 ? "車輛" : i === 4 ? "月租型儀器" : "日租型儀器")],
     ],
   },
   // 儀器管理系統 Base（示範）：資料表（費率清單）。
@@ -241,34 +273,39 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["預計歸還日期", "date", (r) => inWeeks(r) + day],
     ],
   },
-  // 儀器管理系統 Base（示範）：儀器管理歸還單。
+  // 儀器管理系統 Base（示範）：儀器管理歸還單。借出儀器/車輛＝申請人姓名＋編號。示範：借單 0、2、5 已歸還，1 的歸還單被撤回。
   "equipment-returns": {
-    n: 12,
+    n: 5,
     spec: [
-      ["申请状态", "select", (_, i) => (i === 4 ? "已撤回" : "已通过")],
-      ["借出儀器/車輛", "select", (_, i) => DEMO_GEAR[i % 10][0]],
+      ["申请状态", "select", (_, i) => (i === 3 ? "已撤回" : "已通过")],
+      ["借出儀器/車輛", "select", (_, i) => `示範人員${["DEMO-100", DEMO_GEAR[DAILY_IDX[0]][0], DEMO_GEAR[DAILY_IDX[2]][0], DEMO_GEAR[DAILY_IDX[1]][0], DEMO_GEAR[DAILY_IDX[0]][0]][i]}`],
       ["歸還日期", "date", (r) => inWeeks(r) + day],
     ],
   },
-  "equipment-inspection": {
-    n: 18,
+  "equipment-maintenance": {
+    n: 4,
     spec: [
-      ["檢查對象", "select", (_, i) => DEMO_GEAR.filter((g) => g[3] === "月租" || g[2] === "車輛")[i % 8][0]],
-      ["檢查日期", "date", (r) => inWeeks(r)],
-      ["檢查結果", "select", (r) => pick(r, ["正常", "正常", "正常", "異常"])],
-      ["檢查人", "select", (r) => pick(r, ["王小明", "陳大文", "林志強"])],
-      ["備註", "text", (r) => (r() > 0.75 ? pick(r, ["腳架鬆動已鎖緊", "車內雜物已清", "電池老化，申請更換"]) : null)],
+      ["設備類別", "text", (_, i) => (i < 3 ? DEMO_GEAR[[0, 1, 1][i]][0] : null)],
+      ["維修/保養日期", "date", (_, i) => (i < 3 ? Date.now() - [60, 40, 9][i]! * day : null)],
+      ["費用", "number", (_, i) => (i < 3 ? [1800, 20000, 3500][i]! : null)],
+      ["維修/保養廠家", "text", (_, i) => (i < 3 ? "示範原廠" : null)],
     ],
   },
-  "equipment-calibration": {
-    n: 20,
+  // TAF：真實表沒有有效期限欄，示範也不放。
+  "equipment-taf": {
+    n: 3,
     spec: [
-      ["儀器", "select", (_, i) => DEMO_GEAR[i % 10][0]],
-      ["校驗類型", "select", (_, i) => (i < 10 ? "TAF" : "自校")],
-      ["校驗日期", "date", (r) => Date.now() - Math.round(30 + r() * 330) * day],
-      ["有效期限", "date", (r, i) => (i < 10 ? Date.now() + Math.round(-20 + r() * 200) * day : null)],
-      ["結果", "select", (r) => pick(r, ["合格", "合格", "合格", "不合格"])],
-      ["證書編號", "text", (_, i) => (i < 10 ? `TAF-${2600 + i}` : null)],
+      ["設備類別", "text", (_, i) => (i < 2 ? DEMO_GEAR[[2, 4][i]][0] : null)],
+      ["TAF日期", "date", (_, i) => (i < 2 ? Date.now() - [120, 20][i]! * day : null)],
+    ],
+  },
+  "equipment-vehicle-maintenance": {
+    n: 3,
+    spec: [
+      ["車牌", "text", (_, i) => (i < 2 ? `DEMO-${100 + i}` : null)],
+      ["維修/保養日期", "date", (_, i) => (i < 2 ? Date.now() - [30, 75][i]! * day : null)],
+      ["費用", "number", (_, i) => (i < 2 ? [1000, 4200][i]! : null)],
+      ["維修/保養廠家", "text", (_, i) => (i < 2 ? "示範修車廠" : null)],
     ],
   },
   quotes: {
