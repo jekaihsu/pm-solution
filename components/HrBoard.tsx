@@ -1,10 +1,11 @@
 "use client";
-import { CircleAlert, Clock, UserPlus } from "lucide-react";
+import { CircleAlert, Clock, ExternalLink, UserPlus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
 import { OT_APPLICANT, OT_HOURS, OT_HOURS_RAW, OT_START, OT_STATUS, OT_TYPE, summarizeOvertime, teamSections, type OtRecord, type OtTeamLine, type OtTeamSection } from "@/lib/overtime";
 import { PEOPLE_GROUP, PEOPLE_NAME, buildPeopleDirectory, type PeopleRow } from "@/lib/people";
 import { weekName } from "@/lib/week";
+import { YUPAI_REPORT_TITLE, YUPAI_REPORT_URL } from "@/lib/yupaiReport";
 import { useShell } from "./AppShell";
 import AttendanceCards from "./AttendanceCards";
 import DailyCheck from "./DailyCheck";
@@ -299,6 +300,14 @@ export default function HrBoard() {
       <Pending icon={<UserPlus size={16} />} title="招聘">
         <p>暫無。</p>
       </Pending>
+
+      <a className="ov-doclink" href={YUPAI_REPORT_URL} target="_blank" rel="noopener noreferrer">
+        <ExternalLink size={15} strokeWidth={1.9} />
+        <span className="ov-doclink-text">
+          <strong>{YUPAI_REPORT_TITLE}</strong>
+          <span className="muted small">預排 vs 日誌合規報告（Lark 雲端文件，產生器每日覆寫）</span>
+        </span>
+      </a>
 
       <AttendanceCards />
 
