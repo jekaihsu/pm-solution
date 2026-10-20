@@ -7,6 +7,7 @@ export interface WeekRange {
   start: number; // inclusive, epoch ms
   end: number; // exclusive
   label: string;
+  custom?: boolean; // true when a custom date range (not a Mon–Sun week) is active
 }
 
 export function weekRange(offset: number, now = Date.now()): WeekRange {
@@ -61,6 +62,35 @@ export function weekParamToOffset(param: string | null | undefined, now = Date.n
   const mondayLocal = week1Monday + (week - 1) * 7 * DAY;
   const start = mondayLocal - TZ_OFFSET;
   return Math.round((start - weekRange(0, now).start) / (7 * DAY));
+}
+
+// Week offset (0 = this week) of the Mon–Sun week containing `ms`.
+export function offsetOfDate(ms: number, now = Date.now()): number {
+  const local = ms + TZ_OFFSET;
+  const dayIdx = (new Date(local).getUTCDay() + 6) % 7;
+  const monday = Math.floor(local / DAY) * DAY - dayIdx * DAY - TZ_OFFSET;
+  return Math.round((monday - weekRange(0, now).start) / (7 * DAY));
+}
+
+// "YYYY-MM-DD" (Taipei) → epoch ms at local midnight; and back.
+export function dateStrToMs(s: string): number {
+  return Date.parse(`${s}T00:00:00+08:00`);
+}
+export function msToDateStr(ms: number): string {
+  return new Date(ms + TZ_OFFSET).toISOString().slice(0, 10);
+}
+
+// Build a custom-range WeekRange (inclusive from..to by calendar day, Taipei).
+export function customRange(fromStr: string, toStr: string, now = Date.now()): WeekRange | null {
+  const start = dateStrToMs(fromStr);
+  const endInclusive = dateStrToMs(toStr);
+  if (!Number.isFinite(start) || !Number.isFinite(endInclusive) || endInclusive < start) return null;
+  const end = endInclusive + DAY; // exclusive
+  const md = (ms: number) => {
+    const d = new Date(ms + TZ_OFFSET);
+    return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+  };
+  return { offset: offsetOfDate(start, now), start, end, label: `${md(start)}–${md(endInclusive)}`, custom: true };
 }
 
 export function formatDate(ms: number): string {
