@@ -2,7 +2,7 @@
 // R09 內業報告：內業經理看上週「預排 vs 實際」。邏輯在 lib/internalReport.ts（純函式，scripts/test-internal-report.mjs 測試）。
 // 內業以人為單位；人員 record_id＋日期比對，組別只顯示。成本欄位（出工成本、人力成本、方案日成本、加班費、雜支）不讀、不顯示。
 import { CircleAlert, Hourglass } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
 import {
   buildInternalReport,
@@ -13,8 +13,10 @@ import {
   INTERNAL_SCHEDULE_FIELDS,
   INTERNAL_WORK_FIELDS,
   KIND_UNFILLED,
+  KIND_UNFILLED_LEAVE,
   KIND_UNPLANNED,
   RETURNED,
+  taipeiDay,
   type CaseResult,
   type ExceptionRow,
 } from "@/lib/internalReport";
@@ -32,10 +34,13 @@ const md = (day: number) => {
 };
 const range = (e: ExceptionRow) => (e.from === e.to ? md(e.from) : `${md(e.from)}～${md(e.to)}`);
 
-const KIND_CLASS = (k: string) => (k === KIND_UNPLANNED ? "pill pill-warn" : k === KIND_UNFILLED ? "pill" : "pill pill-bad");
+const KIND_CLASS = (k: string) => (k === KIND_UNPLANNED ? "pill pill-warn" : k === KIND_UNFILLED ? "pill" : k === KIND_UNFILLED_LEAVE ? "pill pill-good" : "pill pill-bad");
 const RESULT_CLASS: Record<CaseResult, string> = { 有排有做: "pill pill-good", 有排未做: "pill pill-warn", 未排有做: "pill" };
 
-const EXCEPTION_FILTERS = [KIND_UNPLANNED, KIND_UNFILLED, ...INTERNAL_FLAGS, RETURNED] as const;
+const EXCEPTION_FILTERS = [KIND_UNPLANNED, KIND_UNFILLED, KIND_UNFILLED_LEAVE, ...INTERNAL_FLAGS, RETURNED] as const;
+
+// Lark 假勤回應（型別就地定義，避免把 server-only 模組牽進前端 bundle）。
+type LeaveResp = { status: string; days?: Record<string, { date: string; kind: string }[]> };
 const CASE_FILTERS: CaseResult[] = ["有排有做", "有排未做", "未排有做"];
 
 function Chips<T extends string>({ label, options, value, onPick, count }: { label: string; options: readonly T[]; value: T | null; onPick: (v: T | null) => void; count: (v: T | null) => number }) {
@@ -54,7 +59,7 @@ function Chips<T extends string>({ label, options, value, onPick, count }: { lab
 }
 
 export default function InternalReport() {
-  const { week, version: globalVersion } = useShell();
+  const { week, version: globalVersion, demo, tick, manual } = useShell();
   const [localVersion, setLocalVersion] = useState<DataVersion>("v3");
   const version: DataVersion = globalVersion === "all" ? localVersion : globalVersion;
   const work = useSource(`${version}-internal-work`, { fields: INTERNAL_WORK_FIELDS, links: true });
@@ -64,6 +69,43 @@ export default function InternalReport() {
   const cases = useSource("v3-cases", { fields: INTERNAL_CASE_FIELDS, links: true, enabled: casesOn });
   const [exFilter, setExFilter] = useState<string | null>(null);
   const [caseFilter, setCaseFilter] = useState<CaseResult | null>(null);
+
+  // 「已請假＝正常」：抓 Lark 假勤（請假／出差／外出）的日子，自動把「有排未填」判為正常。
+  // 失敗或沒權限時 leaveDays 維持 null，報表照舊（不影響其他計算）。
+  const [leaveDays, setLeaveDays] = useState<Map<string, Set<number>> | null>(null);
+  const [leaveState, setLeaveState] = useState<"off" | "ok" | "fail">("off");
+  useEffect(() => {
+    let off = false;
+    const qs = new URLSearchParams({ week: String(week.start) });
+    if (demo) qs.set("demo", "1");
+    if (tick > 0 && manual) qs.set("refresh", "1");
+    fetch(`/api/attendance/leave?${qs}`)
+      .then((r) => r.json())
+      .then((res: LeaveResp) => {
+        if (off) return;
+        if (res.status !== "ok" || !res.days) {
+          setLeaveDays(null);
+          setLeaveState("fail");
+          return;
+        }
+        const m = new Map<string, Set<number>>();
+        for (const [rid, list] of Object.entries(res.days)) {
+          const set = new Set<number>();
+          for (const d of list) set.add(taipeiDay(Date.parse(`${d.date}T00:00:00+08:00`)));
+          m.set(rid, set);
+        }
+        setLeaveDays(m);
+        setLeaveState("ok");
+      })
+      .catch(() => {
+        if (off) return;
+        setLeaveDays(null);
+        setLeaveState("fail");
+      });
+    return () => {
+      off = true;
+    };
+  }, [week.start, demo, tick, manual]);
 
   const report = useMemo(() => {
     if (work.status !== "ok" || !work.data) return null;
@@ -75,8 +117,9 @@ export default function InternalReport() {
       cases: casesOn && cases.status === "ok" ? cases.data : undefined,
       start: week.start,
       end: week.end,
+      leave: leaveDays ?? undefined,
     });
-  }, [work.status, work.data, cost.status, cost.data, sched.status, sched.data, cases.status, cases.data, casesOn, week.start, week.end]);
+  }, [work.status, work.data, cost.status, cost.data, sched.status, sched.data, cases.status, cases.data, casesOn, week.start, week.end, leaveDays]);
 
   const header = (
     <div className="cg-head">
@@ -125,6 +168,9 @@ export default function InternalReport() {
   if (casesOn && cases.status !== "ok") notes.push(`案件表${STATUS_TEXT[cases.status]}${cases.error ? `：${cases.error}` : ""}`);
   if (report.stats.unmatchedOrders) notes.push(`${report.stats.unmatchedOrders} 張工作單對不到成本單（沒有人與組別，不列入任何人的人日；案件與異常表仍會列出）`);
   if (report.stats.dateMismatch) notes.push(`${report.stats.dateMismatch} 張工作單的「工作日期-營業額明細」與成本單工作日期不同，以成本單為準`);
+  const leaveAutoDays = report.exceptions.filter((e) => e.kinds.includes(KIND_UNFILLED_LEAVE)).reduce((s, e) => s + e.days, 0);
+  if (leaveState === "ok") notes.push(`已套用 Lark 假勤：「有排未填」當天若請假／出差／外出自動判為正常（${leaveAutoDays} 人日，顯示為「${KIND_UNFILLED_LEAVE}」）`);
+  else if (leaveState === "fail" && !demo) notes.push("未套用 Lark 假勤（沒有人事查看權限或讀取失敗）：「有排未填」未自動扣除請假／出差／外出");
 
   const exCount = (k: string | null) => (k === null ? report.exceptions.length : report.exceptions.filter((e) => e.kinds.includes(k)).length);
   const exRows = exFilter ? report.exceptions.filter((e) => e.kinds.includes(exFilter)) : report.exceptions;

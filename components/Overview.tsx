@@ -19,6 +19,14 @@ const STATUS: Record<string, string> = {
 
 function SourceRow({ src, state, offset }: { src: SourceDef; state: SourceState; offset: number }) {
   const d = state.data;
+  if (src.apiOnly) {
+    return (
+      <li className="ov-row">
+        <span className="ov-name">{src.name}</span>
+        <span className="pill pill-good" title="非多維表格：經 Lark Open API 讀取">經 API</span>
+      </li>
+    );
+  }
   const field = d ? resolveDateField(src, d.fields) : undefined;
   const trend = d && field ? weeklyCounts(d, field, offset, 8) : null;
   const now = trend?.[trend.length - 1].count;
@@ -55,9 +63,10 @@ function SourceRow({ src, state, offset }: { src: SourceDef; state: SourceState;
 export default function Overview() {
   const { week, version } = useShell();
   // SOURCES is a fixed list, so calling the hook per entry keeps hook order stable.
-  const states = Object.fromEntries(SOURCES.map((s) => [s.key, useSource(s.key, { only: "dates" })]));
+  const states = Object.fromEntries(SOURCES.map((s) => [s.key, useSource(s.key, { only: "dates", enabled: !s.apiOnly })]));
   // Optional reference tables (no report depends on them) are counted apart.
   const located = SOURCES.filter((s) => isLocated(s) && !s.optional);
+  const unlocated = SOURCES.filter((s) => !isLocated(s) && !s.apiOnly).length;
   const ok = located.filter((s) => states[s.key].status === "ok").length;
   const failed = located.filter((s) => states[s.key].status === "error").length;
   const optionalFailed = SOURCES.filter((s) => s.optional && isLocated(s) && states[s.key].status === "error").length;
@@ -90,7 +99,7 @@ export default function Overview() {
         </div>
         <div className="stat">
           <span className="stat-label">尚未定位的來源</span>
-          <span className="stat-value">{SOURCES.length - located.length}</span>
+          <span className="stat-value">{unlocated}</span>
         </div>
         <div className="stat">
           <span className="stat-label">最近更新</span>

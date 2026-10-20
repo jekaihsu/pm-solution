@@ -2,6 +2,13 @@
 // 不必解析 attendanceCore（Next 以外不補 .ts 副檔名）。
 import { buildAttendanceView, weekDates, ymdInt, type AttendanceResponse, type LarkUserApprovals, type LarkUserTask } from "./attendanceCore";
 import { demoOpenId, otPeople, otPeopleGroups } from "./demo";
+import type { LeaveDaysResponse } from "./attendance";
+
+// 示範的「已請假＝正常」資料：R09／R10 示範用 n:名字 當人員鍵，record_id 對不上，所以示範回空集合
+// （功能以真實 Lark 資料為準）。仍回 status ok，讓畫面顯示「已載入、本週沒有請假」。
+export function demoLeaveDays(_weekStart: number, _now: number): LeaveDaysResponse {
+  return { status: "ok", days: {} };
+}
 
 // R04 出勤／出差示範：假的 Lark 假勤回應 → 走同一套 buildAttendanceView。全部虛構。
 export function demoAttendance(weekStart: number, now: number): AttendanceResponse {

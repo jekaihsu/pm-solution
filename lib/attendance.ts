@@ -5,6 +5,7 @@ import { LarkApiError, getSourceData, larkReadApi } from "./lark";
 import { PEOPLE_ACCOUNT, PEOPLE_ACTIVE, PEOPLE_GROUP, PEOPLE_NAME } from "./people";
 import { sourceByKey } from "./reports";
 import {
+  approvalDaysByUser,
   attendanceErrorText,
   attendanceTtl,
   buildAttendanceView,
@@ -18,6 +19,7 @@ import {
   taipeiDate,
   weekDates,
   ymdInt,
+  type ApprovalKind,
   type AttendanceResponse,
   type FieldCostInput,
   type LarkUserApprovals,
@@ -214,6 +216,63 @@ async function compute(weekStart: number, now: number, force: boolean): Promise<
   } catch (e) {
     absorb(perm, e, SCOPES.task);
     if (perm.missing.size) return { status: "needs-permission", missing: [...perm.missing], hint: "請管理員在 PM週報 開發者後台開通上列權限並發布新版本。" };
+    return { status: "error", error: attendanceErrorText(e) };
+  }
+}
+
+// 「已請假＝正常」用：所選週內每位同事（人員名單 record_id，含同人多列的別名）請假／出差／外出的日子。
+// 給 R09／R10 把「有排未填／有排未做」自動判為正常。只回 record_id 與日期（非個資），經 HR 守門。
+export interface LeaveDaysResponse {
+  status: "ok" | "needs-permission" | "error" | "not-connected";
+  missing?: string[];
+  hint?: string;
+  error?: string;
+  // 人員名單 record_id → 當週請假／出差／外出的日子（YYYY-MM-DD）
+  days?: Record<string, { date: string; kind: ApprovalKind }[]>;
+}
+
+async function computeLeaveDays(weekStart: number, force: boolean): Promise<LeaveDaysResponse> {
+  const dates = weekDates(weekStart);
+  const rosterSrc = sourceByKey("v3-people");
+  if (!rosterSrc) return { status: "error", error: "找不到人員名單來源" };
+  const rows = (await getSourceData(rosterSrc)).records as unknown as RosterRow[];
+  const { people } = buildRoster(rows, { name: PEOPLE_NAME, group: PEOPLE_GROUP, active: PEOPLE_ACTIVE, account: PEOPLE_ACCOUNT });
+  const perm: Perm = { missing: new Set() };
+  let employeeIds: Map<string, string>;
+  try {
+    employeeIds = await employeeIdMap(people.map((r) => r.openId), force);
+  } catch (e) {
+    absorb(perm, e, SCOPES.contact);
+    if (perm.missing.size) return { status: "needs-permission", missing: [...perm.missing], hint: "請管理員在 PM週報 開通假勤與通訊錄唯讀權限並發布新版本。" };
+    return { status: "error", error: attendanceErrorText(e) };
+  }
+  const allIds = people.map((r) => employeeIds.get(r.openId)).filter((x): x is string => !!x);
+  let byUser: Map<string, { date: string; kind: ApprovalKind }[]>;
+  try {
+    byUser = approvalDaysByUser(await queryApprovals(allIds, dates[0], dates[6]), dates);
+  } catch (e) {
+    absorb(perm, e, SCOPES.task);
+    if (perm.missing.size) return { status: "needs-permission", missing: [...perm.missing], hint: "請管理員在 PM週報 開通假勤唯讀權限並發布新版本。" };
+    return { status: "error", error: attendanceErrorText(e) };
+  }
+  const days: Record<string, { date: string; kind: ApprovalKind }[]> = {};
+  for (const p of people) {
+    const eid = employeeIds.get(p.openId);
+    const d = eid ? byUser.get(eid) : undefined;
+    if (!d) continue;
+    for (const rid of [p.recordId, ...(p.altRecordIds ?? [])]) if (rid) days[rid] = d;
+  }
+  return { status: "ok", days };
+}
+
+export async function getLeaveDays(weekStart: number, opts: { force?: boolean; now?: number } = {}): Promise<LeaveDaysResponse> {
+  const now = opts.now ?? Date.now();
+  const monday = Date.parse(`${weekDates(weekStart)[0]}T00:00:00+08:00`);
+  const isCurrent = weekDates(monday).includes(taipeiDate(now)) && taipeiDate(now) <= weekDates(monday)[6];
+  const ttl = (v: LeaveDaysResponse) => (v.status === "ok" ? (isCurrent ? 5 * 60000 : 6 * 3600000) : 60000);
+  try {
+    return await memo(`att:leave:${monday}`, ttl, () => computeLeaveDays(monday, !!opts.force), opts.force);
+  } catch (e) {
     return { status: "error", error: attendanceErrorText(e) };
   }
 }

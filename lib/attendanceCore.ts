@@ -294,6 +294,30 @@ function normalizeApprovals(items: LarkUserApprovals[]): Map<string, Approval[]>
   return new Map([...byUser].map(([k, v]) => [k, [...v.values()]]));
 }
 
+/**
+ * 每位員工在所選週內有請假／出差／外出的日子（employee_id → [{date, kind}]）。
+ * 給「有排未填／有排未做」自動判定「已請假＝正常」用：只要當天被任一假單涵蓋就算（半天假也算）。
+ * 純函式（用得到 normalizeApprovals／leaveCoverage），scripts/test-attendance.mjs 可直接測。
+ */
+export function approvalDaysByUser(items: LarkUserApprovals[], dates: string[]): Map<string, { date: string; kind: ApprovalKind }[]> {
+  const inWeek = new Set(dates);
+  const out = new Map<string, { date: string; kind: ApprovalKind }[]>();
+  for (const [uid, list] of normalizeApprovals(items)) {
+    const acc: { date: string; kind: ApprovalKind }[] = [];
+    const seen = new Set<string>();
+    for (const a of list) {
+      const days = a.kind === "leave" ? [...leaveCoverage(a).keys()] : [...a.covered];
+      for (const d of days) {
+        if (!inWeek.has(d) || seen.has(`${d}|${a.kind}`)) continue;
+        seen.add(`${d}|${a.kind}`);
+        acc.push({ date: d, kind: a.kind });
+      }
+    }
+    if (acc.length) out.set(uid, acc);
+  }
+  return out;
+}
+
 // ---------- 外出／出差時間文字 ----------
 const hm = (v: string) => v.match(/(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/);
 const md = (d: string) => d.slice(5).replace("-", "/");
