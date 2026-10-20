@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start -p ${PORT:-3000}",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "yupai:parity": "node scripts/yupai-parity/cli.mjs"
   },
   "engines": {
     "node": ">=20"
