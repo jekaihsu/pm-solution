@@ -43,7 +43,7 @@ const EXCEPTION_FILTERS = [KIND_UNPLANNED, KIND_UNFILLED, KIND_UNFILLED_LEAVE, .
 const INTERNAL_MANAGER = managerOf("內業"); // 張佳斌
 
 // Lark 假勤回應（型別就地定義，避免把 server-only 模組牽進前端 bundle）。
-type LeaveResp = { status: string; days?: Record<string, { date: string; kind: string }[]> };
+type LeaveResp = { status: string; days?: Record<string, { date: string; kind: string }[]>; rangeClamped?: boolean };
 const CASE_FILTERS: CaseResult[] = ["有排有做", "有排未做", "未排有做"];
 
 function Chips<T extends string>({ label, options, value, onPick, count }: { label: string; options: readonly T[]; value: T | null; onPick: (v: T | null) => void; count: (v: T | null) => number }) {
@@ -78,6 +78,7 @@ export default function InternalReport() {
   // 失敗或沒權限時 leaveDays 維持 null，報表照舊（不影響其他計算）。
   const [leaveDays, setLeaveDays] = useState<Map<string, Set<number>> | null>(null);
   const [leaveState, setLeaveState] = useState<"off" | "ok" | "fail">("off");
+  const [leaveClamped, setLeaveClamped] = useState(false);
   useEffect(() => {
     let off = false;
     const qs = new URLSearchParams({ week: String(week.start), to: String(week.end) });
@@ -90,6 +91,7 @@ export default function InternalReport() {
         if (res.status !== "ok" || !res.days) {
           setLeaveDays(null);
           setLeaveState("fail");
+          setLeaveClamped(false);
           return;
         }
         const m = new Map<string, Set<number>>();
@@ -100,11 +102,13 @@ export default function InternalReport() {
         }
         setLeaveDays(m);
         setLeaveState("ok");
+        setLeaveClamped(!!res.rangeClamped);
       })
       .catch(() => {
         if (off) return;
         setLeaveDays(null);
         setLeaveState("fail");
+        setLeaveClamped(false);
       });
     return () => {
       off = true;
@@ -175,6 +179,7 @@ export default function InternalReport() {
   const leaveAutoDays = report.exceptions.filter((e) => e.kinds.includes(KIND_UNFILLED_LEAVE)).reduce((s, e) => s + e.days, 0);
   if (leaveState === "ok") notes.push(`已套用 Lark 假勤：「有排未填」當天若請假／出差／外出自動判為正常（${leaveAutoDays} 人日，顯示為「${KIND_UNFILLED_LEAVE}」）`);
   else if (leaveState === "fail" && !demo) notes.push("未套用 Lark 假勤（沒有人事查看權限或讀取失敗）：「有排未填」未自動扣除請假／出差／外出");
+  if (leaveClamped) notes.push("查詢區間超過今天 +60 天上限，Lark 假勤只抓到上限為止；超出的日子未套用請假判定");
 
   const exCount = (k: string | null) => (k === null ? report.exceptions.length : report.exceptions.filter((e) => e.kinds.includes(k)).length);
   const exPeople = [...new Set(report.exceptions.map((e) => e.person))].sort((a, b) => a.localeCompare(b, "zh-Hant"));

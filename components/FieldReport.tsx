@@ -10,7 +10,7 @@ import { managerOf } from "@/lib/managers";
 import { sourceByKey, type DataVersion } from "@/lib/reports";
 import { weekName } from "@/lib/week";
 
-type LeaveResp = { status: string; days?: Record<string, { date: string; kind: string }[]> };
+type LeaveResp = { status: string; days?: Record<string, { date: string; kind: string }[]>; rangeClamped?: boolean };
 const FIELD_MANAGER = managerOf("外業"); // 柯汉
 import { useShell } from "./AppShell";
 import EmptyState from "./EmptyState";
@@ -49,6 +49,7 @@ export default function FieldReport() {
   // 「已請假＝正常」：抓 Lark 假勤，把當天預排的人都請假／出差／外出的「有排未做」自動判為正常。
   const [leaveDays, setLeaveDays] = useState<Map<string, Set<number>> | null>(null);
   const [leaveState, setLeaveState] = useState<"off" | "ok" | "fail">("off");
+  const [leaveClamped, setLeaveClamped] = useState(false);
   useEffect(() => {
     let off = false;
     const qs = new URLSearchParams({ week: String(week.start), to: String(week.end) });
@@ -61,6 +62,7 @@ export default function FieldReport() {
         if (res.status !== "ok" || !res.days) {
           setLeaveDays(null);
           setLeaveState("fail");
+          setLeaveClamped(false);
           return;
         }
         const m = new Map<string, Set<number>>();
@@ -71,8 +73,9 @@ export default function FieldReport() {
         }
         setLeaveDays(m);
         setLeaveState("ok");
+        setLeaveClamped(!!res.rangeClamped);
       })
-      .catch(() => !off && (setLeaveDays(null), setLeaveState("fail")));
+      .catch(() => !off && (setLeaveDays(null), setLeaveState("fail"), setLeaveClamped(false)));
     return () => {
       off = true;
     };
@@ -327,6 +330,7 @@ export default function FieldReport() {
         </div>
         {leaveState === "ok" && leaveAutoN > 0 && <p className="muted small">已套用 Lark 假勤：{leaveAutoN} 筆「有排未做」因當天預排的人都請假／出差／外出，自動判為正常（顯示為「有排未做（已請假）」）。</p>}
         {leaveState === "fail" && !demo && <p className="muted small">未套用 Lark 假勤（沒有人事查看權限或讀取失敗）：「有排未做」未自動扣除請假。</p>}
+        {leaveClamped && <p className="muted small">查詢區間超過今天 +60 天上限，Lark 假勤只抓到上限為止；超出的日子未套用請假判定。</p>}
         <p className="muted small">
           檢核說明需在 Lark 填寫，網站唯讀。
           {larkUrl && (

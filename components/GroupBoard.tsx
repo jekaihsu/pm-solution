@@ -750,7 +750,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const [failOpen, setFailOpen] = useState(false);
   const [layout, setLayout] = useState<"sheet" | "detail">("sheet");
   const [sopOpen, setSopOpen] = useState(false);
-  useEffect(() => setDay(null), [version, week.start]);
+  useEffect(() => setDay(null), [version, week.start, week.end]);
   const pick = (g: string | null, d: number | null = null) => {
     setFocus(g);
     setDay(d);

@@ -14,8 +14,18 @@ export async function GET(req: NextRequest) {
   const now = Date.now();
   if (!Number.isFinite(week) || week < now - 400 * 86400000 || week > now + 60 * 86400000) return NextResponse.json({ status: "error", error: "參數錯誤" }, { status: 400 });
   // 自訂日期區間可跨多週，`to`（exclusive ms）決定要抓到哪一週；缺省或不合法時只抓起始週。
+  // 超過 now+60d 的區間不是整段丟掉（原本會悄悄退回只抓起始週、卻仍回 ok），而是把結束夾到
+  // 上限、照抓到上限那一週，並在回應標 rangeClamped 讓 UI 提示這段區間沒有抓滿。
   const toParam = Number(req.nextUrl.searchParams.get("to"));
-  const end = Number.isFinite(toParam) && toParam > week && toParam <= now + 60 * 86400000 ? toParam : undefined;
+  const cap = now + 60 * 86400000;
+  let end: number | undefined;
+  let rangeClamped = false;
+  if (Number.isFinite(toParam) && toParam > week) {
+    if (toParam > cap) {
+      end = cap;
+      rangeClamped = true;
+    } else end = toParam;
+  }
   const headers = { "Cache-Control": "no-store" };
 
   if (req.nextUrl.searchParams.get("demo") === "1") return NextResponse.json(demoLeaveDays(week, now), { headers });
@@ -27,5 +37,5 @@ export async function GET(req: NextRequest) {
 
   const res = await getLeaveDays(week, { force: req.nextUrl.searchParams.get("refresh") === "1", now, end });
   if (res.status === "error") console.error("[attendance/leave]", res.error);
-  return NextResponse.json(res, { status: res.status === "error" ? 502 : 200, headers });
+  return NextResponse.json(rangeClamped && res.status === "ok" ? { ...res, rangeClamped } : res, { status: res.status === "error" ? 502 : 200, headers });
 }

@@ -230,6 +230,8 @@ export interface LeaveDaysResponse {
   error?: string;
   // 人員名單 record_id → 當週請假／出差／外出的日子（YYYY-MM-DD）
   days?: Record<string, { date: string; kind: ApprovalKind }[]>;
+  // 自訂區間超過 now+60d 上限，結束被夾到上限、只抓到上限那一週（route 設定，UI 用來提示）。
+  rangeClamped?: boolean;
 }
 
 async function computeLeaveDays(weekStart: number, force: boolean): Promise<LeaveDaysResponse> {
