@@ -90,13 +90,17 @@ async function employeeIdMap(openIds: string[], force: boolean): Promise<Map<str
 }
 
 // 部門（含全部子部門）底下的人 employee_id。
+// 考勤組成員集合是以 employee_id 比對（group detail 用 employee_type=employee_id 回 bind_user_ids，
+// buildAttendanceView 也以 employee_id 判 isMember），所以這裡必須取 user_id（＝Lark 的 employee_id），
+// 不能用 open_id — 否則用部門綁定加入考勤組的人（非逐一綁定）會以 open_id 進集合、永遠對不上
+// employee_id 的比對而被判為「不在考勤組」，整列從 R04 消失。
 async function deptUsers(dept: string): Promise<string[]> {
   const ids = [dept];
   const kids = await pages<any>(`/contact/v3/departments/${encodeURIComponent(dept)}/children`, { department_id_type: "open_department_id", fetch_child: "true" }, (d) => d?.items ?? []);
   for (const k of kids) if (k?.open_department_id) ids.push(String(k.open_department_id));
   const out = new Set<string>();
   await mapPool(ids, LIMIT, async (id) => {
-    const us = await pages<any>("/contact/v3/users/find_by_department", { department_id: id, department_id_type: "open_department_id", user_id_type: "open_id" }, (d) => d?.items ?? []);
+    const us = await pages<any>("/contact/v3/users/find_by_department", { department_id: id, department_id_type: "open_department_id", user_id_type: "user_id" }, (d) => d?.items ?? []);
     for (const u of us) if (u?.user_id) out.add(String(u.user_id));
   });
   return [...out];
