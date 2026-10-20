@@ -739,7 +739,9 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
         codes.push(worked ? "leave-half" : "leave-half-nofield");
         continue;
       }
-      const code: DayCode = i < 5 && lw >= 1 ? "leave" : i < 5 && other ? other : worked ? "field" : "nofield";
+      // 週末（i>=5）沒有成本單＝免打卡（off），不是「無日報」——外業週末本來就不一定出工，
+      // 標 nofield 會變成雜訊（item 5）。週末有成本單仍算 field（週末加班出工照算）。
+      const code: DayCode = i < 5 && lw >= 1 ? "leave" : i < 5 && other ? other : worked ? "field" : i < 5 ? "nofield" : "off";
       add(code, 1);
       codes.push(code);
     }
