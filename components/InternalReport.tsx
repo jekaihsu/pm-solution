@@ -1,9 +1,11 @@
 "use client";
 // R09 內業報告：內業經理看上週「預排 vs 實際」。邏輯在 lib/internalReport.ts（純函式，scripts/test-internal-report.mjs 測試）。
 // 內業以人為單位；人員 record_id＋日期比對，組別只顯示。成本欄位（出工成本、人力成本、方案日成本、加班費、雜支）不讀、不顯示。
-import { CircleAlert, Hourglass } from "lucide-react";
+import { CircleAlert, Download, Hourglass } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
+import { downloadCsv, simpleCsv } from "@/lib/csv";
+import { managerOf } from "@/lib/managers";
 import {
   buildInternalReport,
   dayStartMs,
@@ -38,6 +40,7 @@ const KIND_CLASS = (k: string) => (k === KIND_UNPLANNED ? "pill pill-warn" : k =
 const RESULT_CLASS: Record<CaseResult, string> = { 有排有做: "pill pill-good", 有排未做: "pill pill-warn", 未排有做: "pill" };
 
 const EXCEPTION_FILTERS = [KIND_UNPLANNED, KIND_UNFILLED, KIND_UNFILLED_LEAVE, ...INTERNAL_FLAGS, RETURNED] as const;
+const INTERNAL_MANAGER = managerOf("內業"); // 張佳斌
 
 // Lark 假勤回應（型別就地定義，避免把 server-only 模組牽進前端 bundle）。
 type LeaveResp = { status: string; days?: Record<string, { date: string; kind: string }[]> };
@@ -68,6 +71,7 @@ export default function InternalReport() {
   const casesOn = version === "v3"; // V4 沒有對應的案件表
   const cases = useSource("v3-cases", { fields: INTERNAL_CASE_FIELDS, links: true, enabled: casesOn });
   const [exFilter, setExFilter] = useState<string | null>(null);
+  const [exPerson, setExPerson] = useState<string>("");
   const [caseFilter, setCaseFilter] = useState<CaseResult | null>(null);
 
   // 「已請假＝正常」：抓 Lark 假勤（請假／出差／外出）的日子，自動把「有排未填」判為正常。
@@ -173,7 +177,17 @@ export default function InternalReport() {
   else if (leaveState === "fail" && !demo) notes.push("未套用 Lark 假勤（沒有人事查看權限或讀取失敗）：「有排未填」未自動扣除請假／出差／外出");
 
   const exCount = (k: string | null) => (k === null ? report.exceptions.length : report.exceptions.filter((e) => e.kinds.includes(k)).length);
-  const exRows = exFilter ? report.exceptions.filter((e) => e.kinds.includes(exFilter)) : report.exceptions;
+  const exPeople = [...new Set(report.exceptions.map((e) => e.person))].sort((a, b) => a.localeCompare(b, "zh-Hant"));
+  const exRows = report.exceptions.filter((e) => (!exFilter || e.kinds.includes(exFilter)) && (!exPerson || e.person === exPerson));
+  const exportExceptions = () =>
+    downloadCsv(
+      `R09_異常與人工確認_${version.toUpperCase()}_${week.label.replace(/[\s/–]/g, "_")}.csv`,
+      simpleCsv(
+        ["項次", "類別", "負責經理", "組別", "人員", "工程編號", "日期", "天數", "營業額點數", "工程簡稱", "說明"],
+        exRows.map((e, i) => [i + 1, e.kinds.join("＋"), INTERNAL_MANAGER, e.team, e.person, e.code, e.from === e.to ? md(e.from) : `${md(e.from)}~${md(e.to)}`, e.days, e.revenue === null ? "" : r2(e.revenue), e.name, e.note]),
+        [`R09 內業 ${weekName(week.offset)} ${week.label}・負責經理 ${INTERNAL_MANAGER}`, `類別＝${exFilter ?? "全部"}、人員＝${exPerson || "全部"}`],
+      ),
+    );
   const caseCount = (k: CaseResult | null) => (k === null ? report.cases.length : report.cases.filter((c) => c.result === k).length);
   const caseRows = caseFilter ? report.cases.filter((c) => c.result === caseFilter) : report.cases;
   const pct = s.achievement === null ? null : Math.round(s.achievement * 1000) / 10;
@@ -324,12 +338,30 @@ export default function InternalReport() {
           <span className="muted small">檢核說明需在 Lark 填寫，網站唯讀</span>
         </div>
         <Chips<string> label="異常類別" options={EXCEPTION_FILTERS} value={exFilter} onPick={setExFilter} count={exCount} />
+        <div className="ir-tools">
+          <label className="tool tool-select">
+            人員
+            <select value={exPerson} onChange={(e) => setExPerson(e.target.value)} aria-label="篩選人員">
+              <option value="">全部</option>
+              {exPeople.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="muted small">負責經理：{INTERNAL_MANAGER}（內業）</span>
+          <button className="tool" onClick={exportExceptions} disabled={!exRows.length} title="匯出 CSV">
+            <Download size={14} strokeWidth={1.75} /> 匯出
+          </button>
+        </div>
         <div className="ir-scroll">
           <table className="ir-table">
             <thead>
               <tr>
                 <th className="num">項次</th>
                 <th>類別</th>
+                <th>負責經理</th>
                 <th>組別</th>
                 <th>人員</th>
                 <th>工程編號</th>
@@ -353,6 +385,7 @@ export default function InternalReport() {
                       ))}
                     </span>
                   </td>
+                  <td className="fr-nowrap">{INTERNAL_MANAGER}</td>
                   <td>{e.team}</td>
                   <td className="strong">{e.person}</td>
                   <td>{e.code}</td>
@@ -365,7 +398,7 @@ export default function InternalReport() {
               ))}
               {!exRows.length && (
                 <tr>
-                  <td colSpan={10} className="muted">
+                  <td colSpan={11} className="muted">
                     {report.exceptions.length ? "此分類沒有項目" : `${weekName(week.offset)}沒有需要人工確認的項目`}
                   </td>
                 </tr>

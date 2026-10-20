@@ -763,3 +763,7 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
 .cg-sheet .att-name { text-align: left; font-weight: 600; background: var(--surface-2); }
 .cg-sheet th small { display: block; font-weight: 400; color: var(--text-2); }
 .att-reason { white-space: normal !important; min-width: 160px; max-width: 280px; }
+
+/* Exception-list toolbars (R09/R10): person filter, responsible manager, CSV export */
+.ir-tools, .fr-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; }
+.ir-tools .tool-select { gap: 4px; }
