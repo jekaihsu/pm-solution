@@ -1,6 +1,7 @@
 "use client";
-import { ArrowDownRight, ArrowUpRight, ChevronRight, CircleDashed, Minus } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, ChevronRight, CircleDashed, ExternalLink, Minus } from "lucide-react";
 import Link from "next/link";
+import { YUPAI_REPORT_TITLE, YUPAI_REPORT_URL } from "@/lib/yupaiReport";
 import { formatNumber } from "@/lib/aggregate";
 import { resolveDateField, weeklyCounts } from "@/lib/metrics";
 import { REPORTS, SOURCES, isLocated, sourceByKey, type SourceDef } from "@/lib/reports";
@@ -106,6 +107,15 @@ export default function Overview() {
           <span className="stat-value small-value">{latest ? new Date(latest).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
         </div>
       </div>
+
+      <a className="ov-doclink" href={YUPAI_REPORT_URL} target="_blank" rel="noopener noreferrer">
+        <ExternalLink size={15} strokeWidth={1.9} />
+        <span className="ov-doclink-text">
+          <strong>{YUPAI_REPORT_TITLE}</strong>
+          <span className="muted small">預排 vs 日誌合規（Lark 雲端文件，每日更新）</span>
+        </span>
+        <ChevronRight size={16} className="ov-chevron" />
+      </a>
 
       <div className="overview-grid">
         {REPORTS.map((r) => {

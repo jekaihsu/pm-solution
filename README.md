@@ -87,6 +87,24 @@ npm install
 npm run dev
 ```
 
+## 預排核對報告（Lark Docx）
+
+總覽頁與 R04 人事頁有一個「預排核對報告」入口，連到一份 Lark 雲端文件（預排 vs 日誌合規）。
+這份文件**不在儀表板內計算**，由 `scripts/yupai-report` 產生器每日覆寫；儀表板只連過去。
+
+- 連結設定在單一來源 `lib/yupaiReport.ts`，可用環境變數 `NEXT_PUBLIC_YUPAI_REPORT_URL` 覆寫
+  （預設指向 docId `VCAgdgGFooejQ9xqiHZjaCGhpIe`）。見 `.env.example`。
+- 判斷口徑（離職排除、僅平日、日誌 1 日寬限、業務免日誌、請假來源、週五前不判下週、只算有活動的人）
+  的**單一事實來源**是 `lib/yupaiCompliance.ts`，與 R04 的 `lib/scheduleCheck.ts` 共用同一組原始函式。
+- 產生器用法、每日指令與口徑決議見 **`docs/YUPAI_REPORT.md`**。
+
+```bash
+# 產出報告並覆寫雲端文件（box 上 lark-cli 已以 user 身分授權）
+cd /workspace/pm-solution && npm run yupai:report -- --doc-id VCAgdgGFooejQ9xqiHZjaCGhpIe
+# 與舊版 Python 產生器對帳（不連 Lark，用快取資料）
+npm run yupai:parity
+```
+
 ## 架構
 
 ```
