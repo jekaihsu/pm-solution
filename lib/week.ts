@@ -49,6 +49,17 @@ export function isoWeek(ms: number): string {
   return `${year}-W${String(week).padStart(2, "0")}`;
 }
 
+// Number of ISO weeks in an ISO week-year (52 or 53). Dec 28 always falls in the
+// last ISO week, so its week number is the count. Mirrors the math in isoWeek().
+export function weeksInIsoYear(year: number): number {
+  const dec28 = Date.UTC(year, 11, 28);
+  const dow = (new Date(dec28).getUTCDay() + 6) % 7; // Mon = 0
+  const thu = dec28 - dow * DAY + 3 * DAY; // Thursday of Dec 28's week
+  const jan4 = Date.UTC(year, 0, 4);
+  const week1Thu = jan4 - ((new Date(jan4).getUTCDay() + 6) % 7) * DAY + 3 * DAY;
+  return 1 + Math.round((thu - week1Thu) / (7 * DAY));
+}
+
 // Parse a YYYY-Www param into a week offset relative to the current week (0 = this week).
 // Returns null when the string is malformed; the offset is clamped by the caller.
 export function weekParamToOffset(param: string | null | undefined, now = Date.now()): number | null {
@@ -56,7 +67,9 @@ export function weekParamToOffset(param: string | null | undefined, now = Date.n
   if (!m) return null;
   const year = Number(m[1]);
   const week = Number(m[2]);
-  if (week < 1 || week > 53) return null;
+  // Reject W53 for years that only have 52 ISO weeks (otherwise it silently rolls
+  // into the next year's week 1).
+  if (week < 1 || week > weeksInIsoYear(year)) return null;
   const jan4 = Date.UTC(year, 0, 4);
   const week1Monday = jan4 - ((new Date(jan4).getUTCDay() + 6) % 7) * DAY; // Monday of ISO week 1 (local-as-UTC)
   const mondayLocal = week1Monday + (week - 1) * 7 * DAY;

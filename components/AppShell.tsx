@@ -2,7 +2,7 @@
 import { CalendarRange, ChevronLeft, ChevronRight, Database, FlaskConical, LayoutGrid, LogOut, Menu, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { REPORTS, type DataVersion, type SourceDef } from "@/lib/reports";
 import { MAX_FORWARD_WEEKS, customRange, isoWeek, msToDateStr, weekName, weekParamToOffset, weekRange, type WeekRange } from "@/lib/week";
 
@@ -110,19 +110,31 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   useEffect(() => setNavOpen(false), [pathname]);
-  // Restore the week from ?week=YYYY-Www on first load (shareable links), then keep the
-  // URL in sync as the picker changes. Uses history.replaceState so report pages stay SSG.
-  useEffect(() => {
+  // Read the current URL's query string into the week/range selection. Used on first
+  // load (shareable links) and on browser back/forward (popstate) so the selection
+  // always matches the address bar.
+  const applyFromUrl = useCallback(() => {
     const sp = new URLSearchParams(window.location.search);
     const from = sp.get("from");
     const to = sp.get("to");
-    if (from && to && customRange(from, to)) setRange({ from, to });
-    else {
-      const parsed = weekParamToOffset(sp.get("week"));
-      if (parsed !== null) setOffsetState(Math.min(MAX_FORWARD_WEEKS, parsed));
+    if (from && to && customRange(from, to)) {
+      setRange({ from, to });
+      return;
     }
-    setUrlReady(true);
+    const parsed = weekParamToOffset(sp.get("week"));
+    setRange(null);
+    setOffsetState(parsed !== null ? Math.min(MAX_FORWARD_WEEKS, parsed) : 0);
   }, []);
+  useEffect(() => {
+    applyFromUrl();
+    setUrlReady(true);
+    // Restore the selection when the user navigates browser history (back/forward).
+    window.addEventListener("popstate", applyFromUrl);
+    return () => window.removeEventListener("popstate", applyFromUrl);
+  }, [applyFromUrl]);
+  // Keep the URL in sync as the picker changes, and re-apply the query after a sidebar
+  // navigation (Next's <Link> drops it) so ?week=/?from/?to survive page changes.
+  // Uses history.replaceState so report pages stay SSG.
   useEffect(() => {
     if (!urlReady) return;
     const u = new URL(window.location.href);
@@ -136,7 +148,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       u.searchParams.delete("to");
     }
     window.history.replaceState(null, "", u);
-  }, [offset, range, urlReady]);
+  }, [offset, range, urlReady, pathname]);
   useEffect(() => {
     fetch("/api/auth/me")
       .then((r) => r.json())
