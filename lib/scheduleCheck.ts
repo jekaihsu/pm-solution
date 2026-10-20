@@ -88,8 +88,10 @@ export interface DailyStatus {
   planned: boolean; // 當天有預排
   logged: boolean; // 當天有成本單（內業／外業／行政任一）
   punched: boolean; // 當天有有效打卡（考勤組）
+  plannedKnown: boolean; // 預排來源讀得到（或已確定有排）才為 true；否則預排欄顯示「未知」、不算缺漏
+  loggedKnown: boolean; // 成本單來源全讀得到（或已確定有填）才為 true；否則日誌欄顯示「未知」、不算缺漏
   leave: "leave" | "trip" | "out" | null; // 當天請假／出差／外出
-  missing: boolean; // 非請假／出差／外出，且預排／日誌／打卡（考勤組）有缺
+  missing: boolean; // 非請假／出差／外出，且預排／日誌／打卡（考勤組）有確定的缺
 }
 
 // 把多張成本單（內業、外業、行政）那天有填的人員 record_id 收集起來。
@@ -123,6 +125,9 @@ export function dailyStatus(
   punched: Set<string>,
   members: Set<string>,
   leaveByRecord: Map<string, "leave" | "trip" | "out">,
+  // 來源讀取狀態：sched＝預排來源 ok，cost＝全部成本單來源 ok。讀不到時不把「找不到」
+  // 當成「沒排／沒填」（避免整欄空集合造成假缺漏），該欄改顯示「未知」、不算缺漏。
+  known: { sched: boolean; cost: boolean } = { sched: true, cost: true },
 ): DailyStatus[] {
   return roster
     .map((p) => {
@@ -131,6 +136,9 @@ export function dailyStatus(
       const planned0 = planned.has(p.recordId);
       const logged0 = logged.has(p.recordId);
       const punched0 = punched.has(p.recordId);
+      // 確定有排／有填就是「已知」；否則要來源讀得到才敢說「沒有」。
+      const plannedKnown = planned0 || known.sched;
+      const loggedKnown = logged0 || known.cost;
       return {
         recordId: p.recordId,
         name: p.name,
@@ -139,8 +147,10 @@ export function dailyStatus(
         planned: planned0,
         logged: logged0,
         punched: punched0,
+        plannedKnown,
+        loggedKnown,
         leave,
-        missing: !leave && (!planned0 || !logged0 || (isMember && !punched0)),
+        missing: !leave && ((plannedKnown && !planned0) || (loggedKnown && !logged0) || (isMember && !punched0)),
       };
     })
     .sort((a, b) => a.group.localeCompare(b.group, "zh-Hant") || a.name.localeCompare(b.name, "zh-Hant"));
