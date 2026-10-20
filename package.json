@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test scripts/test-*.mjs",
     "yupai:report": "tsx scripts/yupai-report/main.ts",
-    "yupai:parity": "tsx scripts/yupai-report/parity.ts"
+    "yupai:parity": "tsx scripts/yupai-report/parity.ts",
+    "yupai:parity:r04": "node scripts/yupai-parity/cli.mjs"
   },
   "engines": {
     "node": ">=20"
