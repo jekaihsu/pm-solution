@@ -106,6 +106,15 @@ export function customRange(fromStr: string, toStr: string, now = Date.now()): W
   return { offset: offsetOfDate(start, now), start, end, label: `${md(start)}–${md(endInclusive)}`, custom: true };
 }
 
+// Chinese weekday character (一…日) for the Taipei calendar day of `ms`. Monday = 一.
+// Derives from the actual date, so it stays correct for custom ranges that don't start
+// on a Monday (unlike indexing a fixed Mon–Sun array by day-offset).
+const WEEKDAY_CN = "一二三四五六日";
+export function weekdayCn(ms: number): string {
+  const idx = (new Date(ms + TZ_OFFSET).getUTCDay() + 6) % 7; // Monday = 0
+  return WEEKDAY_CN[idx];
+}
+
 export function formatDate(ms: number): string {
   const d = new Date(ms + TZ_OFFSET);
   return `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}`;

@@ -80,7 +80,7 @@ export default function InternalReport() {
   const [leaveState, setLeaveState] = useState<"off" | "ok" | "fail">("off");
   useEffect(() => {
     let off = false;
-    const qs = new URLSearchParams({ week: String(week.start) });
+    const qs = new URLSearchParams({ week: String(week.start), to: String(week.end) });
     if (demo) qs.set("demo", "1");
     if (tick > 0 && manual) qs.set("refresh", "1");
     fetch(`/api/attendance/leave?${qs}`)
@@ -109,7 +109,7 @@ export default function InternalReport() {
     return () => {
       off = true;
     };
-  }, [week.start, demo, tick, manual]);
+  }, [week.start, week.end, demo, tick, manual]);
 
   const report = useMemo(() => {
     if (work.status !== "ok" || !work.data) return null;

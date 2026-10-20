@@ -266,13 +266,30 @@ async function computeLeaveDays(weekStart: number, force: boolean): Promise<Leav
   return { status: "ok", days };
 }
 
-export async function getLeaveDays(weekStart: number, opts: { force?: boolean; now?: number } = {}): Promise<LeaveDaysResponse> {
-  const now = opts.now ?? Date.now();
-  const monday = Date.parse(`${weekDates(weekStart)[0]}T00:00:00+08:00`);
+// The Taipei Monday (epoch ms) of the Mon–Sun week containing `ms`.
+const mondayOf = (ms: number) => Date.parse(`${weekDates(ms)[0]}T00:00:00+08:00`);
+
+async function fetchLeaveWeek(monday: number, now: number, force: boolean): Promise<LeaveDaysResponse> {
   const isCurrent = weekDates(monday).includes(taipeiDate(now)) && taipeiDate(now) <= weekDates(monday)[6];
   const ttl = (v: LeaveDaysResponse) => (v.status === "ok" ? (isCurrent ? 5 * 60000 : 6 * 3600000) : 60000);
+  return memo(`att:leave:${monday}`, ttl, () => computeLeaveDays(monday, force), force);
+}
+
+// 請假／出差／外出的日子。自訂日期區間（R09／R10）可跨多週：以 `end`（exclusive ms）決定
+// 要抓哪幾個週一～週日的週，逐週抓（各自快取）後合併，否則只有起始週的請假會被讀到。
+export async function getLeaveDays(weekStart: number, opts: { force?: boolean; now?: number; end?: number } = {}): Promise<LeaveDaysResponse> {
+  const now = opts.now ?? Date.now();
   try {
-    return await memo(`att:leave:${monday}`, ttl, () => computeLeaveDays(monday, !!opts.force), opts.force);
+    const first = mondayOf(weekStart);
+    const last = opts.end && opts.end > weekStart ? mondayOf(opts.end - 1) : first;
+    const mondays: number[] = [];
+    for (let m = first; m <= last; m += 7 * 86400000) mondays.push(m);
+    const results = await Promise.all(mondays.map((m) => fetchLeaveWeek(m, now, !!opts.force)));
+    const bad = results.find((r) => r.status !== "ok");
+    if (bad) return bad;
+    const days: Record<string, { date: string; kind: ApprovalKind }[]> = {};
+    for (const r of results) for (const [rid, list] of Object.entries(r.days ?? {})) (days[rid] ??= []).push(...list);
+    return { status: "ok", days };
   } catch (e) {
     return { status: "error", error: attendanceErrorText(e) };
   }

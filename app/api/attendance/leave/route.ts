@@ -13,6 +13,9 @@ export async function GET(req: NextRequest) {
   const week = Number(req.nextUrl.searchParams.get("week"));
   const now = Date.now();
   if (!Number.isFinite(week) || week < now - 400 * 86400000 || week > now + 60 * 86400000) return NextResponse.json({ status: "error", error: "參數錯誤" }, { status: 400 });
+  // 自訂日期區間可跨多週，`to`（exclusive ms）決定要抓到哪一週；缺省或不合法時只抓起始週。
+  const toParam = Number(req.nextUrl.searchParams.get("to"));
+  const end = Number.isFinite(toParam) && toParam > week && toParam <= now + 60 * 86400000 ? toParam : undefined;
   const headers = { "Cache-Control": "no-store" };
 
   if (req.nextUrl.searchParams.get("demo") === "1") return NextResponse.json(demoLeaveDays(week, now), { headers });
@@ -22,7 +25,7 @@ export async function GET(req: NextRequest) {
   if (!perm.canView) return NextResponse.json({ status: "error", error: perm.reason }, { status: 403, headers });
   if (!isLarkConfigured()) return NextResponse.json({ status: "not-connected" }, { headers });
 
-  const res = await getLeaveDays(week, { force: req.nextUrl.searchParams.get("refresh") === "1", now });
+  const res = await getLeaveDays(week, { force: req.nextUrl.searchParams.get("refresh") === "1", now, end });
   if (res.status === "error") console.error("[attendance/leave]", res.error);
   return NextResponse.json(res, { status: res.status === "error" ? 502 : 200, headers });
 }
