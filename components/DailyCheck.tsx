@@ -5,6 +5,7 @@ import { CalendarCheck2, Download } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { downloadCsv, simpleCsv } from "@/lib/csv";
 import { dailyStatus, loggedPersonIds, parseRoster, scheduledPersonIds, taipeiDay, type CostSource } from "@/lib/scheduleCheck";
+import { weekDates } from "@/lib/attendanceCore";
 import { useShell } from "./AppShell";
 import { STATUS_TEXT, useSource } from "./useSource";
 
@@ -17,6 +18,7 @@ type DailyResp = { status: string; leave?: Record<string, { date: string; kind: 
 
 const yes = <span className="att-tag ok">✓</span>;
 const no = <span className="att-tag bad">✗</span>;
+const unknown = <span className="muted small" title="來源讀取失敗，無法判斷">未知</span>;
 
 export default function DailyCheck() {
   const { week, demo, tick, manual } = useShell();
@@ -26,8 +28,11 @@ export default function DailyCheck() {
   const fCost = useSource("v3-field-cost", { fields: ["工作日期", "組長", "實際出工人", "組員"], links: true });
   const aCost = useSource("v3-admin-cost", { fields: ["工作日期", "填表人"], links: true });
 
-  // 所選週的 7 天（台北），預設今天（不在本週就選週一）。
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => new Date(week.start + i * DAY + TZ).toISOString().slice(0, 10)), [week.start]);
+  // 所選週的 7 天（週一～週日，台北），預設今天（不在本週就選週一）。用 weekDates 取
+  // 「含 week.start 的那一週」——與打卡／請假 API（/api/attendance/daily 以 weekDates 展開）
+  // 一致。若直接從 week.start 往後數 7 天，自訂範圍起日非週一（例如週三）時會算出週三～
+  // 隔週二，日期落在 API 沒回的下週一／二，造成那兩天假缺卡／假請假。
+  const days = useMemo(() => weekDates(week.start), [week.start]);
   const todayStr = new Date(Date.now() + TZ).toISOString().slice(0, 10);
   const [date, setDate] = useState(days.includes(todayStr) ? todayStr : days[0]);
   useEffect(() => setDate(days.includes(todayStr) ? todayStr : days[0]), [days, todayStr]);
@@ -53,12 +58,20 @@ export default function DailyCheck() {
     };
   }, [week.start, demo, tick, manual]);
 
+  // 預排／成本單來源是否讀得到：讀不到時不能把「找不到那個人」當成「沒排／沒填」，
+  // 否則整欄空集合會把所有人都標成缺漏。schedKnown＝預排 ok；costKnown＝三張成本單全 ok
+  // （任一張讀不到，沒出現的人可能填在那張，無法斷定）。
+  const schedKnown = sched.status === "ok" && !!sched.data;
+  const costKnown = [iCost, fCost, aCost].every((c) => c.status === "ok" && !!c.data);
+  const schedFailed = sched.status !== "ok" && sched.status !== "loading";
+  const costFailed = [iCost, fCost, aCost].some((c) => c.status !== "ok" && c.status !== "loading");
+
   const rows = useMemo(() => {
     if (people.status !== "ok" || !people.data) return null;
     const roster = parseRoster(people.data);
     const dayNo = taipeiDay(Date.parse(`${date}T00:00:00+08:00`));
     const dayStart = Date.parse(`${date}T00:00:00+08:00`);
-    const planned = sched.status === "ok" && sched.data ? scheduledPersonIds(sched.data, dayStart, dayStart + DAY) : new Set<string>();
+    const planned = schedKnown && sched.data ? scheduledPersonIds(sched.data, dayStart, dayStart + DAY) : new Set<string>();
     const costSources: CostSource[] = [
       iCost.status === "ok" && iCost.data ? { data: iCost.data, dateNames: ["工作日期"], personNames: ["填報人"] } : null,
       fCost.status === "ok" && fCost.data ? { data: fCost.data, dateNames: ["工作日期"], personNames: ["組長", "實際出工人", "組員"] } : null,
@@ -73,8 +86,8 @@ export default function DailyCheck() {
       const hit = list.find((l) => l.date === date);
       if (hit) leaveByRecord.set(rid, hit.kind as "leave" | "trip" | "out");
     }
-    return dailyStatus(roster, planned, logged, punched, members, leaveByRecord);
-  }, [people.status, people.data, sched.status, sched.data, iCost.status, iCost.data, fCost.status, fCost.data, aCost.status, aCost.data, daily, date]);
+    return dailyStatus(roster, planned, logged, punched, members, leaveByRecord, { sched: schedKnown, cost: costKnown });
+  }, [people.status, people.data, sched.status, sched.data, iCost.status, iCost.data, fCost.status, fCost.data, aCost.status, aCost.data, daily, date, schedKnown, costKnown]);
 
   const title = (
     <div className="hr-card-head">
@@ -107,7 +120,7 @@ export default function DailyCheck() {
       `每日檢查_${date}.csv`,
       simpleCsv(
         ["姓名", "組別", "預排", "日誌", "打卡", "請假/出差/外出"],
-        shown.map((r) => [r.name, r.group, r.planned ? "有" : "無", r.logged ? "有" : "無", r.isMember ? (r.punched ? "有" : "無") : "不打卡", r.leave ? LEAVE_TEXT[r.leave] : ""]),
+        shown.map((r) => [r.name, r.group, r.plannedKnown ? (r.planned ? "有" : "無") : "未知", r.loggedKnown ? (r.logged ? "有" : "無") : "未知", r.isMember ? (r.punched ? "有" : "無") : "不打卡", r.leave ? LEAVE_TEXT[r.leave] : ""]),
         [`每日檢查 ${date}`, onlyMissing ? "只列有缺漏的" : "全部在職", `缺漏 ${missingCount} 人、請假／出差／外出 ${leaveCount} 人`],
       ),
     );
@@ -141,6 +154,11 @@ export default function DailyCheck() {
         </div>
       </div>
       {dailyState === "fail" && !demo && <p className="warn-text small">打卡與請假資料讀取失敗或沒有人事查看權限：打卡欄與請假欄可能不準。</p>}
+      {(schedFailed || costFailed) && !demo && (
+        <p className="warn-text small">
+          {schedFailed && costFailed ? "預排與成本單（日誌）" : schedFailed ? "預排" : "成本單（日誌）"}資料讀取失敗：該欄以「未知」顯示，不列為缺漏、不計入匯出的缺漏清單。
+        </p>
+      )}
       <div className="cg-sheet">
         <table>
           <thead>
@@ -158,8 +176,8 @@ export default function DailyCheck() {
               <tr key={r.recordId} className={r.missing ? "" : ""}>
                 <td className="att-name">{r.name}</td>
                 <td>{r.group}</td>
-                <td>{r.planned ? yes : no}</td>
-                <td>{r.logged ? yes : no}</td>
+                <td>{r.plannedKnown ? (r.planned ? yes : no) : unknown}</td>
+                <td>{r.loggedKnown ? (r.logged ? yes : no) : unknown}</td>
                 <td>{r.isMember ? (r.punched ? yes : no) : <span className="muted small">不打卡</span>}</td>
                 <td>{r.leave ? <span className="att-tag">{LEAVE_TEXT[r.leave]}</span> : <span className="muted">—</span>}</td>
               </tr>
