@@ -479,7 +479,7 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
   .hide-sm { display: none; }
   .topbar { height: auto; flex-wrap: wrap; gap: 8px; padding: 8px 16px; }
   .crumb-root, .crumb-sep { display: none; }
-  .topbar-right { width: 100%; margin-left: 0; }
+  .topbar-right { width: 100%; margin-left: 0; flex-wrap: wrap; }
   .topbar-right .week-picker { flex: 1; justify-content: space-between; }
   .week-range { font-size: 12.5px; }
   .content { padding: 16px; }

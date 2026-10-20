@@ -78,10 +78,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ key:
 
   try {
     const data = await getSourceData(src, req.nextUrl.searchParams.get("refresh") === "1");
-    return NextResponse.json({ status: "ok", data: project(data, req, src.restricted === "hr") });
+    return NextResponse.json({ status: "ok", data: project(data, req, src.restricted === "hr") }, src.readProfile ? { headers: { "Cache-Control": "no-store" } } : undefined);
   } catch (err) {
     const message = (err as Error).message;
     console.error(`[source ${key}]`, message);
+    if (src.readProfile) return NextResponse.json({ status: "error", error: "預排核對來源讀取失敗或資料不完整（YUPAI_SOURCE_UNAVAILABLE）" }, { status: 502, headers: { "Cache-Control": "no-store" } });
     const prev = lastGood<TableData>(sourceCacheKey(src));
     if (prev) return NextResponse.json({ status: "ok", data: project({ ...prev, stale: true, error: message }, req, src.restricted === "hr") });
     return NextResponse.json({ status: "error", error: message }, { status: 502 });

@@ -28,7 +28,7 @@ export function useSource(key: string, opts: SourceOptions = {}): SourceState {
   const enabled = opts.enabled !== false;
   // Tag each result with the source + mode + projection it belongs to, so a switch never
   // shows the previous table's data while the new one loads.
-  const tag = `${key}|${demo ? "demo" : "live"}|${projection}`;
+  const tag = `${key}|${demo ? "demo" : "live"}|${projection}|${tick}|${manual}`;
   const [state, setState] = useState<SourceState & { tag?: string }>({ status: "loading" });
 
   useEffect(() => {
@@ -40,7 +40,7 @@ export function useSource(key: string, opts: SourceOptions = {}): SourceState {
     fetch(`/api/sources/${key}?${qs}`)
       .then((r) => r.json())
       .then((j) => !cancelled && setState({ status: j.status, data: j.data, error: j.error, openId: j.openId, tag }))
-      .catch((e) => !cancelled && setState((prev) => (prev.tag === tag ? { ...prev, status: prev.data ? "ok" : "error", error: String(e) } : { status: "error", error: String(e), tag })));
+      .catch((e) => !cancelled && setState((prev) => (!key.startsWith("yupai-") && prev.tag === tag ? { ...prev, status: prev.data ? "ok" : "error", error: String(e) } : { status: "error", error: String(e), tag })));
     return () => {
       cancelled = true;
     };

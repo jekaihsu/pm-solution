@@ -1,3 +1,4 @@
+import { YUPAI_PROFILES, YUPAI_PROFILE_VERSION } from "./yupaiSource";
 // Report and data-source registry, based on the PM handover spec (R01–R10, S1–S11).
 // Base / table / view IDs are identifiers, not secrets: access is granted by the
 // Lark app credentials in the server environment.
@@ -5,6 +6,7 @@
 export type DataVersion = "v3" | "v4";
 
 export interface SourceDef {
+  readProfile?: string; // strict minimal projection; fresh reads only
   optional?: boolean; // reference only: no report depends on it, so a failure is not a report outage
   key: string;
   name: string;
@@ -109,6 +111,7 @@ function eqSys(key: string, name: string, table: string, note: string, extra: Pa
 }
 
 export const SOURCES: SourceDef[] = [
+  ...YUPAI_PROFILES.map((p) => raw(`yupai-v3-${p.key}`, `預排核對：${p.name}`, "v3", p.tableId, { restricted: "hr", readProfile: YUPAI_PROFILE_VERSION })),
   raw("v3-field-work", "外業工作單", "v3", "tbl97f1uXqi7Qz0k", { dateField: "出工日期", columns: COLS.fieldWork, ...DASH.fieldWork, note: "R01 與 R10 共用同一批工作單，跨報告不可相加。" }),
   raw("v4-field-work", "外業工作單", "v4", "tbl5zPLS0ExWNEty", { dateField: "工作日期-薪資", columns: COLS.fieldWork, ...DASH.fieldWork, note: "R01 與 R10 共用；欄名含「最終」不代表已核定。" }),
   raw("v4-field-cost", "外業成本單", "v4", "tbl8wRYCUCvbSoJG", { dateField: "工作日期", columns: COLS.fieldCost, ...DASH.fieldCost }),
@@ -277,7 +280,7 @@ export const REPORTS: ReportDef[] = [
     slug: "r04",
     name: "人事數據",
     purpose: "讓授權主管掌握招聘、出勤、出差與加班的營運狀態與待處理事項。",
-    sources: ["hr", "attendance", "salary-overtime", "v3-people"],
+    sources: ["hr", "attendance", "salary-overtime", "v3-people", ...YUPAI_PROFILES.map((p) => `yupai-v3-${p.key}`)],
     mustHave: ["招聘（暫無）", "出勤紀錄", "出差紀錄", "加班紀錄"],
     pending: ["出勤、出差需開通 Lark 假勤／審批 API 權限", "可見範圍與敏感欄位（D-09）", "加班時數是成本單層級，非每人實際時數"],
   },

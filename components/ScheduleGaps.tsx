@@ -1,121 +1,37 @@
 "use client";
-// R04 管理工具（item 2）：下週預排未填 — 名冊 vs 下週工作預排，列出沒有任何預排的人＋組別。
-// 「下週」＝所選週的下一週（可用週選擇器往前看）。純函式在 lib/scheduleCheck.ts。
 import { CalendarX, Download } from "lucide-react";
-import { useMemo } from "react";
 import { downloadCsv, simpleCsv } from "@/lib/csv";
-import { parseRoster, scheduledPersonIds, unfilledPlanning } from "@/lib/scheduleCheck";
+import { buildRosterIndex, buildScheduleIndex, exemptionRosterNote, scheduledPersonIds, unfilledPlanning, type RosterLite } from "@/lib/scheduleCheck";
+import { normalizeWorkDate } from "@/lib/workDate";
 import { weekName, weekRange } from "@/lib/week";
 import { useShell } from "./AppShell";
 import { STATUS_TEXT, useSource } from "./useSource";
 
-// 預排只需人員（link）、真起訖日、條類型；依 field id，V4 退回欄名。
-const SCHED_FIELDS = ["#fldMXOggGP", "#fldjWv1xST", "#fld7KNCsVe", "#fld78OmLVn", "開始日期", "結束日期", "人員", "條類型"];
-
 export default function ScheduleGaps() {
   const { week } = useShell();
   const next = weekRange(week.offset + 1);
-  const people = useSource("v3-people");
-  const sched = useSource("v3-schedule", { fields: SCHED_FIELDS, links: true });
-
-  const report = useMemo(() => {
-    if (people.status !== "ok" || !people.data || sched.status !== "ok" || !sched.data) return null;
-    const roster = parseRoster(people.data);
-    const scheduled = scheduledPersonIds(sched.data, next.start, next.end);
-    const filled = roster.filter((p) => scheduled.has(p.recordId)).length;
-    return { roster, unfilled: unfilledPlanning(roster, scheduled), filled };
-  }, [people.status, people.data, sched.status, sched.data, next.start, next.end]);
-
-  const title = (
-    <div className="hr-card-head">
-      <CalendarX size={16} />
-      <h2>下週預排未填</h2>
-      <span className="muted small">
-        {weekName(next.offset)} {next.label}
-      </span>
-    </div>
-  );
-
-  if (people.status === "forbidden")
-    return (
-      <section className="hr-card">
-        {title}
-        <p className="muted small">{people.error ?? "沒有查看人員名單的權限"}（下週預排未填需要人事查看權限）。</p>
-      </section>
-    );
-  if (!report)
-    return (
-      <section className="hr-card">
-        {title}
-        <p className={`small ${people.status === "error" || sched.status === "error" ? "bad-text" : "muted"}`}>
-          {people.status !== "ok" ? `人員名單${STATUS_TEXT[people.status]}` : `工作預排${STATUS_TEXT[sched.status]}`}
-          {people.error || sched.error ? `：${people.error ?? sched.error}` : ""}
-        </p>
-      </section>
-    );
-
-  const { roster, unfilled, filled } = report;
-  const byGroup = new Map<string, string[]>();
-  for (const p of unfilled) byGroup.set(p.group, [...(byGroup.get(p.group) ?? []), p.name]);
-  const exportCsv = () =>
-    downloadCsv(
-      `下週預排未填_${next.label.replace(/[\s/–]/g, "_")}.csv`,
-      simpleCsv(["姓名", "組別"], unfilled.map((p) => [p.name, p.group]), [`下週（${next.label}）預排未填`, `在職 ${roster.length} 人、已排 ${filled} 人、未填 ${unfilled.length} 人`]),
-    );
-
-  return (
-    <section className="hr-card">
-      {title}
-      <div className="att-kpis">
-        <div className="att-kpi">
-          <span>在職</span>
-          <b>{roster.length}</b>
-        </div>
-        <div className="att-kpi">
-          <span>已排下週</span>
-          <b>{filled}</b>
-        </div>
-        <div className="att-kpi">
-          <span>未填</span>
-          <b className={unfilled.length ? "bad-text" : ""}>{unfilled.length}</b>
-        </div>
-      </div>
-      {unfilled.length ? (
-        <>
-          <div className="cg-sheet">
-            <table>
-              <thead>
-                <tr>
-                  <th>組別</th>
-                  <th>未填下週預排的人</th>
-                  <th className="num">人數</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...byGroup].sort((a, b) => a[0].localeCompare(b[0], "zh-Hant")).map(([g, names]) => (
-                  <tr key={g}>
-                    <td className="cg-sheet-name">{g}</td>
-                    <td>{names.join("、")}</td>
-                    <td className="num">{names.length}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div style={{ marginTop: 8 }}>
-            <button className="tool" onClick={exportCsv} title="匯出 CSV">
-              <Download size={14} strokeWidth={1.75} /> 匯出名單
-            </button>
-          </div>
-        </>
-      ) : (
-        <p className="muted small">下週每位在職同事都有預排。</p>
-      )}
-      <ul className="cg-notes">
-        <li>
-          名冊＝V3 人員名單在職同事；比對「下週」（所選週的下一週，可用上方週選擇器往前看）工作預排的「人員」欄（依 record_id），排除條類型＝休假／請假的預排。沒有出現在任何預排的人即列為未填。V4 預排另計，這裡只看 V3。
-        </li>
-      </ul>
-    </section>
-  );
+  const people = useSource("yupai-v3-people", { links: true });
+  const sched = useSource("yupai-v3-schedule", { links: true });
+  let report: { roster: RosterLite[]; required: RosterLite[]; scheduled: Set<string>; unfilled: RosterLite[] } | undefined;
+  let error = people.status !== "ok" ? STATUS_TEXT[people.status] : sched.status !== "ok" ? STATUS_TEXT[sched.status] : "";
+  if (!error) try {
+    const roster = buildRosterIndex(people.data!);
+    const start = normalizeWorkDate(next.start)!, end = normalizeWorkDate(next.end - 1)!;
+    const index = buildScheduleIndex(sched.data!, roster, start, end);
+    const scheduled = scheduledPersonIds(index, roster.active, start, end);
+    const required = roster.active.filter((p) => p.requiresPlanning && !p.sourcePending);
+    report = { roster: roster.active, required, scheduled, unfilled: unfilledPlanning(roster.active, scheduled) };
+  } catch (e) { error = (e as Error).message; }
+  const title = <div className="hr-card-head"><CalendarX size={16} /><h2>下週預排未填</h2><span className="muted small">{weekName(next.offset)} {next.label}</span></div>;
+  if (!report) return <section className="hr-card">{title}<p className="warn-text small">核對未完成：{error}。停止缺失統計及結果匯出。</p></section>;
+  const pending = report.roster.filter((p) => p.requiresPlanning && p.sourcePending);
+  const filled = report.required.length - report.unfilled.length;
+  const note = `應填 ${report.required.length}・週內曾排 ${filled}・未排 ${report.unfilled.length}・來源待確認 ${pending.length}（不計缺漏）`;
+  const excluded = report.roster.filter((p) => !p.requiresPlanning);
+  return <section className="hr-card">{title}<div className="toolbar" style={{ flexWrap: "wrap", gap: 12 }}><span>{note}</span><button className="tool" onClick={() => downloadCsv(`下週預排_${next.label}.csv`, simpleCsv(["姓名", "原組別", "有效組別", "狀態"], [...report!.unfilled.map((p) => [p.name, p.rawGroup, p.effectiveGroup, "未排"]), ...pending.map((p) => [p.name, p.rawGroup, p.effectiveGroup, "待確認"])], [note, "週內曾排，不代表每天排滿；空白類型及同組外業預排皆計入。", exemptionRosterNote(people.data)]))}><Download size={14} />匯出</button></div>
+    <div className="cg-sheet"><table><thead><tr><th>姓名</th><th>原組別 → 有效組別</th><th>狀態</th></tr></thead><tbody>{report!.unfilled.map((p) => <tr key={p.recordId}><td>{p.name}</td><td>{p.rawGroup || "未填"} → {p.effectiveGroup || "未填"}</td><td>未排</td></tr>)}{!report.unfilled.length && <tr><td colSpan={3} className="muted">應填者週內皆曾排。</td></tr>}</tbody></table></div>
+    <h3>行政資料來源待確認</h3><p className="muted small">{pending.map((p) => `${p.name}（待確認）`).join("、") || "無"}</p>
+    <p className="muted small">週內任一平日有預排就算曾排（含空白類型、休假類型）；有效外業組共享預排，PM／行政／內業不共享。此處不代表每天排滿。</p>
+    <p className="muted small">排除：{excluded.map((p) => `${p.name}（${p.departedReason ?? p.exemptionReason}）`).join("、") || "無"}。{exemptionRosterNote(people.data)}</p>
+  </section>;
 }
