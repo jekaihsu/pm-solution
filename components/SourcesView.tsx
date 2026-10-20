@@ -13,8 +13,46 @@ const KIND_TEXT: Record<string, string> = {
   person: "人員",
 };
 
+function ApiSourceRow({ src }: { src: SourceDef }) {
+  const usedBy = REPORTS.filter((r) => r.sources.includes(src.key)).map((r) => r.id);
+  return (
+    <section className="src-card">
+      <header className="src-head">
+        <div>
+          <h2>{src.name}</h2>
+          <div className="src-used">
+            {usedBy.map((id) => (
+              <span key={id} className="rid">
+                {id}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="src-meta">
+          <span className="pill pill-good" title="非多維表格：經 Lark Open API 讀取">經 Lark API</span>
+          {src.url && (
+            <a href={src.url} target="_blank" rel="noreferrer" className="icon-btn bordered" title="在 Lark 開啟" aria-label="在 Lark 開啟">
+              <ExternalLink size={14} strokeWidth={1.75} />
+            </a>
+          )}
+        </div>
+      </header>
+      <dl className="facts">
+        <dt>來源</dt>
+        <dd className="mono">Lark 假勤 Open API（attendance/v1、contact/v3）</dd>
+        {src.note && (
+          <>
+            <dt>備註</dt>
+            <dd>{src.note}</dd>
+          </>
+        )}
+      </dl>
+    </section>
+  );
+}
+
 function SourceRow({ src }: { src: SourceDef }) {
-  const s = useSource(src.key, { only: "meta" });
+  const s = useSource(src.key, { only: "meta", enabled: !src.apiOnly });
   const usedBy = REPORTS.filter((r) => r.sources.includes(src.key)).map((r) => r.id);
   const status =
     s.status === "ok" && s.data ? (
@@ -124,9 +162,7 @@ export default function SourcesView() {
         </div>
       </header>
       <div className="src-list">
-        {SOURCES.map((s) => (
-          <SourceRow key={s.key} src={s} />
-        ))}
+        {SOURCES.map((s) => (s.apiOnly ? <ApiSourceRow key={s.key} src={s} /> : <SourceRow key={s.key} src={s} />))}
       </div>
     </div>
   );

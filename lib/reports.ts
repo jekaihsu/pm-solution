@@ -23,6 +23,7 @@ export interface SourceDef {
   tableName?: RegExp; // find the table by name when tableId is not known
   allowField?: (name: string) => boolean; // read ONLY these fields from Lark (sensitive tables)
   restricted?: "hr"; // only HR_VIEWERS may load it
+  apiOnly?: boolean; // not a Bitable table: read via a dedicated Lark Open API (e.g. 假勤), shown but not loaded on /sources
 }
 
 // 薪水計算 Base 的「詠翔加班」（逐筆加班審批單）：只讀下列欄位，精確比對、不用關鍵字。
@@ -173,6 +174,14 @@ export const SOURCES: SourceDef[] = [
     note: "招聘候選人池含個人資料，可見範圍（D-09）核定前不接入；出勤／出差在 Lark 差勤與審批，不是多維表格。",
   },
   {
+    key: "attendance",
+    name: "Lark 假勤：出勤／出差／外出／請假",
+    apiOnly: true,
+    restricted: "hr",
+    url: `${LARK_WEB}/attendance`,
+    note: "出勤、請假、出差、外出來自 Lark 假勤 Open API（attendance/v1：groups、user_tasks/query、user_approvals/query；搭配 contact/v3 查員工與部門），不是多維表格。R04 經 /api/attendance 讀取；R09／R10 的「有排未填／有排未做」以 /api/attendance/leave 取得請假／出差／外出日自動判為正常。只輸出白名單欄位（姓名、組別、每日狀態、出差起訖／時長），不輸出 employee_id、open_id、地點、GPS、照片、打卡時間。需 attendance:task:readonly、attendance:rule:readonly、contact:contact.base:readonly、contact:user.employee_id:readonly，通訊錄範圍＝全部成員。依 HR_VIEWERS 設定才看得到。",
+  },
+  {
     key: "salary-overtime",
     name: "薪水計算：詠翔加班",
     baseToken: SALARY_BASE,
@@ -268,7 +277,7 @@ export const REPORTS: ReportDef[] = [
     slug: "r04",
     name: "人事數據",
     purpose: "讓授權主管掌握招聘、出勤、出差與加班的營運狀態與待處理事項。",
-    sources: ["hr", "salary-overtime", "v3-people"],
+    sources: ["hr", "attendance", "salary-overtime", "v3-people"],
     mustHave: ["招聘（暫無）", "出勤紀錄", "出差紀錄", "加班紀錄"],
     pending: ["出勤、出差需開通 Lark 假勤／審批 API 權限", "可見範圍與敏感欄位（D-09）", "加班時數是成本單層級，非每人實際時數"],
   },
@@ -313,7 +322,7 @@ export const REPORTS: ReportDef[] = [
     slug: "r09",
     name: "內業報告",
     purpose: "內業經理看上週預排與實際完成的對照：誰排了沒填、誰沒排卻填了，哪些案件排了沒做，以及要人工確認的異常單。",
-    sources: ["v3-schedule", "v3-internal-work", "v3-internal-cost", "v4-schedule", "v4-internal-work", "v4-internal-cost"],
+    sources: ["v3-schedule", "v3-internal-work", "v3-internal-cost", "v4-schedule", "v4-internal-work", "v4-internal-cost", "attendance"],
     mustHave: ["預排 vs 實際（人日，內業以人為單位，人員＋日期比對）", "預排 vs 實際（以工程＝案件編號前 7 碼為單位；空白、C000000、格式不符的案件不合併）", "上週異常與人工確認案件（未排有填、有排未填、⚠亮燈、已退回）", "進行中工作營業額剩餘"],
     pending: [
       "圖資／報告節點的期限（n+2、N+2、N+1）、節點狀態（未逾期／預計逾期／已逾期／無工作）、確認單營業額與執行比例：V4 才有，待依 V4 邏輯實作（V3 不呈現；確認單營業額來源為工程確認單，目前 V4／報價 Base 尚未開放讀取）",
@@ -325,7 +334,7 @@ export const REPORTS: ReportDef[] = [
     slug: "r10",
     name: "外業報告",
     purpose: "外業經理看上週預排與實際完成的對照（以案件為單位）、異常與人工確認案件、檢核待辦，判斷預排是否失誤。",
-    sources: ["v3-field-work", "v3-schedule", "v3-cases", "v4-field-work", "v4-schedule"],
+    sources: ["v3-field-work", "v3-schedule", "v3-cases", "v4-field-work", "v4-schedule", "attendance"],
     mustHave: ["預排 vs 實際（以工程＝案件編號前 7 碼為單位，工程編號＋工程名稱；空白、C000000、格式不符的案件不合併）：預排組日、實際出工組日、吻合組日、結果分類", "異常與人工確認案件（未排有做、有排未做、突發狀況、已退回、修改後數量≠完成數量）", "檢核待辦（外業經理檢核未勾、控制組檢核未勾、已退回）"],
     pending: ["圖資／報告節點期限（N+1／N+2）與節點狀態（未逾期／預計逾期／已逾期／無工作）口徑待業主說明", "進行中工作營業額剩餘：外業分母粒度、延期、停工、委外規則（D-03）與避免內外業重疊（D-06）"],
   },
