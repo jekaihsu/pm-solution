@@ -11,7 +11,7 @@ import { sourceByKey, type DataVersion } from "@/lib/reports";
 import { weekName } from "@/lib/week";
 
 type LeaveResp = { status: string; days?: Record<string, { date: string; kind: string }[]>; rangeClamped?: boolean };
-const FIELD_MANAGER = managerOf("外業"); // 柯汉
+const FIELD_MANAGER = managerOf("外業"); // 吳科翰
 import { useShell } from "./AppShell";
 import EmptyState from "./EmptyState";
 import { STATUS_TEXT, useSource } from "./useSource";
