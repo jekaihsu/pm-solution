@@ -1,3 +1,5 @@
+import { yupaiDemo } from "./yupaiDemo";
+import { yupaiProfile } from "./yupaiSource";
 // Fictional sample data, only served when the viewer explicitly switches to demo
 // mode. Every record id is prefixed "demo_" and the payload is marked source="demo".
 import type { CellValue, FieldKind, TableData } from "./types";
@@ -353,10 +355,11 @@ const DEMO_FID: Record<string, string> = { 人員: "fld7KNCsVe", 業別: "fldrEN
 const specKey = (key: string) => key.replace(/^v[34]-/, "");
 
 export function hasDemo(key: string) {
-  return specKey(key) in SPECS;
+  return !!yupaiProfile(key) || specKey(key) in SPECS;
 }
 
 export function demoSourceData(src: SourceDef): TableData {
+  if (yupaiProfile(src.key)) return yupaiDemo(src.key);
   const def = SPECS[specKey(src.key)];
   let seed = [...src.key].reduce((a, c) => a + c.charCodeAt(0), 0);
   const r = () => {

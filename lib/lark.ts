@@ -2,6 +2,7 @@
 import "server-only";
 import type { FieldMeta, FieldKind, TableData, TableMeta, CellValue } from "./types";
 import type { SourceDef } from "./reports";
+import { readYupaiTable, yupaiProfile, type YupaiPage } from "./yupaiSource";
 import { personRefs } from "./people";
 
 const API_BASE = (process.env.LARK_API_BASE || "https://open.larksuite.com").replace(/\/$/, "");
@@ -127,7 +128,7 @@ const inflight = store.inflight;
 // Fresh hit → served. Stale hit → served immediately while one background refresh
 // runs (stale-while-revalidate). No hit or force → waits for the fetch. Concurrent
 // callers for the same key share one fetch.
-async function cached<T>(key: string, fn: () => Promise<T>, force = false, ttl = CACHE_TTL_MS): Promise<T> {
+async function cached<T>(key: string, fn: () => Promise<T>, force = false, ttl = CACHE_TTL_MS, allowStale = true): Promise<T> {
   const hit = cache.get(key);
   if (!force && hit && hit.expiresAt > Date.now()) return hit.value as T;
   const run = () => {
@@ -143,7 +144,7 @@ async function cached<T>(key: string, fn: () => Promise<T>, force = false, ttl =
     }
     return p;
   };
-  if (!force && hit) {
+  if (!force && hit && allowStale) {
     run().catch((err) => console.error(`[refresh ${key}]`, (err as Error).message));
     return hit.value as T;
   }
@@ -166,7 +167,7 @@ export function lastGood<T>(key: string): T | undefined {
   return cache.get(key)?.value as T | undefined;
 }
 
-export const sourceCacheKey = (src: SourceDef) => `source:${src.baseToken}:${src.tableId ?? src.key}:${src.viewId ?? ""}`;
+export const sourceCacheKey = (src: SourceDef) => `source:${src.baseToken}:${src.tableId ?? src.key}:${src.viewId ?? ""}${src.readProfile ? `:${src.key}:${src.readProfile}` : ""}`;
 
 async function resolveTableId(src: SourceDef): Promise<string> {
   if (src.tableId) return src.tableId;
@@ -246,6 +247,7 @@ function fieldKind(type: number, uiType?: string): FieldKind {
 export async function listFields(baseToken: string, tableId: string): Promise<FieldMeta[]> {
   const fields: FieldMeta[] = [];
   let pageToken: string | undefined;
+  const seenTokens = new Set<string>();
   do {
     const qs = new URLSearchParams({ page_size: "100" });
     if (pageToken) qs.set("page_token", pageToken);
@@ -266,7 +268,9 @@ export async function listFields(baseToken: string, tableId: string): Promise<Fi
         linkTable: isLink ? (f.property?.table_id ?? tableId) : undefined,
       });
     }
+    if (data.has_more && (!data.items?.length || !data.page_token || seenTokens.has(data.page_token))) throw new Error("INCOMPLETE_FIELD_PAGE");
     pageToken = data.has_more ? data.page_token : undefined;
+    if (pageToken) seenTokens.add(pageToken);
   } while (pageToken);
   return fields;
 }
@@ -404,6 +408,23 @@ async function linkTitles(baseToken: string, tableId: string, ids: string[]): Pr
 export async function getSourceData(src: SourceDef, force = false): Promise<TableData> {
   const { baseToken, viewId } = src;
   if (!baseToken || !(src.tableId || src.tableName)) throw new Error(`Source ${src.key} has no Base/table configured`);
+  if (src.readProfile) {
+    const profile = yupaiProfile(src.key);
+    if (!profile) throw new Error("YUPAI_PROFILE_UNKNOWN");
+    const key = sourceCacheKey(src);
+    try {
+      return await cached(key, async () => readYupaiTable(profile, await listFields(baseToken, profile.tableId), async (fieldNames, token) => {
+        const qs = new URLSearchParams({ page_size: "500" });
+        if (token) qs.set("page_token", token);
+        return larkFetch<YupaiPage>(`/bitable/v1/apps/${baseToken}/tables/${profile.tableId}/records/search?${qs}`, {
+          method: "POST", body: JSON.stringify({ automatic_fields: false, field_names: fieldNames }),
+        });
+      }), force, CACHE_TTL_MS, false);
+    } catch (error) {
+      cache.delete(key);
+      throw error;
+    }
+  }
   return cached(
     sourceCacheKey(src),
     async () => {

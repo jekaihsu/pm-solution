@@ -10,7 +10,7 @@ export function demoLeaveDays(_weekStart: number, _now: number): LeaveDaysRespon
   return { status: "ok", days: {} };
 }
 
-// 示範的每日檢查：示範名冊 record_id 與成本單／預排不互通，回空集合（功能以真實 Lark 資料為準）。
+// 預排核對專用示範名冊與 link IDs 互通；沿用現有每日假勤來源介面。
 export function demoDailyStatus(_weekStart: number, _now: number): DailyStatusResponse {
   return { status: "ok", leave: {}, punch: {}, members: [] };
 }
