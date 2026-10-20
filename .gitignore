@@ -8,3 +8,8 @@ next-env.d.ts
 
 # SOP sign-offs saved locally
 /data
+
+# 預排核對報告產生器的本地抓取快取與產出（含個資，不進 repo）
+/scripts/yupai-report/data
+/scripts/yupai-report/legacy/report.md
+/scripts/yupai-report/legacy/result.md
