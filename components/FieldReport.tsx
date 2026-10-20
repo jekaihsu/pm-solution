@@ -14,7 +14,7 @@ import { STATUS_TEXT, useSource } from "./useSource";
 const r2 = (n: number) => formatNumber(Math.round(n * 100) / 100);
 const dash = <span className="muted">—</span>;
 
-const RESULT_PILL: Record<CaseResult, string> = { 有排有做: "pill-good", 有排未做: "pill-bad", 未排有做: "pill-warn", 預排讀不到: "" };
+const RESULT_PILL: Record<CaseResult, string> = { 有排有做: "pill-good", 有排未做: "pill-bad", 未排有做: "pill-warn", 有排未到期: "", 預排讀不到: "" };
 const KIND_PILL: Record<ExceptionKind, string> = { 未排有做: "pill-warn", 有排未做: "pill-bad", 工作單異常: "pill-bad" };
 
 function Chips<T extends string>({ value, onChange, options, label }: { value: T | "全部"; onChange: (v: T | "全部") => void; options: { key: T | "全部"; n: number }[]; label: string }) {
@@ -102,7 +102,7 @@ export default function FieldReport() {
   if (report.hiddenGroups.length) notes.push(`不列入（非外業組）：${report.hiddenGroups.map((h) => `${/^rec/.test(h.group) ? "未對應組別" : h.group}（${h.orders} 張）`).join("、")}`);
   if (work.data?.stale) notes.push("工作單為上次成功讀取的快照");
 
-  const caseResults = ["有排有做", "有排未做", "未排有做"] as const;
+  const caseResults = ["有排有做", "有排未做", "未排有做", "有排未到期"] as const;
   const caseRows = caseFilter === "全部" ? report.cases : report.cases.filter((c) => c.result === caseFilter);
   const excKinds = ["未排有做", "有排未做", "工作單異常"] as const;
   const excRows = excFilter === "全部" ? report.exceptions : report.exceptions.filter((e) => e.kind === excFilter);
@@ -155,7 +155,7 @@ export default function FieldReport() {
             label="結果分類"
             value={caseFilter}
             onChange={setCaseFilter}
-            options={[{ key: "全部", n: report.cases.length }, ...caseResults.map((k) => ({ key: k, n: report.cases.filter((c) => c.result === k).length }))]}
+            options={[{ key: "全部", n: report.cases.length }, ...caseResults.map((k) => ({ key: k, n: report.cases.filter((c) => c.result === k).length })).filter((o) => o.n > 0 || o.key === caseFilter)]}
           />
         )}
         <div className="fr-scroll">

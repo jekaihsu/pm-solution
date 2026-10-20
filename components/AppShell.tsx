@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useContext, useEffect, useState } from "react";
 import { REPORTS, type DataVersion, type SourceDef } from "@/lib/reports";
-import { weekName, weekRange, type WeekRange } from "@/lib/week";
+import { MAX_FORWARD_WEEKS, isoWeek, weekName, weekParamToOffset, weekRange, type WeekRange } from "@/lib/week";
 
 interface Ctx {
   week: WeekRange;
@@ -33,7 +33,8 @@ function crumb(pathname: string): string {
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  const [offset, setWeekOffset] = useState(-1); // reports default to last week
+  const [offset, setWeekOffset] = useState(0); // default to the current week (shareable via ?week=)
+  const [urlReady, setUrlReady] = useState(false);
   const [demo, setDemo] = useState(false);
   const [version, setVersion] = useState<VersionFilter>("all");
   const [tick, setTick] = useState(0);
@@ -43,6 +44,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   useEffect(() => setNavOpen(false), [pathname]);
+  // Restore the week from ?week=YYYY-Www on first load (shareable links), then keep the
+  // URL in sync as the picker changes. Uses history.replaceState so report pages stay SSG.
+  useEffect(() => {
+    const parsed = weekParamToOffset(new URLSearchParams(window.location.search).get("week"));
+    if (parsed !== null) setWeekOffset(Math.min(MAX_FORWARD_WEEKS, parsed));
+    setUrlReady(true);
+  }, []);
+  useEffect(() => {
+    if (!urlReady) return;
+    const u = new URL(window.location.href);
+    u.searchParams.set("week", isoWeek(weekRange(offset).start));
+    window.history.replaceState(null, "", u);
+  }, [offset, urlReady]);
   useEffect(() => {
     fetch("/api/auth/me")
       .then((r) => r.json())
@@ -133,11 +147,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 <button className="icon-btn" onClick={() => setWeekOffset(offset - 1)} aria-label="前一週">
                   <ChevronLeft size={16} />
                 </button>
-                <button className="week-label" onClick={() => setWeekOffset(-1)} title="回到上週">
+                <button className="week-label" onClick={() => setWeekOffset(0)} title="回到本週">
                   <span className="week-name">{weekName(offset)}</span>
                   <span className="week-range">{week.label}</span>
                 </button>
-                <button className="icon-btn" onClick={() => setWeekOffset(offset + 1)} disabled={offset >= 0} aria-label="下一週">
+                <button className="icon-btn" onClick={() => setWeekOffset(offset + 1)} disabled={offset >= MAX_FORWARD_WEEKS} aria-label="下一週">
                   <ChevronRight size={16} />
                 </button>
               </div>
