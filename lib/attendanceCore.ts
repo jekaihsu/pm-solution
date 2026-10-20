@@ -294,6 +294,21 @@ function normalizeApprovals(items: LarkUserApprovals[]): Map<string, Approval[]>
   return new Map([...byUser].map(([k, v]) => [k, [...v.values()]]));
 }
 
+/** 每位員工在所選週內「有有效打卡」的日子（employee_id → Set<date>）。給每日檢查（item 3）判斷有沒有打卡。 */
+export function punchedDays(tasks: LarkUserTask[], dates: string[]): Map<string, Set<string>> {
+  const inWeek = new Set(dates);
+  const out = new Map<string, Set<string>>();
+  for (const t of tasks) {
+    const day = parseYmd(t.day);
+    if (!t.user_id || !day || !inWeek.has(day)) continue;
+    const ok = (t.records ?? []).some((r) => isPunch(r.check_in_result, r.check_in_result_supplement) || isPunch(r.check_out_result, r.check_out_result_supplement));
+    if (!ok) continue;
+    if (!out.has(t.user_id)) out.set(t.user_id, new Set());
+    out.get(t.user_id)!.add(day);
+  }
+  return out;
+}
+
 /**
  * 每位員工在所選週內有請假／出差／外出的日子（employee_id → [{date, kind}]）。
  * 給「有排未填／有排未做」自動判定「已請假＝正常」用：只要當天被任一假單涵蓋就算（半天假也算）。

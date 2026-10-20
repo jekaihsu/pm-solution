@@ -7,6 +7,8 @@ import { PEOPLE_GROUP, PEOPLE_NAME, buildPeopleDirectory, type PeopleRow } from 
 import { weekName } from "@/lib/week";
 import { useShell } from "./AppShell";
 import AttendanceCards from "./AttendanceCards";
+import DailyCheck from "./DailyCheck";
+import ScheduleGaps from "./ScheduleGaps";
 import { STATUS_TEXT, useSource, type SourceState } from "./useSource";
 
 const round1 = (n: number) => formatNumber(Math.round(n * 10) / 10);
@@ -299,6 +301,10 @@ export default function HrBoard() {
       </Pending>
 
       <AttendanceCards />
+
+      <ScheduleGaps />
+
+      <DailyCheck />
 
       <section className="hr-card">
         <div className="hr-card-head">

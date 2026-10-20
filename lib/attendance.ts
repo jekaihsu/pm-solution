@@ -6,6 +6,7 @@ import { PEOPLE_ACCOUNT, PEOPLE_ACTIVE, PEOPLE_GROUP, PEOPLE_NAME } from "./peop
 import { sourceByKey } from "./reports";
 import {
   approvalDaysByUser,
+  punchedDays,
   attendanceErrorText,
   attendanceTtl,
   buildAttendanceView,
@@ -272,6 +273,82 @@ export async function getLeaveDays(weekStart: number, opts: { force?: boolean; n
   const ttl = (v: LeaveDaysResponse) => (v.status === "ok" ? (isCurrent ? 5 * 60000 : 6 * 3600000) : 60000);
   try {
     return await memo(`att:leave:${monday}`, ttl, () => computeLeaveDays(monday, !!opts.force), opts.force);
+  } catch (e) {
+    return { status: "error", error: attendanceErrorText(e) };
+  }
+}
+
+// 每日檢查（item 3）：所選週內每位同事（人員名單 record_id）的請假／出差／外出、有效打卡日，與是否為考勤組成員。
+// 只回 record_id 與日期（非個資），經 HR 守門。
+export interface DailyStatusResponse {
+  status: "ok" | "needs-permission" | "error" | "not-connected";
+  missing?: string[];
+  hint?: string;
+  error?: string;
+  leave?: Record<string, { date: string; kind: ApprovalKind }[]>; // record_id → 請假／出差／外出日
+  punch?: Record<string, string[]>; // record_id → 有有效打卡的日子
+  members?: string[]; // 屬於考勤組的 record_id（會打卡；其餘為外業／不打卡）
+}
+
+async function computeDailyStatus(weekStart: number, now: number, force: boolean): Promise<DailyStatusResponse> {
+  const dates = weekDates(weekStart);
+  const today = taipeiDate(now);
+  const rosterSrc = sourceByKey("v3-people");
+  if (!rosterSrc) return { status: "error", error: "找不到人員名單來源" };
+  const rows = (await getSourceData(rosterSrc)).records as unknown as RosterRow[];
+  const { people } = buildRoster(rows, { name: PEOPLE_NAME, group: PEOPLE_GROUP, active: PEOPLE_ACTIVE, account: PEOPLE_ACCOUNT });
+
+  const perm: Perm = { missing: new Set() };
+  const [em, gm] = await Promise.allSettled([employeeIdMap(people.map((r) => r.openId), force), groupMembers(force)]);
+  if (em.status === "rejected") absorb(perm, em.reason, SCOPES.contact);
+  if (gm.status === "rejected") absorb(perm, gm.reason, [...SCOPES.rule, ...SCOPES.contact]);
+  if (perm.missing.size) return { status: "needs-permission", missing: [...perm.missing], hint: "請管理員在 PM週報 開通假勤與通訊錄唯讀權限並發布新版本。" };
+  if (perm.other) return { status: "error", error: attendanceErrorText(perm.other) };
+  const employeeIds = (em as PromiseFulfilledResult<Map<string, string>>).value;
+  const { members } = (gm as PromiseFulfilledResult<{ members: Set<string>; groupCount: number }>).value;
+
+  const allIds = people.map((r) => employeeIds.get(r.openId)).filter((x): x is string => !!x);
+  const memberIds = allIds.filter((x) => members.has(x));
+  const last = dates[6] < today ? dates[6] : today;
+  let leaveByUser: Map<string, { date: string; kind: ApprovalKind }[]>;
+  let punchByUser: Map<string, Set<string>>;
+  try {
+    const [t, approvals] = await Promise.all([
+      dates[0] > today || !memberIds.length ? Promise.resolve({ tasks: [] as LarkUserTask[], invalid: 0 }) : queryTasks(memberIds, dates[0], last),
+      queryApprovals(allIds, dates[0], dates[6]),
+    ]);
+    leaveByUser = approvalDaysByUser(approvals, dates);
+    punchByUser = punchedDays(t.tasks, dates);
+  } catch (e) {
+    absorb(perm, e, SCOPES.task);
+    if (perm.missing.size) return { status: "needs-permission", missing: [...perm.missing], hint: "請管理員在 PM週報 開通假勤唯讀權限並發布新版本。" };
+    return { status: "error", error: attendanceErrorText(e) };
+  }
+  const leave: Record<string, { date: string; kind: ApprovalKind }[]> = {};
+  const punch: Record<string, string[]> = {};
+  const memberRids: string[] = [];
+  for (const p of people) {
+    const eid = employeeIds.get(p.openId);
+    if (!eid) continue;
+    const rids = [p.recordId, ...(p.altRecordIds ?? [])].filter((x): x is string => !!x);
+    const lv = leaveByUser.get(eid);
+    const pu = punchByUser.get(eid);
+    for (const rid of rids) {
+      if (lv) leave[rid] = lv;
+      if (pu) punch[rid] = [...pu];
+      if (members.has(eid)) memberRids.push(rid);
+    }
+  }
+  return { status: "ok", leave, punch, members: memberRids };
+}
+
+export async function getDailyStatus(weekStart: number, opts: { force?: boolean; now?: number } = {}): Promise<DailyStatusResponse> {
+  const now = opts.now ?? Date.now();
+  const monday = Date.parse(`${weekDates(weekStart)[0]}T00:00:00+08:00`);
+  const isCurrent = weekDates(monday).includes(taipeiDate(now)) && taipeiDate(now) <= weekDates(monday)[6];
+  const ttl = (v: DailyStatusResponse) => (v.status === "ok" ? (isCurrent ? 5 * 60000 : 6 * 3600000) : 60000);
+  try {
+    return await memo(`att:daily:${monday}`, ttl, () => computeDailyStatus(monday, now, !!opts.force), opts.force);
   } catch (e) {
     return { status: "error", error: attendanceErrorText(e) };
   }
