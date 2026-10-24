@@ -1,5 +1,5 @@
-import Overview from "@/components/Overview";
+import PlumbHarmonyArenaWinner from "@/components/PlumbHarmonyArenaWinner";
 
 export default function Page() {
-  return <Overview />;
+  return <PlumbHarmonyArenaWinner />;
 }
