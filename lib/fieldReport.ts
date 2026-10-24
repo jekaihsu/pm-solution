@@ -54,8 +54,8 @@ export const NO_CASE_LABEL = "（未連案件）";
 const text = (v: CellValue | undefined): string => (v === null || v === undefined ? "" : Array.isArray(v) ? v.join("、") : String(v));
 const pick = (fields: FieldMeta[], names: string[], kinds?: FieldMeta["kind"][]) => names.map((n) => fields.find((f) => f.name === n && (!kinds || kinds.includes(f.kind)))).find(Boolean);
 
-export type CaseResult = "有排有做" | "有排未做" | "未排有做" | "預排讀不到";
-export type ExceptionKind = "未排有做" | "有排未做" | "工作單異常";
+export type CaseResult = "有排有做" | "有排未做" | "未排有做" | "有排未到期" | "預排讀不到";
+export type ExceptionKind = "未排有做" | "有排未做" | "有排未做（已請假）" | "工作單異常";
 
 export interface CaseRow {
   caseId: string; // 工程鍵 P:前7碼；不合併的案件為 record_id（讀不到時為 t:標題）
@@ -128,6 +128,7 @@ export interface FieldReportInput {
   start: number; // epoch ms, inclusive
   end: number; // epoch ms, exclusive
   today?: number; // epoch ms；預排日 ≥ 今天（台北）尚未到期，不納入比較。預設現在。
+  leave?: Map<string, Set<number>>; // 人員名單 record_id → 當天請假／出差／外出的台北日序號；用來把「有排未做」判為正常
 }
 
 interface FOrder {
@@ -175,7 +176,7 @@ function mergeDays(days: number[]): [number, number][] {
 }
 
 export function buildFieldReport(p: FieldReportInput): FieldReport {
-  const { work, sched, cases, start, end } = p;
+  const { work, sched, cases, start, end, leave } = p;
   const notes: string[] = [];
   const winFirst = taipeiDay(start);
   const winLast = taipeiDay(end - 1);
@@ -353,8 +354,13 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
   };
 
   // ---- 預排（外業＋ROV）→ 組日×案件 ----
-  type Triple = { g: string; day: number; caseKey: string };
+  type Triple = { g: string; day: number; caseKey: string; people: Set<string> };
   const plan = new Map<string, Triple>(); // g|day|case
+  const addPlan = (key: string, g: string, day: number, caseKey: string, people: string[]) => {
+    const t = plan.get(key);
+    if (t) for (const p of people) t.people.add(p);
+    else plan.set(key, { g, day, caseKey, people: new Set(people) });
+  };
   let scheduleOn = false;
   let planNoGroup = 0;
   if (sched) {
@@ -366,6 +372,7 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
       group: byId(FIELD_SCHEDULE_FID.group) ?? pick(sched.fields, ["組別"]),
       kind: byId(FIELD_SCHEDULE_FID.kind) ?? pick(sched.fields, ["條類型"]),
       job: byId(FIELD_SCHEDULE_FID.job) ?? pick(sched.fields, ["案件", "案件編號", "工程編號"]),
+      people: byId(FIELD_SCHEDULE_FID.people) ?? pick(sched.fields, ["人員"]),
     };
     if (sf.start && sf.group) {
       scheduleOn = true;
@@ -376,7 +383,9 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
         const e0 = sf.end ? r.fields[sf.end.name] : null;
         const e = typeof e0 === "number" && e0 >= s ? e0 : s;
         const from = Math.max(taipeiDay(s), winFirst);
-        const to = Math.min(taipeiDay(e), lastDue);
+        // Include the whole selected week's plan (so next-week/current-week reviews see
+        // future 預排); days after today are shown but never judged「未做」(see lastDue below).
+        const to = Math.min(taipeiDay(e), winLast);
         if (to < from) continue;
         const trade = sf.trade ? text(r.fields[sf.trade.name]) : "";
         const gv = r.fields[sf.group.name];
@@ -391,11 +400,12 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
         const keys = ids.length ? ids : titles.filter(Boolean).map((t) => `t:${t}`);
         if (ids.length) ids.forEach((id, i) => titles[i] && !hints.has(id) && hints.set(id, titles[i]));
         else titles.forEach((t) => t && !hints.has(`t:${t}`) && hints.set(`t:${t}`, t));
+        const planPeople = (sf.people && r.links?.[sf.people.name]) || [];
         for (const raw of groups) {
           if (!keepFieldSchedule(trade, raw) || !keepFieldGroup(raw)) continue;
           const g = groupKey(raw);
           if (!labels.has(g)) labels.set(g, g);
-          for (let d = from; d <= to; d++) for (const c of keys.length ? keys : [NO_CASE]) plan.set(`${g}|${d}|${c}`, { g, day: d, caseKey: c });
+          for (let d = from; d <= to; d++) for (const c of keys.length ? keys : [NO_CASE]) addPlan(`${g}|${d}|${c}`, g, d, c, planPeople);
         }
       }
     } else notes.push("預排表找不到組別或真起日欄位（以 field id 比對），無法比對預排");
@@ -407,7 +417,7 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
   for (const [k, t] of [...plan]) {
     plan.delete(k);
     t.caseKey = projOf(t.caseKey);
-    plan.set(`${t.g}|${t.day}|${t.caseKey}`, t);
+    addPlan(`${t.g}|${t.day}|${t.caseKey}`, t.g, t.day, t.caseKey, [...t.people]);
   }
 
   // ---- 組日 ----
@@ -420,8 +430,12 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
     actGD.add(`${o.g}|${o.day}`);
   }
   const planGD = new Set([...plan.values()].map((t) => `${t.g}|${t.day}`));
+  const planGDDue = new Set([...plan.values()].filter((t) => t.day <= lastDue).map((t) => `${t.g}|${t.day}`));
   let hit = 0;
   for (const k of planGD) if (actGD.has(k)) hit++;
+  let missedDue = 0; // 只有已到期的預排組日才算「沒做」
+  for (const k of planGDDue) if (!actGD.has(k)) missedDue++;
+  if (planGD.size > planGDDue.size) notes.push(`${planGD.size - planGDDue.size} 個預排組日還沒到期（今天之後）：列出供檢視，不判「未做」`);
   const unplannedGD = [...actGD].filter((k) => !planGD.has(k));
   const unplannedBy = new Map<string, number>();
   for (const k of unplannedGD) {
@@ -453,14 +467,17 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
     ptsBy.set(o.caseKey, cur);
   }
   const groupsOf = (s: Set<string> | undefined) => [...new Set([...(s ?? [])].map((k) => labelOf(k.slice(0, k.lastIndexOf("|")))))].sort((a, b) => a.localeCompare(b));
+  const dayOf = (gd: string) => Number(gd.slice(gd.lastIndexOf("|") + 1));
+  const anyDue = (s: Set<string> | undefined) => !!s && [...s].some((k) => dayOf(k) <= lastDue);
   const caseKeys = new Set([...planBy.keys(), ...actBy.keys()]);
-  const order: Record<CaseResult, number> = { 有排有做: 0, 有排未做: 1, 未排有做: 2, 預排讀不到: 3 };
+  const order: Record<CaseResult, number> = { 有排有做: 0, 有排未做: 1, 未排有做: 2, 有排未到期: 3, 預排讀不到: 4 };
   const caseRows: CaseRow[] = [...caseKeys].map((key) => {
     const pl = planBy.get(key);
     const ac = actBy.get(key);
     const m = metaOf(key);
     const matched = pl && ac ? [...pl].filter((k) => ac.has(k)).length : 0;
-    const result: CaseResult = !scheduleOn ? "預排讀不到" : pl?.size && ac?.size ? "有排有做" : pl?.size ? "有排未做" : "未排有做";
+    // 有排未做 only when at least one planned group-day is already due; otherwise 有排未到期.
+    const result: CaseResult = !scheduleOn ? "預排讀不到" : pl?.size && ac?.size ? "有排有做" : pl?.size ? (anyDue(pl) ? "有排未做" : "有排未到期") : "未排有做";
     return {
       caseId: key,
       no: m.no,
@@ -507,20 +524,26 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
       }
     }
     // 有排未做：預排（組,日,案）當天沒有對應工作單
-    const miss = new Map<string, { g: string; c: string; days: number[] }>();
+    const miss = new Map<string, { g: string; c: string; kind: ExceptionKind; days: number[] }>();
     for (const t of plan.values()) {
-      if (t.caseKey === NO_CASE || done(t.g, t.day, t.caseKey)) continue;
-      const rk = `${t.g}|${t.caseKey}`;
-      if (!miss.has(rk)) miss.set(rk, { g: t.g, c: t.caseKey, days: [] });
+      if (t.caseKey === NO_CASE || t.day > lastDue || done(t.g, t.day, t.caseKey)) continue; // 未到期的預排不算未做
+      // 已請假＝正常：當天預排的人都請假／出差／外出就判為正常，不算「有排未做」。
+      const onLeave = t.people.size > 0 && [...t.people].every((pid) => leave?.get(pid)?.has(t.day));
+      const kind: ExceptionKind = onLeave ? "有排未做（已請假）" : "有排未做";
+      const rk = `${t.g}|${t.caseKey}|${kind}`;
+      if (!miss.has(rk)) miss.set(rk, { g: t.g, c: t.caseKey, kind, days: [] });
       miss.get(rk)!.days.push(t.day);
     }
-    for (const { g, c, days } of miss.values()) {
+    for (const { g, c, kind, days } of miss.values()) {
       for (const [from, to] of mergeDays(days)) {
         const inRange = days.filter((d) => d >= from && d <= to).length;
         const instead = new Set<string>();
         for (const o of orders) if (o.g === g && o.day >= from && o.day <= to) instead.add(o.caseKey === NO_CASE ? NO_CASE_LABEL : caseLabel(o.caseKey));
-        const desc = [`預排 ${inRange} 天，當天沒有此案的工作單`, instead.size ? `該組當天實際做：${[...instead].join("、")}` : "該組當天沒有任何工作單"];
-        exceptions.push({ kind: "有排未做", group: labelOf(g), gk: g, caseId: c, no: metaOf(c).no, name: metaOf(c).name, from, to, days: 0, points: 0, orders: 0, desc });
+        const desc =
+          kind === "有排未做（已請假）"
+            ? [`預排 ${inRange} 天，當天預排的人都請假／出差／外出（自動判為正常）`]
+            : [`預排 ${inRange} 天，當天沒有此案的工作單`, instead.size ? `該組當天實際做：${[...instead].join("、")}` : "該組當天沒有任何工作單"];
+        exceptions.push({ kind, group: labelOf(g), gk: g, caseId: c, no: metaOf(c).no, name: metaOf(c).name, from, to, days: 0, points: 0, orders: 0, desc });
       }
     }
   }
@@ -540,7 +563,7 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
       exceptions.push({ kind: "工作單異常", group: labelOf(g), gk: g, caseId: c, no: metaOf(c).no, name: metaOf(c).name, from, to, days: new Set(inRow.map((o) => o.day)).size, points: inRow.reduce((s, o) => s + (o.points ?? 0), 0), orders: inRow.length, desc });
     }
   }
-  const kindOrder: Record<ExceptionKind, number> = { 未排有做: 0, 有排未做: 1, 工作單異常: 2 };
+  const kindOrder: Record<ExceptionKind, number> = { 未排有做: 0, 有排未做: 1, "有排未做（已請假）": 2, 工作單異常: 3 };
   exceptions.sort((a, b) => a.group.localeCompare(b.group) || a.from - b.from || kindOrder[a.kind] - kindOrder[b.kind] || a.no.localeCompare(b.no));
 
   // ---- 檢核待辦 ----
@@ -562,7 +585,7 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
     summary: {
       planGroupDays: planGD.size,
       hitGroupDays: hit,
-      missedGroupDays: planGD.size - hit,
+      missedGroupDays: missedDue,
       actualGroupDays: actGD.size,
       unplannedGroupDays: scheduleOn ? unplannedGD.length : 0,
       planCases: planCases.length,
@@ -587,7 +610,7 @@ export function buildFieldReport(p: FieldReportInput): FieldReport {
 // 伺服器要哪些欄位（"#fld…" 依 field id；預排日期永遠不看欄名）。
 export const FIELD_WORK_FIELDS = ["工作單號", "出工日期", "工作日期-薪資", "組別", "所屬案件", "案件編號", "最終營業額點數", "營業額點數", "完成數量", "修改後數量", "突發狀況", "備註", "修改意見", "檢核狀態", "控制組檢核", "外業經理檢核"];
 export const FIELD_SCHEDULE_FIELDS = [
-  ...(["start", "end", "trade", "group", "kind", "job"] as const).map((k) => `#${FIELD_SCHEDULE_FID[k]}`),
-  "業別", "組別", "開始日期", "結束日期", "條類型", "案件", // V4 預排表 id 不同，退回用欄名
+  ...(["start", "end", "trade", "group", "kind", "job", "people"] as const).map((k) => `#${FIELD_SCHEDULE_FID[k]}`),
+  "業別", "組別", "開始日期", "結束日期", "條類型", "案件", "人員", // V4 預排表 id 不同，退回用欄名
 ];
 export const FIELD_CASE_FIELDS = ["案件編號", "案件名稱"];

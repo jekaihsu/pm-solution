@@ -294,6 +294,45 @@ function normalizeApprovals(items: LarkUserApprovals[]): Map<string, Approval[]>
   return new Map([...byUser].map(([k, v]) => [k, [...v.values()]]));
 }
 
+/** 每位員工在所選週內「有有效打卡」的日子（employee_id → Set<date>）。給每日檢查（item 3）判斷有沒有打卡。 */
+export function punchedDays(tasks: LarkUserTask[], dates: string[]): Map<string, Set<string>> {
+  const inWeek = new Set(dates);
+  const out = new Map<string, Set<string>>();
+  for (const t of tasks) {
+    const day = parseYmd(t.day);
+    if (!t.user_id || !day || !inWeek.has(day)) continue;
+    const ok = (t.records ?? []).some((r) => isPunch(r.check_in_result, r.check_in_result_supplement) || isPunch(r.check_out_result, r.check_out_result_supplement));
+    if (!ok) continue;
+    if (!out.has(t.user_id)) out.set(t.user_id, new Set());
+    out.get(t.user_id)!.add(day);
+  }
+  return out;
+}
+
+/**
+ * 每位員工在所選週內有請假／出差／外出的日子（employee_id → [{date, kind}]）。
+ * 給「有排未填／有排未做」自動判定「已請假＝正常」用：只要當天被任一假單涵蓋就算（半天假也算）。
+ * 純函式（用得到 normalizeApprovals／leaveCoverage），scripts/test-attendance.mjs 可直接測。
+ */
+export function approvalDaysByUser(items: LarkUserApprovals[], dates: string[]): Map<string, { date: string; kind: ApprovalKind }[]> {
+  const inWeek = new Set(dates);
+  const out = new Map<string, { date: string; kind: ApprovalKind }[]>();
+  for (const [uid, list] of normalizeApprovals(items)) {
+    const acc: { date: string; kind: ApprovalKind }[] = [];
+    const seen = new Set<string>();
+    for (const a of list) {
+      const days = a.kind === "leave" ? [...leaveCoverage(a).keys()] : [...a.covered];
+      for (const d of days) {
+        if (!inWeek.has(d) || seen.has(`${d}|${a.kind}`)) continue;
+        seen.add(`${d}|${a.kind}`);
+        acc.push({ date: d, kind: a.kind });
+      }
+    }
+    if (acc.length) out.set(uid, acc);
+  }
+  return out;
+}
+
 // ---------- 外出／出差時間文字 ----------
 const hm = (v: string) => v.match(/(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/);
 const md = (d: string) => d.slice(5).replace("-", "/");
@@ -700,7 +739,9 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
         codes.push(worked ? "leave-half" : "leave-half-nofield");
         continue;
       }
-      const code: DayCode = i < 5 && lw >= 1 ? "leave" : i < 5 && other ? other : worked ? "field" : "nofield";
+      // 週末（i>=5）沒有成本單＝免打卡（off），不是「無日報」——外業週末本來就不一定出工，
+      // 標 nofield 會變成雜訊（item 5）。週末有成本單仍算 field（週末加班出工照算）。
+      const code: DayCode = i < 5 && lw >= 1 ? "leave" : i < 5 && other ? other : worked ? "field" : i < 5 ? "nofield" : "off";
       add(code, 1);
       codes.push(code);
     }
