@@ -1,5 +1,5 @@
-import Overview from "@/components/Overview";
+import PlumbHarmonySwitchboardB from "@/components/PlumbHarmonySwitchboardB";
 
 export default function Page() {
-  return <Overview />;
+  return <PlumbHarmonySwitchboardB />;
 }
