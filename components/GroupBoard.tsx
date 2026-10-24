@@ -6,7 +6,7 @@ import { COST_FIELDS, FIELD_COST_FIELDS, JOINED_DATE, keepFieldSchedule, keepInt
 import { inRange, resolveDateField } from "@/lib/metrics";
 import { sourceByKey, type DataVersion } from "@/lib/reports";
 import type { CellValue, TableData } from "@/lib/types";
-import { formatDate, weekName } from "@/lib/week";
+import { formatDate, weekName, weekdayCn } from "@/lib/week";
 import { useShell } from "./AppShell";
 import EmptyState from "./EmptyState";
 import { MOBILE, useMedia } from "./useMedia";
@@ -139,7 +139,7 @@ function OrderDetail({ row, wf, checkLabel, ff, dateField, onlyDay, weekStart }:
             const d = r.fields[dateField];
             return (
               <tr key={r.id} className={fixes.length ? "cg-err" : undefined}>
-                <td>{typeof d === "number" ? `${formatDate(d).slice(5)}（${WEEKDAYS[dayOfWeek(d, weekStart)] ?? ""}）` : "—"}</td>
+                <td>{typeof d === "number" ? `${formatDate(d).slice(5)}（${weekdayCn(d)}）` : "—"}</td>
                 <td>{no}</td>
                 <td>{wf.jobNo ? text(r.fields[wf.jobNo.name]) : "—"}</td>
                 <td>{wf.item ? text(r.fields[wf.item.name]) : "—"}</td>
@@ -186,7 +186,9 @@ function OrderDetail({ row, wf, checkLabel, ff, dateField, onlyDay, weekStart }:
   );
 }
 
-const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
+const DAY = 86400000;
+// 區間天數：週＝7，自訂日期區間可為任意天數（週一～週日模型以外）。
+const rangeDays = (weekStart: number, weekEnd: number) => Math.max(1, Math.round((weekEnd - weekStart) / DAY));
 
 // 列的唯一鍵與顯示名：以組為單位＝組別名；以人為單位＝「內業組別|人員 record_id」與「人名（組別）」。
 const rk = (r: GroupRow) => r.key ?? r.group;
@@ -197,8 +199,8 @@ interface DayCell {
   errors: number;
 }
 
-function dayCells(row: GroupRow, ff: FixFields, dateField: string, weekStart: number): DayCell[] {
-  const cells = WEEKDAYS.map(() => ({ orders: 0, errors: 0 }));
+function dayCells(row: GroupRow, ff: FixFields, dateField: string, weekStart: number, nDays: number): DayCell[] {
+  const cells: DayCell[] = Array.from({ length: nDays }, () => ({ orders: 0, errors: 0 }));
   for (const r of row.orders) {
     const t = r.fields[dateField];
     if (typeof t !== "number") continue;
@@ -236,12 +238,14 @@ function DayCellView({ c, on, onClick }: { c: DayCell; on?: boolean; onClick?: (
 }
 
 function dayHead(i: number, weekStart: number) {
-  return `${WEEKDAYS[i]} ${formatDate(weekStart + i * 86400000).slice(5)}`;
+  const ms = weekStart + i * DAY;
+  return `${weekdayCn(ms)} ${formatDate(ms).slice(5)}`;
 }
 
-// 每組每天有沒有出錯：rows = groups, columns = Mon–Sun.
-function DayGrid({ rows, ff, dateField, weekStart, onPick }: { rows: GroupRow[]; ff: FixFields; dateField: string; weekStart: number; onPick: (g: string, day: number) => void }) {
+// 每組每天有沒有出錯：rows = groups, columns = 區間內每一天（週＝7 天，自訂區間為 N 天）。
+function DayGrid({ rows, ff, dateField, weekStart, weekEnd, onPick }: { rows: GroupRow[]; ff: FixFields; dateField: string; weekStart: number; weekEnd: number; onPick: (g: string, day: number) => void }) {
   const people = rows.some((r) => r.personId);
+  const nDays = rangeDays(weekStart, weekEnd);
   return (
     <div className="cg-days">
       <div className="cg-days-head">
@@ -253,15 +257,15 @@ function DayGrid({ rows, ff, dateField, weekStart, onPick }: { rows: GroupRow[];
           <thead>
             <tr>
               <th>{people ? "人員" : "組別"}</th>
-              {WEEKDAYS.map((_, i) => (
+              {Array.from({ length: nDays }, (_, i) => (
                 <th key={i}>{dayHead(i, weekStart)}</th>
               ))}
-              <th className="num">本週出錯</th>
+              <th className="num">出錯</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => {
-              const cells = dayCells(r, ff, dateField, weekStart);
+              const cells = dayCells(r, ff, dateField, weekStart, nDays);
               const err = cells.reduce((s, c) => s + c.errors, 0);
               const errDays = cells.filter((c) => c.errors).length;
               return (
@@ -375,7 +379,7 @@ function FailPanel({ rows, wf, cfg, dateField, weekStart, onPick }: { rows: Grou
                 return (
                   <tr key={o.id}>
                     <td className="cg-group">{perPerson ? row.team : row.group}</td>
-                    <td>{typeof d === "number" ? `${formatDate(d).slice(5)}（${WEEKDAYS[dayOfWeek(d, weekStart)] ?? ""}）` : "—"}</td>
+                    <td>{typeof d === "number" ? `${formatDate(d).slice(5)}（${weekdayCn(d)}）` : "—"}</td>
                     <td>{wf.orderNo ? text(o.fields[wf.orderNo.name]) || o.id : o.id}</td>
                     <td className="strong">{perPerson ? row.group : wf.person ? text(o.fields[wf.person.name]) || "—" : "—"}</td>
                     <td>{wf.jobNo ? text(o.fields[wf.jobNo.name]) || "—" : "—"}</td>
@@ -627,7 +631,7 @@ function SopPanel({ items, wf, dateField, weekStart, onPick }: { items: { key: s
               return (
                 <tr key={o.id} className="cg-link" onClick={() => onPick(key)}>
                   <td className="cg-group">{group}</td>
-                  <td>{typeof d === "number" ? `${formatDate(d).slice(5)}（${WEEKDAYS[dayOfWeek(d, weekStart)] ?? ""}）` : "—"}</td>
+                  <td>{typeof d === "number" ? `${formatDate(d).slice(5)}（${weekdayCn(d)}）` : "—"}</td>
                   <td>{wf.orderNo ? text(o.fields[wf.orderNo.name]) || o.id : o.id}</td>
                   <td className="strong">{wf.person ? text(o.fields[wf.person.name]) || "—" : "—"}</td>
                   <td>{wf.jobNo ? text(o.fields[wf.jobNo.name]) || "—" : "—"}</td>
@@ -646,11 +650,11 @@ function SopPanel({ items, wf, dateField, weekStart, onPick }: { items: { key: s
 }
 
 // One group, one week: every R01 item for that group on a single screen.
-function GroupFocus({ row, group, wf, cfg, hasCheck, hasFlags, ff, hasFix, dateField, weekStart, day, setDay }: { row?: GroupRow; group: string; wf: WorkFields; cfg: BoardConfig; hasCheck: boolean; hasFlags: boolean; ff: FixFields; hasFix: boolean; dateField: string; weekStart: number; day: number | null; setDay: (d: number | null) => void }) {
+function GroupFocus({ row, group, wf, cfg, hasCheck, hasFlags, ff, hasFix, dateField, weekStart, weekEnd, day, setDay }: { row?: GroupRow; group: string; wf: WorkFields; cfg: BoardConfig; hasCheck: boolean; hasFlags: boolean; ff: FixFields; hasFix: boolean; dateField: string; weekStart: number; weekEnd: number; day: number | null; setDay: (d: number | null) => void }) {
   const [failOpen, setFailOpen] = useState(false);
   if (!row) return <EmptyState kind="empty" title={`${group.includes("|") ? "這位人員" : group} 這週沒有${cfg.workLabel}`} />;
   const diff = row.planned && wf.revenue ? row.revenue - row.planned.points : null;
-  const cells = dayCells(row, ff, dateField, weekStart);
+  const cells = dayCells(row, ff, dateField, weekStart, rangeDays(weekStart, weekEnd));
   const errOrders = cells.reduce((s, c) => s + c.errors, 0);
   const errDays = cells.filter((c) => c.errors).length;
   return (
@@ -746,7 +750,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const [failOpen, setFailOpen] = useState(false);
   const [layout, setLayout] = useState<"sheet" | "detail">("sheet");
   const [sopOpen, setSopOpen] = useState(false);
-  useEffect(() => setDay(null), [version, week.start]);
+  useEffect(() => setDay(null), [version, week.start, week.end]);
   const pick = (g: string | null, d: number | null = null) => {
     setFocus(g);
     setDay(d);
@@ -1135,7 +1139,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
       )}
 
       {focus ? (
-        <GroupFocus row={allRows.find((r) => rk(r) === focus)} group={focus} wf={wf} cfg={cfg} hasCheck={hasCheck} hasFlags={hasFlags} ff={ff} hasFix={hasFix} dateField={dateField} weekStart={week.start} day={day} setDay={setDay} />
+        <GroupFocus row={allRows.find((r) => rk(r) === focus)} group={focus} wf={wf} cfg={cfg} hasCheck={hasCheck} hasFlags={hasFlags} ff={ff} hasFix={hasFix} dateField={dateField} weekStart={week.start} weekEnd={week.end} day={day} setDay={setDay} />
       ) : rows.length === 0 ? (
         <EmptyState kind="empty" title={`${weekName(week.offset)}${byPerson && team ? `「${team}」` : ""}沒有${cfg.workLabel}`} />
       ) : null}
@@ -1164,7 +1168,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
         </>
       )}
 
-      {!focus && rows.length > 0 && hasFix && <DayGrid rows={rows} ff={ff} dateField={dateField} weekStart={week.start} onPick={(g, d) => pick(g, d)} />}
+      {!focus && rows.length > 0 && hasFix && <DayGrid rows={rows} ff={ff} dateField={dateField} weekStart={week.start} weekEnd={week.end} onPick={(g, d) => pick(g, d)} />}
 
       <p className="cg-foot">
         失誤率＝{cfg.checkLabel}「不通過」÷ 已檢核（未檢核不計）。{byPerson ? `一列一個人（內業成本單的填報人），依成本單的內業組別分段，每組一列小計；同一人在不同內業組別填單時，每組各一列。預排點數＝預排表${cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}依「人員＋日期」比對（組別不參與，預排「人員」欄多人逐人展開，休假條不算），有填「預估營業額點數」就分攤到每天，未填以每人每天 1 點計（同人同日多條只算一次，標 *）；預排日期認欄位 id，不看欄名。` : `預排點數＝預排表${cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}點數欄，未填以每組每天 1 點計（標 *）。`}差異＝營業額點數（原值）− 預排點數。

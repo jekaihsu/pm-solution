@@ -265,8 +265,10 @@ test("排除行政／業務／內業／資訊組與未對應組別（工作單�
 
 test("預排日晚於今天的不算（本週尚未到的天不算有排未做）", () => {
   const r = run(work([]), sched([{ start: 1, end: 4, group: "水深C組", caseIds: ["C9"] }]), undefined, at(3)); // 今天＝day3
-  // day1、day2 已到期；day3（今天）與 day4 還沒到期
-  assert.equal(r.summary.planGroupDays, 2);
+  // day1、day2 已到期；day3（今天）與 day4 還沒到期。整週預排都列出供檢視（planGroupDays＝4），
+  // 但只有已到期的 day1、day2 才判「有排未做」／算 missedGroupDays（item 9：未到期不算沒做）。
+  assert.equal(r.summary.planGroupDays, 4);
+  assert.equal(r.summary.missedGroupDays, 2);
   assert.equal(r.exceptions.filter((e) => e.kind === "有排未做")[0].to, dayNo(2));
 });
 
