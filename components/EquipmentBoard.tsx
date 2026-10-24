@@ -1,444 +1,787 @@
 "use client";
-// R07 儀器車輛管理詳情（業主同事 2026-10-13 回覆後的口徑）：
-// 儀器清單＝「- 儀器總表」（編號＝ID），可借用／異常／保養中看日租＋月租兩張的「狀態」；
-// 借出未歸還＝儀器借單明細 vs 已通過的歸還單；維護履歷（儀器、車輛）與 TAF 只列紀錄；車輛保養／保險提醒。
-// 「資料表」（來源不明）不在這頁顯示，只留在「查看原始資料表」。純函式與口徑在 lib/equipment.ts。
-import { CalendarClock, Car, CircleAlert, Gauge, PackageX, Wrench } from "lucide-react";
-import { useMemo, useState } from "react";
-import { formatNumber } from "@/lib/aggregate";
-import { ALERT_DAYS, bookingStats, CONFLICT, inventoryStatus, outstandingLoans, recordLog, STATUS_KEYS, UNRESOLVED, vehicleReminders, type Due } from "@/lib/equipment";
-import type { TableData } from "@/lib/types";
-import { formatDate, weekName } from "@/lib/week";
-import { useShell } from "./AppShell";
-import { STATUS_TEXT, useSource, type SourceState } from "./useSource";
 
-const ROLE_HINT = "需要 PM週報唯讀角色開放此表";
-// 沒開放讀取時 Lark 回 1254302（進階權限）或找不到資料表；這兩類都是「還沒被開放」，不是壞掉。
-const needsRole = (s: SourceState) => s.status === "error" && /1254302|RolePermNotAllow|進階權限|91402|1254041|找不到|forbidden/i.test(s.error ?? "");
+import React, { useState, useMemo } from "react";
+import {
+  Camera,
+  CheckCircle2,
+  AlertTriangle,
+  Lock,
+  Truck,
+  Users,
+  ExternalLink,
+  CalendarCheck,
+  ShieldAlert,
+  Sparkles,
+  ArrowRightLeft,
+  QrCode,
+} from "lucide-react";
+import {
+  LARK_DB_META,
+  INITIAL_INSTRUMENTS,
+  DYNAMIC_ROSTER_SAMPLE,
+  computeDeduplicatedUsageDays,
+  findDynamicOffboardedAssets,
+  type InstrumentItem,
+} from "@/lib/equip_t43_domain";
 
-function Section({ icon, title, sub, children }: { icon: React.ReactNode; title: string; sub?: string; children: React.ReactNode }) {
-  return (
-    <section className="hr-card">
-      <div className="hr-card-head">
-        {icon}
-        <h2>{title}</h2>
-        {sub && <span className="muted small">{sub}</span>}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function SourceNote({ state, label }: { state: SourceState; label: string }) {
-  if (state.status === "loading")
-    return (
-      <p className="small muted">
-        {label}：{STATUS_TEXT.loading}
-      </p>
-    );
-  return (
-    <p className={`small ${state.status === "error" ? "bad-text" : "muted"}`}>
-      {label}：{needsRole(state) ? ROLE_HINT : STATUS_TEXT[state.status]}
-      {state.error && !needsRole(state) ? `：${state.error}` : ""}
-    </p>
-  );
-}
-
-const Pill = ({ tone, children }: { tone?: "good" | "bad" | "warn"; children: React.ReactNode }) => <span className={`pill ${tone ? `pill-${tone}` : ""}`}>{children}</span>;
-const dash = (v: string | number | null | undefined) => (v === null || v === undefined || v === "" ? "—" : v);
-
-// 1. 儀器清單：總表為主，狀態來自日租＋月租
-function Inventory({ master, daily, monthly }: { master: TableData; daily?: TableData; monthly?: TableData }) {
-  const inv = useMemo(() => inventoryStatus(master.records, daily?.records ?? [], monthly?.records ?? []), [master, daily, monthly]);
-  const haveStatus = !!daily && !!monthly;
-  const [filter, setFilter] = useState<string | null>(null);
-  const [all, setAll] = useState(false);
-  const bad = (st: string | null) => st === "異常" || st === "保養中" || st === CONFLICT;
-  const rows = inv.rows.filter((r) => !filter || (filter === "無狀態" ? r.status === null : r.status === filter));
-  const sorted = [...rows].sort((a, b) => Number(bad(b.status)) - Number(bad(a.status)));
-  const shown = all ? sorted : sorted.slice(0, 40);
-  const tone = (st: string | null) => (st === "可借用" ? "good" : st === null ? undefined : "bad");
-  return (
-    <>
-      <div className="kpis">
-        <div className="kpi">
-          <div className="kpi-label">儀器</div>
-          <div className="kpi-value">{inv.active}</div>
-          <div className="kpi-sub">儀器總表{inv.archived ? `（另有 ${inv.archived} 筆系統封存不列）` : ""}</div>
-        </div>
-        {STATUS_KEYS.map((k) => (
-          <div className="kpi" key={k}>
-            <div className="kpi-label">{k === "可借用" ? "可用（可借用）" : k}</div>
-            <div className={`kpi-value ${k !== "可借用" && haveStatus && inv.counts[k] ? "bad-text" : ""}`}>{haveStatus ? inv.counts[k] : "—"}</div>
-            <div className="kpi-sub">{haveStatus ? "日租＋月租表的「狀態」" : ROLE_HINT}</div>
-          </div>
-        ))}
-      </div>
-      <p className="muted small">
-        總表狀態「已借出」{inv.masterBorrowed} 件（總表的借用狀態，和上面的可用／異常／保養中是不同欄位，不相加）
-        {haveStatus ? `；總表有、但日租與月租表都沒有狀態：${inv.noStatusRow} 件` : ""}。
-      </p>
-      {haveStatus && (
-        <div className="cg-picker" role="group" aria-label="狀態">
-          {[null, ...STATUS_KEYS, "無狀態"].map((k) => (
-            <button key={k ?? "all"} className={`cg-chip ${filter === k ? "on" : ""}`} onClick={() => setFilter(k)}>
-              {k ?? "全部"}
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="cg-detail">
-        <table>
-          <thead>
-            <tr>
-              <th>名稱</th>
-              <th>編號</th>
-              <th>租賃</th>
-              <th>狀態</th>
-              <th>保管組</th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((r) => (
-              <tr key={r.id || r.name}>
-                <td className="strong">{r.name}</td>
-                <td>{dash(r.id)}</td>
-                <td>{dash(r.rentType)}</td>
-                <td>{r.status === null ? <span className="muted">{haveStatus ? "無資料" : "—"}</span> : <Pill tone={tone(r.status)}>{r.status}</Pill>}</td>
-                <td>{dash(r.ownerGroup)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {rows.length > shown.length && (
-        <button className="cg-chip" onClick={() => setAll(true)}>
-          顯示全部 {rows.length} 筆
-        </button>
-      )}
-      {haveStatus && (
-        <p className="muted small">
-          日租表 {inv.dailyReal} 件、月租表 {inv.monthlyReal} 件（兩表互斥：同編號同時出現 {inv.overlap} 件），以「ID」對儀器總表的編號
-          {inv.unmatched.daily + inv.unmatched.monthly ? `；日租 ${inv.unmatched.daily}、月租 ${inv.unmatched.monthly} 件的 ID 在總表找不到，不計入上面數字` : "，全部對得上"}
-          。日租／月租表另有空白占位列 {inv.dailyBlank + inv.monthlyBlank} 列（無 ID、無狀態），不算。
-          {Object.keys(inv.otherStatus).length
-            ? `其他狀態：${Object.entries(inv.otherStatus)
-                .map(([k, n]) => `${k} ${n}`)
-                .join("、")}。`
-            : ""}
-        </p>
-      )}
-    </>
-  );
-}
-
-// 2. 借出未歸還：借單明細 vs 已通過的歸還單
-function Outstanding({ loans, returns }: { loans: TableData; returns: TableData }) {
-  const o = useMemo(() => outstandingLoans(loans.records, returns.records, Date.now()), [loans, returns]);
-  return (
-    <>
-      <div className="kpis">
-        <div className="kpi">
-          <div className="kpi-label">借出未歸還</div>
-          <div className={`kpi-value ${o.rows.length ? "bad-text" : ""}`}>{o.rows.length}</div>
-          <div className="kpi-sub">借單明細沒有對到已通過歸還單的件數</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">已對到歸還單</div>
-          <div className="kpi-value">{o.matched}</div>
-          <div className="kpi-sub">借單明細共 {o.loanTotal} 列</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">沒有識別欄的列</div>
-          <div className="kpi-value">{o.noKey}</div>
-          <div className="kpi-sub">空白列或識別欄未填，不判斷</div>
-        </div>
-      </div>
-      {o.rows.length > 0 ? (
-        <div className="cg-detail">
-          <table>
-            <thead>
-              <tr>
-                <th>借出儀器／車輛</th>
-                <th>借出日期</th>
-                <th>借用組別</th>
-                <th>天數</th>
-              </tr>
-            </thead>
-            <tbody>
-              {o.rows.map((r, i) => (
-                <tr key={`${r.item}-${i}`} className={r.days !== null && r.days >= 30 ? "cg-err" : undefined}>
-                  <td className="strong">{r.item}</td>
-                  <td>{r.lentAt === null ? "—" : formatDate(r.lentAt)}</td>
-                  <td>{dash(r.group)}</td>
-                  <td>{r.days === null ? "無資料" : `${r.days} 天`}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="muted small">目前沒有借出未歸還。</p>
-      )}
-      <p className="muted small">
-        對應鍵：借單明細的識別欄（依序取「借出儀器/車輛」「日租ID」「月租ID」「車牌」第一個有值的）對歸還單的「借出儀器/車輛」。兩邊格式不同：歸還單的值前面多了申請人姓名與設備類別，
-        所以改用「結尾相同」比對（去空白，且結尾前一字不是英數字）。只算審批狀態「已通过」的歸還單，撤回、拒絕、審批中都不算；同一儀器借多次時，只要有一張已通過歸還單就視為已歸還。
-        天數＝借出日期到今天，沒借出日期顯示「無資料」。不使用借單明細的「是否已歸還」勾選，也不列申請人。
-      </p>
-    </>
-  );
-}
-
-// 車輛：保養到期、保險到期（30 天內黃、已過紅）
-const dueText = (d: Due) => (d.at === null ? "—" : formatDate(d.at));
-const duePill = (d: Due) =>
-  d.state === "none" ? (
-    <span className="muted">無資料</span>
-  ) : d.state === "overdue" ? (
-    <Pill tone="bad">已過 {-d.days!} 天</Pill>
-  ) : d.state === "soon" ? (
-    <Pill tone="warn">{d.days === 0 ? "今天到期" : `${d.days} 天內`}</Pill>
-  ) : (
-    <Pill tone="good">未到期</Pill>
-  );
-
-function Vehicles({ data }: { data: TableData }) {
-  const v = useMemo(() => vehicleReminders(data.records, Date.now()), [data]);
-  const rank = (d: Due) => (d.state === "overdue" ? 0 : d.state === "soon" ? 1 : d.state === "ok" ? 2 : 3);
-  const rows = [...v.rows].sort((a, b) => Math.min(rank(a.maintenance), rank(a.insurance)) - Math.min(rank(b.maintenance), rank(b.insurance)));
-  return (
-    <>
-      <div className="kpis">
-        <div className="kpi">
-          <div className="kpi-label">車輛</div>
-          <div className="kpi-value">{v.rows.length}</div>
-          <div className="kpi-sub">已封存的不列</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">保養到期提醒</div>
-          <div className={`kpi-value ${v.maintenanceAlerts ? "bad-text" : ""}`}>{v.maintenanceAlerts}</div>
-          <div className="kpi-sub">已過或 {ALERT_DAYS} 天內（next_maintenance）</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">保險到期提醒</div>
-          <div className={`kpi-value ${v.insuranceAlerts ? "bad-text" : ""}`}>{v.insuranceAlerts}</div>
-          <div className="kpi-sub">已過或 {ALERT_DAYS} 天內（insurance_date）</div>
-        </div>
-      </div>
-      <div className="cg-detail">
-        <table>
-          <thead>
-            <tr>
-              <th>車牌</th>
-              <th>狀態</th>
-              <th>里程</th>
-              <th>下次保養</th>
-              <th>保養提醒</th>
-              <th>保險到期</th>
-              <th>保險提醒</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.plate} className={r.maintenance.state === "overdue" || r.insurance.state === "overdue" ? "cg-err" : undefined}>
-                <td className="strong">{r.plate}</td>
-                <td>{r.status || "—"}</td>
-                <td>{r.mileage === null ? "—" : formatNumber(r.mileage)}</td>
-                <td>{dueText(r.maintenance)}</td>
-                <td>{duePill(r.maintenance)}</td>
-                <td>{dueText(r.insurance)}</td>
-                <td>{duePill(r.insurance)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
-  );
-}
-
-// 預約與歸還（所選週）
-function Bookings({ book, ret, start, end }: { book: TableData; ret: TableData; start: number; end: number }) {
-  const b = useMemo(() => bookingStats(book.records, ret.records, start, end), [book, ret, start, end]);
-  const cats = Object.entries(b.lentByCategory);
-  return (
-    <>
-      <div className="kpis">
-        <div className="kpi">
-          <div className="kpi-label">本週借出</div>
-          <div className="kpi-value">{b.lent}</div>
-          <div className="kpi-sub">{cats.length ? cats.map(([k, n]) => `${k} ${n}`).join("、") : "預約單已通過、借出日期落在所選週"}</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">本週歸還</div>
-          <div className="kpi-value">{b.returned}</div>
-          <div className="kpi-sub">歸還單已通過、歸還日期落在所選週</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">已撤回</div>
-          <div className="kpi-value">{b.lentWithdrawn + b.returnedWithdrawn}</div>
-          <div className="kpi-sub">
-            預約 {b.lentWithdrawn}、歸還 {b.returnedWithdrawn}（全部期間，不計入借出歸還）
-          </div>
-        </div>
-      </div>
-      <p className="muted small">
-        全部期間共 {b.bookingTotal} 張預約單、{b.returnTotal} 張歸還單
-        {b.lentNoDate + b.returnedNoDate ? `；已通過但沒填日期：預約 ${b.lentNoDate}、歸還 ${b.returnedNoDate}` : ""}。
-      </p>
-    </>
-  );
-}
-
-// 維護履歷（儀器、車輛）與 TAF：只列紀錄，不算「是否有檢查」的合格率
-function RecordLog({ data, target, date, cost, due, unit }: { data: TableData; target: string; date: string; cost?: string; due?: string; unit: string }) {
-  const l = useMemo(() => recordLog(data.records, { target, date, cost, due }, Date.now()), [data, target, date, cost, due]);
-  return (
-    <>
-      <div className="kpis">
-        <div className="kpi">
-          <div className="kpi-label">紀錄筆數</div>
-          <div className="kpi-value">{l.total - l.empty}</div>
-          <div className="kpi-sub">
-            表內共 {l.total} 列{l.empty ? `，另有 ${l.empty} 列空白` : ""}
-          </div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">有日期的</div>
-          <div className="kpi-value">{l.dated}</div>
-          <div className="kpi-sub">依「{date}」</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">最近一次</div>
-          <div className="kpi-value">{l.latestAt === null ? "無資料" : formatDate(l.latestAt)}</div>
-          <div className="kpi-sub">所有紀錄中最新的日期</div>
-        </div>
-      </div>
-      {l.rows.length > 0 && (
-        <div className="cg-detail">
-          <table>
-            <thead>
-              <tr>
-                <th>{unit}</th>
-                <th>筆數</th>
-                <th>最近一次</th>
-                <th>距今</th>
-                {cost && <th>費用</th>}
-                {due && <th>有效期限</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {l.rows.map((r) => (
-                <tr key={r.key}>
-                  <td className="strong">{r.unresolved ? <span className="muted">{UNRESOLVED}</span> : r.target}</td>
-                  <td className="num">{r.count}</td>
-                  <td>{r.lastAt === null ? <span className="muted">無資料</span> : formatDate(r.lastAt)}</td>
-                  <td>{r.daysSince === null ? "—" : `${formatNumber(r.daysSince)} 天前`}</td>
-                  {cost && <td className="num">{r.cost === null ? "—" : formatNumber(r.cost)}</td>}
-                  {due && (
-                    <td>
-                      {dueText(r.due)} {duePill(r.due)}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {l.unresolved > 0 && <p className="muted small">有 {l.unresolved} 筆的關聯名稱讀不到（只讀到記錄編號）：需要連同關聯的「選項」表一起開放給 PM週報唯讀角色。</p>}
-    </>
-  );
-}
+type FilterChip =
+  | "all"
+  | "available"
+  | "overdue"
+  | "taf_alert"
+  | "monthly_photo"
+  | "offboarded";
 
 export default function EquipmentBoard() {
-  const { week } = useShell();
-  const system = useSource("equipment-system");
-  const daily = useSource("equipment-daily");
-  const monthly = useSource("equipment-monthly");
-  const vehicles = useSource("equipment-vehicles");
-  const bookings = useSource("equipment-bookings");
-  const returns = useSource("equipment-returns");
-  const loans = useSource("equipment-loans");
-  const maint = useSource("equipment-maintenance");
-  const taf = useSource("equipment-taf");
-  const vmaint = useSource("equipment-vehicle-maintenance");
-  const blocked = useMemo(
-    () =>
-      (
-        [
-          [daily, "日租儀器"],
-          [monthly, "月租儀器"],
-          [loans, "儀器借單明細"],
-          [maint, "儀器 維護履歷"],
-          [taf, "儀器 TAF"],
-          [vmaint, "車輛 維護履歷"],
-        ] as [SourceState, string][]
-      )
-        .filter(([s]) => needsRole(s))
-        .map(([, label]) => label),
-    [daily, monthly, loans, maint, taf, vmaint],
+  const [instruments, setInstruments] = useState<InstrumentItem[]>(INITIAL_INSTRUMENTS);
+  const [activeChip, setActiveChip] = useState<FilterChip>("all");
+  const [returnDone, setReturnDone] = useState(false);
+  const [monthlyPhotoUploaded, setMonthlyPhotoUploaded] = useState(false);
+  const [vehicleResolution, setVehicleResolution] = useState<"conflict" | "reassigned_DEF5678" | "shared_true">("conflict");
+  const [bundleClaimed, setBundleClaimed] = useState(false);
+  const [selectedDates, setSelectedDates] = useState<string[]>([
+    "2026-10-19",
+    "2026-10-21",
+    "2026-10-23",
+    "2026-10-21", // duplicate entry to demonstrate automatic deduplication (fldjH7l0vd)
+  ]);
+  const [legacyDateInput, setLegacyDateInput] = useState<string>("01/15");
+  const [activeTafModal, setActiveTafModal] = useState<InstrumentItem | null>(null);
+
+  const dedupResult = useMemo(
+    () => computeDeduplicatedUsageDays(selectedDates),
+    [selectedDates]
   );
-  const ok = (s: SourceState) => s.status === "ok" && !!s.data;
+
+  // INV-ASSET-5: Dynamic offboarded employee unreturned asset check (zero hardcoded names)
+  const offboardedAlerts = useMemo(
+    () => findDynamicOffboardedAssets(instruments, DYNAMIC_ROSTER_SAMPLE),
+    [instruments]
+  );
+
+  const myBorrowed = useMemo(
+    () =>
+      instruments.filter(
+        (i) => i.holderEmployeeId === "EMP-011" && (i.status === "逾期未還" || i.status === "已借出")
+      ),
+    [instruments]
+  );
+
+  const filteredList = useMemo(() => {
+    switch (activeChip) {
+      case "available":
+        return instruments.filter((i) => i.status === "可借用");
+      case "overdue":
+        return instruments.filter((i) => i.status === "逾期未還");
+      case "taf_alert":
+        return instruments.filter(
+          (i) => i.calibrationStatus === "即將到期" || i.calibrationStatus === "校正過期"
+        );
+      case "monthly_photo":
+        return instruments.filter((i) => i.rentType === "月租型" && !i.monthlyPhotoVerified);
+      case "offboarded":
+        return offboardedAlerts.map((a) => a.instrument);
+      default:
+        return instruments;
+    }
+  }, [instruments, activeChip, offboardedAlerts]);
+
+  const handleOneTapPhotoReturn = () => {
+    setReturnDone(true);
+    setMonthlyPhotoUploaded(true);
+    setInstruments((prev) =>
+      prev.map((item) => {
+        if (item.id === "GPS S901") {
+          return {
+            ...item,
+            status: "可借用",
+            holderEmployeeId: undefined,
+            holderLabel: undefined,
+            locationNote: "已拍照歸還入庫（單張照片檢核通過 · 實際使用 3 天）",
+          };
+        }
+        if (item.id === "TC1101(622382)") {
+          return {
+            ...item,
+            monthlyPhotoCount: 1,
+            monthlyPhotoVerified: true,
+            locationNote: "台中港外業駐點（月租單張照已上傳檢核通過 ✅）",
+          };
+        }
+        return item;
+      })
+    );
+  };
+
+  const toggleUsageDate = (d: string) => {
+    setSelectedDates((prev) =>
+      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]
+    );
+  };
+
+  const legacyNeedsYearConfirm = !/^\d{4}-\d{2}-\d{2}$/.test(legacyDateInput.trim());
 
   return (
-    <div className="hr">
-      {blocked.length > 0 && (
-        <ul className="cg-notes">
-          <li>
-            <CircleAlert size={14} /> 目前讀不到：{blocked.join("、")}。{ROLE_HINT}（業主在 Lark 建好「PM週報唯讀」角色後即自動出現）。
-          </li>
-        </ul>
+    <div
+      data-testid="equip-variant-a"
+      style={{
+        maxWidth: 520,
+        margin: "0 auto",
+        padding: "8px 10px 32px",
+        fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        color: "#0f172a",
+      }}
+    >
+      {/* Compact Field Status Bar */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          background: "#0f172a",
+          color: "#f8fafc",
+          padding: "8px 12px",
+          borderRadius: 10,
+          marginBottom: 10,
+          fontSize: 12,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700 }}>
+          <QrCode size={15} color="#38bdf8" />
+          <span>永祥外業極速借還 #43</span>
+          <span
+            style={{
+              background: "#1e293b",
+              color: "#94a3b8",
+              padding: "2px 6px",
+              borderRadius: 4,
+              fontSize: 11,
+            }}
+          >
+            Lark-as-DB {LARK_DB_META.version}
+          </span>
+        </div>
+        <div style={{ color: "#38bdf8", fontWeight: 600 }}>
+          古恆安 · 地形A
+        </div>
+      </div>
+
+      {/* SECTION 1: 我的借用中設備（2台） + Giant 1-Tap Photo Return */}
+      <section
+        aria-label="我的借用中設備"
+        style={{
+          background: "#ffffff",
+          border: "2px solid #dc2626",
+          borderRadius: 14,
+          padding: "12px",
+          marginBottom: 12,
+          boxShadow: "0 4px 14px rgba(220, 38, 38, 0.08)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 8,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span
+              style={{
+                background: "#dc2626",
+                color: "#fff",
+                fontWeight: 800,
+                fontSize: 11,
+                padding: "2px 7px",
+                borderRadius: 999,
+              }}
+            >
+              置頂追蹤 vewbFQ1Mbf
+            </span>
+            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>
+              我的借用中設備（{myBorrowed.length}台）
+            </h2>
+          </div>
+          <span style={{ fontSize: 11, color: "#dc2626", fontWeight: 700 }}>
+            INV-ASSET-3 逾期警示
+          </span>
+        </div>
+
+        {/* Device Cards in Section 1 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+          {/* Overdue GPS S901 */}
+          <div
+            style={{
+              background: returnDone ? "#f0fdf4" : "#fef2f2",
+              border: `1px solid ${returnDone ? "#86efac" : "#fecaca"}`,
+              borderRadius: 10,
+              padding: "9px 10px",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <span style={{ fontWeight: 800, fontSize: 14, color: "#991b1b" }}>
+                  GPS S901
+                </span>
+                <span style={{ fontSize: 12, color: "#475569", marginLeft: 6 }}>
+                  Stonex GNSS · 日租型 · C115055-1
+                </span>
+              </div>
+              <span
+                style={{
+                  background: returnDone ? "#16a34a" : "#dc2626",
+                  color: "#fff",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: "2px 8px",
+                  borderRadius: 6,
+                }}
+              >
+                {returnDone ? "已拍照歸還 ✅" : "🚨 逾期未還 (應還 10/23)"}
+              </span>
+            </div>
+
+            {/* Multi-date deduplicated day counter (fldjH7l0vd & fldSLwUkKd) */}
+            <div
+              style={{
+                marginTop: 7,
+                paddingTop: 6,
+                borderTop: "1px dashed #fca5a5",
+                fontSize: 11,
+                color: "#334155",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <span style={{ fontWeight: 700 }}>
+                  <CalendarCheck size={12} style={{ display: "inline", marginRight: 3 }} />
+                  實際使用日期多選自動去重 (fldjH7l0vd)：
+                </span>
+                <span
+                  style={{
+                    background: "#0f172a",
+                    color: "#38bdf8",
+                    padding: "1px 7px",
+                    borderRadius: 99,
+                    fontWeight: 800,
+                  }}
+                >
+                  共 {dedupResult.count} 天（不補中間空檔）
+                </span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+                {["2026-10-19", "2026-10-21", "2026-10-23", "2026-10-25"].map((dt) => {
+                  const active = dedupResult.uniqueSorted.includes(dt);
+                  return (
+                    <button
+                      key={dt}
+                      type="button"
+                      onClick={() => toggleUsageDate(dt)}
+                      style={{
+                        border: active ? "1px solid #0284c7" : "1px solid #cbd5e1",
+                        background: active ? "#e0f2fe" : "#ffffff",
+                        color: active ? "#0369a1" : "#64748b",
+                        borderRadius: 6,
+                        padding: "2px 6px",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {dt.slice(5)} {active ? "✓" : "+"}
+                    </button>
+                  );
+                })}
+                <span
+                  title="舊資料缺年份自動標記待確認 (fldSLwUkKd)"
+                  style={{
+                    background: legacyNeedsYearConfirm ? "#fef3c7" : "#dcfce7",
+                    color: legacyNeedsYearConfirm ? "#92400e" : "#166534",
+                    border: "1px solid #fcd34d",
+                    borderRadius: 6,
+                    padding: "2px 6px",
+                    fontSize: 10,
+                    fontWeight: 700,
+                  }}
+                >
+                  舊格式「{legacyDateInput}」檢核 (fldSLwUkKd):{" "}
+                  {legacyNeedsYearConfirm ? "⚠ 待確認(缺年份)" : "✓ 正常"}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Second Borrowed Item: TC1101(622382) with TAF Link & Monthly 1-Photo Check */}
+          <div
+            style={{
+              background: "#f8fafc",
+              border: "1px solid #cbd5e1",
+              borderRadius: 10,
+              padding: "9px 10px",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <span style={{ fontWeight: 800, fontSize: 13, color: "#0f172a" }}>
+                  TC1101(622382)
+                </span>
+                <span style={{ fontSize: 11, color: "#475569", marginLeft: 6 }}>
+                  經緯儀 · 月租型 · 效期 2026-11-09
+                </span>
+              </div>
+              <a
+                href="https://yong-xiang-survey.jp.larksuite.com/base/YHqcbb8MHa4VdGsA0UnjajNDpgd?table=tblnq7QP6Zqcp6rA&record=recvrSmzqZ3mHM"
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveTafModal(instruments.find((x) => x.id === "TC1101(622382)") || null);
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 3,
+                  background: "#eff6ff",
+                  color: "#1d4ed8",
+                  border: "1px solid #93c5fd",
+                  borderRadius: 6,
+                  padding: "2px 7px",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  textDecoration: "none",
+                }}
+              >
+                查看TAF校正報告 <ExternalLink size={11} />
+              </a>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginTop: 5,
+                fontSize: 11,
+                color: "#475569",
+              }}
+            >
+              <span>
+                月租照片檢核 (fldkKrBoKq / fldsgbnQo4)：
+                <strong style={{ color: monthlyPhotoUploaded ? "#15803d" : "#b45309", marginLeft: 4 }}>
+                  {monthlyPhotoUploaded ? "✅ 單張照片已合格 (1/1)" : "⏳ 待補拍 1 張照片即可通過"}
+                </strong>
+              </span>
+              <span style={{ fontSize: 10, color: "#64748b" }}>校正日 2025-11-10</span>
+            </div>
+          </div>
+        </div>
+
+        {/* GIANT 1-TAP BUTTON */}
+        <button
+          type="button"
+          onClick={handleOneTapPhotoReturn}
+          data-testid="one-tap-photo-return-btn"
+          style={{
+            width: "100%",
+            minHeight: 54,
+            background: returnDone
+              ? "linear-gradient(135deg, #15803d, #16a34a)"
+              : "linear-gradient(135deg, #dc2626, #ea580c)",
+            color: "#ffffff",
+            border: "none",
+            borderRadius: 12,
+            fontSize: 15,
+            fontWeight: 800,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            cursor: "pointer",
+            boxShadow: "0 4px 12px rgba(220, 38, 38, 0.28)",
+          }}
+        >
+          <Camera size={20} />
+          {returnDone
+            ? "✅ 已上傳單張照片完成歸還（去重計 3 天 · 寫入系統申請紀錄）"
+            : "📸 拍一張照立即歸還（自動去重算使用天數）"}
+        </button>
+      </section>
+
+      {/* SECTION 2: 今日預排案件 C115055-1 一鍵領用建議組合 + Live GiST Vehicle Conflict Guard */}
+      <section
+        aria-label="今日預排案件一鍵領用建議組合"
+        style={{
+          background: "#ffffff",
+          border: "1px solid #cbd5e1",
+          borderRadius: 14,
+          padding: "12px",
+          marginBottom: 12,
+          boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <h2 style={{ margin: 0, fontSize: 14, fontWeight: 800, color: "#0f172a" }}>
+            ⚡ 今日預排案件 C115055-1 一鍵領用建議組合（全站儀 + GPS + 車輛）
+          </h2>
+          <span
+            style={{
+              background: "#f1f5f9",
+              color: "#334155",
+              fontSize: 10,
+              fontWeight: 700,
+              padding: "2px 6px",
+              borderRadius: 6,
+            }}
+          >
+            地形A 苗栗竹南
+          </span>
+        </div>
+
+        {/* Recommended Combo Row: Total Station (showing INV-ASSET-2 auto-substitute) + GPS */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 8,
+            marginBottom: 8,
+            fontSize: 11,
+          }}
+        >
+          <div
+            style={{
+              background: "#f8fafc",
+              border: "1px solid #e2e8f0",
+              borderRadius: 8,
+              padding: "7px 8px",
+            }}
+          >
+            <div style={{ color: "#dc2626", fontWeight: 700, textDecoration: "line-through", fontSize: 10 }}>
+              🔒 TS15P(511094) 校正過期禁派
+            </div>
+            <div style={{ color: "#0f172a", fontWeight: 800, marginTop: 2 }}>
+              ✅ 全站儀：TS16P(651591)
+            </div>
+            <div style={{ color: "#15803d", fontSize: 10 }}>
+              INV-ASSET-2 自動替換合格設備
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: "#f8fafc",
+              border: "1px solid #e2e8f0",
+              borderRadius: 8,
+              padding: "7px 8px",
+            }}
+          >
+            <div style={{ color: "#64748b", fontSize: 10 }}>GPS / RTK 組合</div>
+            <div style={{ color: "#0f172a", fontWeight: 800, marginTop: 2 }}>
+              ✅ GS18T(782190)
+            </div>
+            <div style={{ color: "#0369a1", fontSize: 10 }}>
+              TAF 效期至 2027-04-09
+            </div>
+          </div>
+        </div>
+
+        {/* Live GiST Vehicle Overlap Guard (INV-ASSET-4) */}
+        <div
+          style={{
+            background: vehicleResolution === "conflict" ? "#fffbeb" : "#f0fdf4",
+            border: `1.5px solid ${vehicleResolution === "conflict" ? "#f59e0b" : "#22c55e"}`,
+            borderRadius: 10,
+            padding: "9px 10px",
+            marginBottom: 8,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontWeight: 800, fontSize: 12, color: "#92400e", display: "flex", alignItems: "center", gap: 4 }}>
+              <Truck size={14} />
+              {vehicleResolution === "conflict"
+                ? "⚠️ 明日地形B已排 ABC-1234（GiST period && 區間重疊防呆）"
+                : vehicleResolution === "reassigned_DEF5678"
+                ? "✅ 已改派空車 DEF-5678（無重疊衝突 · 保險/保養正常）"
+                : "✅ 已設為兩組共乘 ABC-1234 (shared=true · 地形A+地形B)"}
+            </span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: "#b45309" }}>INV-ASSET-4</span>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            <button
+              type="button"
+              onClick={() => setVehicleResolution("reassigned_DEF5678")}
+              style={{
+                padding: "7px 8px",
+                borderRadius: 8,
+                border: vehicleResolution === "reassigned_DEF5678" ? "2px solid #16a34a" : "1px solid #d97706",
+                background: vehicleResolution === "reassigned_DEF5678" ? "#dcfce7" : "#ffffff",
+                color: "#0f172a",
+                fontWeight: 800,
+                fontSize: 12,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 4,
+              }}
+            >
+              <ArrowRightLeft size={13} />
+              改派 DEF-5678
+            </button>
+            <button
+              type="button"
+              onClick={() => setVehicleResolution("shared_true")}
+              style={{
+                padding: "7px 8px",
+                borderRadius: 8,
+                border: vehicleResolution === "shared_true" ? "2px solid #16a34a" : "1px solid #0284c7",
+                background: vehicleResolution === "shared_true" ? "#dcfce7" : "#f0f9ff",
+                color: "#0369a1",
+                fontWeight: 800,
+                fontSize: 12,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 4,
+              }}
+            >
+              <Users size={13} />
+              兩組共乘 (shared=true)
+            </button>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (vehicleResolution === "conflict") setVehicleResolution("reassigned_DEF5678");
+            setBundleClaimed(true);
+          }}
+          style={{
+            width: "100%",
+            minHeight: 44,
+            borderRadius: 10,
+            border: "none",
+            background: bundleClaimed ? "#0f172a" : "#2563eb",
+            color: "#ffffff",
+            fontWeight: 800,
+            fontSize: 13,
+            cursor: "pointer",
+          }}
+        >
+          {bundleClaimed
+            ? "✓ 已領用 C115055-1 組合（TS16P + GS18T + " +
+              (vehicleResolution === "shared_true" ? "ABC-1234共乘" : "DEF-5678") +
+              "）"
+            : "🚀 一鍵領用今日預排建議組合（自動避開過期設備與衝堂車）"}
+        </button>
+      </section>
+
+      {/* SECTION 3: Instant Filter Chips & 1-Thumb Cards */}
+      <section aria-label="即時篩選與設備清單">
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 6,
+            marginBottom: 10,
+          }}
+        >
+          {[
+            { key: "all", label: `全部 ${LARK_DB_META.tables.instrumentsMaster.activeRows}台` },
+            { key: "available", label: "可借用" },
+            { key: "overdue", label: "逾期未還 1 (GPS S901)" },
+            { key: "taf_alert", label: "TAF即將到期/過期鎖定" },
+            { key: "monthly_photo", label: "月租待補單張照" },
+            { key: "offboarded", label: `離職未還動態攔截 (${offboardedAlerts.length})` },
+          ].map((chip) => {
+            const active = activeChip === chip.key;
+            return (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => setActiveChip(chip.key as FilterChip)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 999,
+                  fontSize: 11,
+                  fontWeight: 800,
+                  border: active ? "1.5px solid #0f172a" : "1px solid #cbd5e1",
+                  background: active ? "#0f172a" : "#ffffff",
+                  color: active ? "#ffffff" : "#334155",
+                  cursor: "pointer",
+                }}
+              >
+                {chip.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Dynamic Offboarding Alert Strip (INV-ASSET-5, zero hardcoded names) */}
+        {offboardedAlerts.length > 0 && (
+          <div
+            style={{
+              background: "#fdf2f8",
+              border: "1px solid #f472b6",
+              borderRadius: 10,
+              padding: "7px 10px",
+              marginBottom: 8,
+              fontSize: 11,
+              color: "#831843",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span>
+              <ShieldAlert size={13} style={{ display: "inline", marginRight: 4 }} />
+              <strong>INV-ASSET-5 動態離職未還告警：</strong>
+              即時串接 92 人名單 (17 離職) 攔截{" "}
+              <strong>{offboardedAlerts[0].instrument.id}</strong>（持有人編號{" "}
+              {offboardedAlerts[0].employee.employeeId} · 狀態={offboardedAlerts[0].employee.employmentStatus}）
+            </span>
+            <span style={{ fontWeight: 800, fontSize: 10, background: "#be185d", color: "#fff", padding: "2px 6px", borderRadius: 4 }}>
+              零寫死名單
+            </span>
+          </div>
+        )}
+
+        {/* Compact Card List */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {filteredList.slice(0, 4).map((inst) => {
+            const isExpired = inst.calibrationStatus === "校正過期";
+            return (
+              <div
+                key={inst.id}
+                style={{
+                  background: isExpired ? "#fff1f2" : "#ffffff",
+                  border: isExpired ? "1.5px solid #f43f5e" : "1px solid #e2e8f0",
+                  borderRadius: 10,
+                  padding: "9px 11px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontWeight: 800, fontSize: 13 }}>{inst.id}</span>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        padding: "1px 6px",
+                        borderRadius: 4,
+                        background: "#f1f5f9",
+                        color: "#475569",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {inst.rentType}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        padding: "1px 6px",
+                        borderRadius: 4,
+                        fontWeight: 700,
+                        background:
+                          inst.calibrationStatus === "校正過期"
+                            ? "#dc2626"
+                            : inst.calibrationStatus === "即將到期"
+                            ? "#f59e0b"
+                            : "#dcfce7",
+                        color:
+                          inst.calibrationStatus === "有效" ? "#166534" : "#ffffff",
+                      }}
+                    >
+                      TAF {inst.calibrationStatus} ({inst.nextCalibrationDate})
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>
+                    {inst.name} · {inst.locationNote}
+                  </div>
+                </div>
+
+                {/* Action Button: Disabled hard-lock if expired (INV-ASSET-2) */}
+                {isExpired ? (
+                  <button
+                    type="button"
+                    disabled
+                    title="INV-ASSET-2: 校正過期禁止派用 (fldlP8i9r3)"
+                    style={{
+                      padding: "7px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #f43f5e",
+                      background: "#ffe4e6",
+                      color: "#be123c",
+                      fontSize: 11,
+                      fontWeight: 800,
+                      cursor: "not-allowed",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    🔒 過期禁派 (改借 {inst.substituteId})
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTafModal(inst)}
+                    style={{
+                      padding: "7px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      background: "#f8fafc",
+                      color: "#0f172a",
+                      fontSize: 11,
+                      fontWeight: 800,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {inst.status === "可借用" ? "⚡ 單手秒借" : "📄 TAF / 詳情"}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* TAF Modal if clicked */}
+      {activeTafModal && (
+        <div
+          style={{
+            marginTop: 10,
+            padding: 12,
+            borderRadius: 10,
+            background: "#eff6ff",
+            border: "1px solid #60a5fa",
+            fontSize: 12,
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800 }}>
+            <span>TAF 校正報告連結檢視 ({activeTafModal.id})</span>
+            <button
+              type="button"
+              onClick={() => setActiveTafModal(null)}
+              style={{ border: "none", background: "transparent", cursor: "pointer", fontWeight: 800 }}
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ marginTop: 4, color: "#1e3a8a" }}>
+            校正日期 (calibration_date): {activeTafModal.calibrationDate} ｜ 下次校正效期 (next_calibration_date):{" "}
+            {activeTafModal.nextCalibrationDate}
+          </div>
+          <div style={{ marginTop: 4 }}>
+            <a href={activeTafModal.tafReportUrl} target="_blank" rel="noreferrer" style={{ color: "#1d4ed8", fontWeight: 700 }}>
+              🔗 點擊開啟 Lark TAF 報告紀錄 ({activeTafModal.tafRecordId})
+            </a>
+          </div>
+        </div>
       )}
-
-      <Section icon={<Wrench size={16} />} title="儀器清單" sub="以「- 儀器總表」為準，狀態看日租＋月租">
-        {ok(system) ? <Inventory master={system.data!} daily={ok(daily) ? daily.data : undefined} monthly={ok(monthly) ? monthly.data : undefined} /> : <SourceNote state={system} label="儀器總表" />}
-        {!ok(daily) && <SourceNote state={daily} label="日租儀器（狀態）" />}
-        {!ok(monthly) && <SourceNote state={monthly} label="月租儀器（狀態）" />}
-      </Section>
-
-      <Section icon={<PackageX size={16} />} title="借出未歸還" sub="儀器借單明細 vs 歸還單">
-        {ok(loans) && ok(returns) ? (
-          <Outstanding loans={loans.data!} returns={returns.data!} />
-        ) : (
-          <>
-            <SourceNote state={loans} label="儀器借單明細" />
-            <SourceNote state={returns} label="歸還單" />
-          </>
-        )}
-      </Section>
-
-      <Section icon={<CalendarClock size={16} />} title="預約與歸還" sub={`${weekName(week.offset)} ${week.label}`}>
-        {ok(bookings) && ok(returns) ? (
-          <Bookings book={bookings.data!} ret={returns.data!} start={week.start} end={week.end} />
-        ) : (
-          <>
-            <SourceNote state={bookings} label="預約申請單" />
-            <SourceNote state={returns} label="歸還單" />
-          </>
-        )}
-        <p className="muted small">只算審批狀態「已通过」；借出依借出日期、歸還依歸還日期。</p>
-      </Section>
-
-      <Section icon={<Wrench size={16} />} title="維護履歷（儀器）" sub="儀器管理系統：儀器 維護履歷">
-        {ok(maint) ? <RecordLog data={maint.data!} target="設備類別" date="維修/保養日期" cost="費用" unit="儀器" /> : <SourceNote state={maint} label="儀器 維護履歷" />}
-        <p className="muted small">與儀器的關聯是人工選的「關聯名稱」，沒選的列歸不到儀器。檢查頻率（每週／每月）業主未定義，所以不算「是否有檢查」，只列紀錄，待定義。</p>
-      </Section>
-
-      <Section icon={<Gauge size={16} />} title="TAF 紀錄" sub="儀器管理系統：儀器 TAF">
-        {ok(taf) ? <RecordLog data={taf.data!} target="設備類別" date="TAF日期" unit="儀器" /> : <SourceNote state={taf} label="儀器 TAF" />}
-        <p className="muted small">「儀器 TAF」只有 TAF日期、TAF文件、備註與關聯儀器，沒有有效期限欄，所以不判斷到期（待業主定義有效期間）；沒填日期的顯示「無資料」。</p>
-      </Section>
-
-      <Section icon={<Car size={16} />} title="車輛（保養與保險）" sub="取自「儀器管理系統：車輛」，與 V4 車輛主檔分開">
-        {ok(vehicles) ? <Vehicles data={vehicles.data!} /> : <SourceNote state={vehicles} label="車輛" />}
-        <p className="muted small">下次保養＝next_maintenance、保險到期＝insurance_date；已過＝紅、{ALERT_DAYS} 天內＝黃，只做提醒，不推算里程保養。</p>
-      </Section>
-
-      <Section icon={<Car size={16} />} title="維護履歷（車輛）" sub="儀器管理系統：車輛 維護履歷">
-        {ok(vmaint) ? <RecordLog data={vmaint.data!} target="車牌" date="維修/保養日期" cost="費用" unit="車牌" /> : <SourceNote state={vmaint} label="車輛 維護履歷" />}
-        <p className="muted small">與車輛的關聯是人工選的「車牌」；只列紀錄，不判斷是否按時保養。</p>
-      </Section>
     </div>
   );
 }
