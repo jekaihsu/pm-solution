@@ -21,6 +21,15 @@ export function toCsv(fields: FieldMeta[], records: { id: string; fields: Record
   return "﻿" + lines.join("\r\n");
 }
 
+// Generic CSV for computed report tables (not raw Lark records). Same quoting /
+// formula-injection guard and BOM as toCsv.
+export function simpleCsv(headers: string[], rows: (string | number | null | undefined)[][], meta: string[] = []): string {
+  const lines = meta.map((m) => escape(`# ${m}`));
+  lines.push(headers.map((h) => escape(String(h))).join(","));
+  for (const r of rows) lines.push(r.map((c) => escape(c === null || c === undefined ? "" : String(c))).join(","));
+  return "﻿" + lines.join("\r\n");
+}
+
 export function downloadCsv(name: string, csv: string) {
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const a = Object.assign(document.createElement("a"), { href: url, download: name });

@@ -1,12 +1,17 @@
 "use client";
 // R10 外業報告（外業經理用）：預排 vs 實際（以案件為單位）、異常與人工確認案件、檢核待辦。
 // 邏輯在 lib/fieldReport.ts（純函式，scripts/test-field-report.mjs 測試）。網站唯讀：檢核說明要到 Lark 填。
-import { CircleAlert, ExternalLink } from "lucide-react";
-import { useMemo, useState } from "react";
+import { CircleAlert, Download, ExternalLink } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
-import { buildFieldReport, FIELD_CASE_FIELDS, FIELD_SCHEDULE_FIELDS, FIELD_WORK_FIELDS, fmtRange, NO_CASE_LABEL, type CaseResult, type ExceptionKind } from "@/lib/fieldReport";
+import { downloadCsv, simpleCsv } from "@/lib/csv";
+import { buildFieldReport, FIELD_CASE_FIELDS, FIELD_SCHEDULE_FIELDS, FIELD_WORK_FIELDS, fmtRange, NO_CASE_LABEL, taipeiDay, type CaseResult, type ExceptionKind } from "@/lib/fieldReport";
+import { managerOf } from "@/lib/managers";
 import { sourceByKey, type DataVersion } from "@/lib/reports";
 import { weekName } from "@/lib/week";
+
+type LeaveResp = { status: string; days?: Record<string, { date: string; kind: string }[]>; rangeClamped?: boolean };
+const FIELD_MANAGER = managerOf("外業"); // 柯汉
 import { useShell } from "./AppShell";
 import EmptyState from "./EmptyState";
 import { STATUS_TEXT, useSource } from "./useSource";
@@ -14,8 +19,8 @@ import { STATUS_TEXT, useSource } from "./useSource";
 const r2 = (n: number) => formatNumber(Math.round(n * 100) / 100);
 const dash = <span className="muted">—</span>;
 
-const RESULT_PILL: Record<CaseResult, string> = { 有排有做: "pill-good", 有排未做: "pill-bad", 未排有做: "pill-warn", 預排讀不到: "" };
-const KIND_PILL: Record<ExceptionKind, string> = { 未排有做: "pill-warn", 有排未做: "pill-bad", 工作單異常: "pill-bad" };
+const RESULT_PILL: Record<CaseResult, string> = { 有排有做: "pill-good", 有排未做: "pill-bad", 未排有做: "pill-warn", 有排未到期: "", 預排讀不到: "" };
+const KIND_PILL: Record<ExceptionKind, string> = { 未排有做: "pill-warn", 有排未做: "pill-bad", "有排未做（已請假）": "pill-good", 工作單異常: "pill-bad" };
 
 function Chips<T extends string>({ value, onChange, options, label }: { value: T | "全部"; onChange: (v: T | "全部") => void; options: { key: T | "全部"; n: number }[]; label: string }) {
   return (
@@ -30,7 +35,7 @@ function Chips<T extends string>({ value, onChange, options, label }: { value: T
 }
 
 export default function FieldReport() {
-  const { week, version: globalVersion } = useShell();
+  const { week, version: globalVersion, demo, tick, manual } = useShell();
   const [localVersion, setLocalVersion] = useState<DataVersion>("v3");
   const version: DataVersion = globalVersion === "all" ? localVersion : globalVersion;
   const work = useSource(`${version}-field-work`, { fields: FIELD_WORK_FIELDS, links: true });
@@ -39,6 +44,42 @@ export default function FieldReport() {
   const cases = useSource("v3-cases", { fields: FIELD_CASE_FIELDS, enabled: version === "v3" });
   const [caseFilter, setCaseFilter] = useState<CaseResult | "全部">("全部");
   const [excFilter, setExcFilter] = useState<ExceptionKind | "全部">("全部");
+  const [excGroup, setExcGroup] = useState<string>("全部");
+
+  // 「已請假＝正常」：抓 Lark 假勤，把當天預排的人都請假／出差／外出的「有排未做」自動判為正常。
+  const [leaveDays, setLeaveDays] = useState<Map<string, Set<number>> | null>(null);
+  const [leaveState, setLeaveState] = useState<"off" | "ok" | "fail">("off");
+  const [leaveClamped, setLeaveClamped] = useState(false);
+  useEffect(() => {
+    let off = false;
+    const qs = new URLSearchParams({ week: String(week.start), to: String(week.end) });
+    if (demo) qs.set("demo", "1");
+    if (tick > 0 && manual) qs.set("refresh", "1");
+    fetch(`/api/attendance/leave?${qs}`)
+      .then((r) => r.json())
+      .then((res: LeaveResp) => {
+        if (off) return;
+        if (res.status !== "ok" || !res.days) {
+          setLeaveDays(null);
+          setLeaveState("fail");
+          setLeaveClamped(false);
+          return;
+        }
+        const m = new Map<string, Set<number>>();
+        for (const [rid, list] of Object.entries(res.days)) {
+          const set = new Set<number>();
+          for (const d of list) set.add(taipeiDay(Date.parse(`${d.date}T00:00:00+08:00`)));
+          m.set(rid, set);
+        }
+        setLeaveDays(m);
+        setLeaveState("ok");
+        setLeaveClamped(!!res.rangeClamped);
+      })
+      .catch(() => !off && (setLeaveDays(null), setLeaveState("fail"), setLeaveClamped(false)));
+    return () => {
+      off = true;
+    };
+  }, [week.start, week.end, demo, tick, manual]);
 
   const casesState = version === "v3" ? cases.status : "skipped";
   const report = useMemo(() => {
@@ -50,8 +91,9 @@ export default function FieldReport() {
       cases: casesState === "ok" ? cases.data : undefined,
       start: week.start,
       end: week.end,
+      leave: leaveDays ?? undefined,
     });
-  }, [work.status, work.data, sched.status, sched.data, casesState, cases.data, week.start, week.end]);
+  }, [work.status, work.data, sched.status, sched.data, casesState, cases.data, week.start, week.end, leaveDays]);
 
   const wk = weekName(week.offset);
   const header = (
@@ -102,10 +144,21 @@ export default function FieldReport() {
   if (report.hiddenGroups.length) notes.push(`不列入（非外業組）：${report.hiddenGroups.map((h) => `${/^rec/.test(h.group) ? "未對應組別" : h.group}（${h.orders} 張）`).join("、")}`);
   if (work.data?.stale) notes.push("工作單為上次成功讀取的快照");
 
-  const caseResults = ["有排有做", "有排未做", "未排有做"] as const;
+  const caseResults = ["有排有做", "有排未做", "未排有做", "有排未到期"] as const;
   const caseRows = caseFilter === "全部" ? report.cases : report.cases.filter((c) => c.result === caseFilter);
-  const excKinds = ["未排有做", "有排未做", "工作單異常"] as const;
-  const excRows = excFilter === "全部" ? report.exceptions : report.exceptions.filter((e) => e.kind === excFilter);
+  const excKinds = ["未排有做", "有排未做", "有排未做（已請假）", "工作單異常"] as const;
+  const excGroups = [...new Set(report.exceptions.map((e) => e.group))].sort((a, b) => a.localeCompare(b, "zh-Hant"));
+  const excRows = report.exceptions.filter((e) => (excFilter === "全部" || e.kind === excFilter) && (excGroup === "全部" || e.group === excGroup));
+  const leaveAutoN = report.exceptions.filter((e) => e.kind === "有排未做（已請假）").length;
+  const exportExceptions = () =>
+    downloadCsv(
+      `R10_異常與人工確認_${version.toUpperCase()}_${week.label.replace(/[\s/–]/g, "_")}.csv`,
+      simpleCsv(
+        ["項次", "類型", "負責經理", "組別", "工程編號", "出工日期", "實際出工天數", "營業額點數", "工程簡稱", "說明"],
+        excRows.map((e) => [e.n, e.kind, FIELD_MANAGER, e.group, e.no, fmtRange(e.from, e.to), e.days, e.orders ? r2(e.points) : "", e.name, e.desc.join("；")]),
+        [`R10 外業 ${weekName(week.offset)} ${week.label}・負責經理 ${FIELD_MANAGER}`, `類型＝${excFilter}、組別＝${excGroup}`],
+      ),
+    );
   const larkUrl = sourceByKey(`${version}-field-work`)?.url;
   const t = report.checksTotal;
   const noMgr = !report.hasFields.manager;
@@ -155,7 +208,7 @@ export default function FieldReport() {
             label="結果分類"
             value={caseFilter}
             onChange={setCaseFilter}
-            options={[{ key: "全部", n: report.cases.length }, ...caseResults.map((k) => ({ key: k, n: report.cases.filter((c) => c.result === k).length }))]}
+            options={[{ key: "全部", n: report.cases.length }, ...caseResults.map((k) => ({ key: k, n: report.cases.filter((c) => c.result === k).length })).filter((o) => o.n > 0 || o.key === caseFilter)]}
           />
         )}
         <div className="fr-scroll">
@@ -213,13 +266,23 @@ export default function FieldReport() {
             未排有做、有排未做，以及工作單有「突發狀況」、已退回、修改後數量≠完成數量；同組同案連續日期合併成 起～迄
           </span>
         </div>
-        <Chips label="異常類型" value={excFilter} onChange={setExcFilter} options={[{ key: "全部", n: report.exceptions.length }, ...excKinds.map((k) => ({ key: k, n: report.exceptions.filter((e) => e.kind === k).length }))]} />
+        <Chips label="異常類型" value={excFilter} onChange={setExcFilter} options={[{ key: "全部", n: report.exceptions.length }, ...excKinds.map((k) => ({ key: k, n: report.exceptions.filter((e) => e.kind === k).length })).filter((o) => o.n > 0 || o.key === excFilter)]} />
+        {excGroups.length > 1 && (
+          <Chips label="組別" value={excGroup} onChange={setExcGroup} options={[{ key: "全部", n: report.exceptions.length }, ...excGroups.map((g) => ({ key: g, n: report.exceptions.filter((e) => e.group === g).length }))]} />
+        )}
+        <div className="fr-tools">
+          <span className="muted small">負責經理：{FIELD_MANAGER}（外業）</span>
+          <button className="tool" onClick={exportExceptions} disabled={!excRows.length} title="匯出 CSV">
+            <Download size={14} strokeWidth={1.75} /> 匯出
+          </button>
+        </div>
         <div className="fr-scroll">
           <table>
             <thead>
               <tr>
                 <th className="num">項次</th>
                 <th>類型</th>
+                <th>負責經理</th>
                 <th>組別</th>
                 <th>工程編號</th>
                 <th>出工日期</th>
@@ -236,11 +299,12 @@ export default function FieldReport() {
                   <td>
                     <span className={`pill ${KIND_PILL[e.kind]}`}>{e.kind}</span>
                   </td>
+                  <td className="fr-nowrap">{FIELD_MANAGER}</td>
                   <td className="fr-nowrap">{e.group}</td>
                   <td className="fr-nowrap">{e.no === NO_CASE_LABEL ? <span className="muted">{e.no}</span> : e.no}</td>
                   <td className="fr-nowrap">
                     {fmtRange(e.from, e.to)}
-                    {e.kind === "有排未做" && <span className="muted small">　預排</span>}
+                    {(e.kind === "有排未做" || e.kind === "有排未做（已請假）") && <span className="muted small">　預排</span>}
                   </td>
                   <td className="num">{e.days}</td>
                   <td className="num">{e.orders ? r2(e.points) : dash}</td>
@@ -256,7 +320,7 @@ export default function FieldReport() {
               ))}
               {!excRows.length && (
                 <tr>
-                  <td colSpan={9} className="muted">
+                  <td colSpan={10} className="muted">
                     {report.scheduleOn ? "這週沒有符合的異常" : "預排讀不到，只列得出工作單異常"}
                   </td>
                 </tr>
@@ -264,6 +328,9 @@ export default function FieldReport() {
             </tbody>
           </table>
         </div>
+        {leaveState === "ok" && leaveAutoN > 0 && <p className="muted small">已套用 Lark 假勤：{leaveAutoN} 筆「有排未做」因當天預排的人都請假／出差／外出，自動判為正常（顯示為「有排未做（已請假）」）。</p>}
+        {leaveState === "fail" && !demo && <p className="muted small">未套用 Lark 假勤（沒有人事查看權限或讀取失敗）：「有排未做」未自動扣除請假。</p>}
+        {leaveClamped && <p className="muted small">查詢區間超過今天 +60 天上限，Lark 假勤只抓到上限為止；超出的日子未套用請假判定。</p>}
         <p className="muted small">
           檢核說明需在 Lark 填寫，網站唯讀。
           {larkUrl && (

@@ -29,7 +29,7 @@ export default function ReportView({ report }: { report: ReportDef }) {
 
   return (
     <div className="page">
-      <header className="page-head">
+      {report.id !== "R07" && (<header className="page-head">
         <div className="page-title">
           <div className="eyebrow">報告 {report.id}</div>
           <h1>{report.name}</h1>
@@ -39,7 +39,7 @@ export default function ReportView({ report }: { report: ReportDef }) {
           <Info size={15} strokeWidth={1.75} />
           報告定義
         </button>
-      </header>
+      </header>)}
 
       {showSpec && (
         <div className="spec">
