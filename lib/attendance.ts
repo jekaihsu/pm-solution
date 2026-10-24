@@ -5,6 +5,8 @@ import { LarkApiError, getSourceData, larkReadApi } from "./lark";
 import { PEOPLE_ACCOUNT, PEOPLE_ACTIVE, PEOPLE_GROUP, PEOPLE_NAME } from "./people";
 import { sourceByKey } from "./reports";
 import {
+  approvalDaysByUser,
+  punchedDays,
   attendanceErrorText,
   attendanceTtl,
   buildAttendanceView,
@@ -18,6 +20,7 @@ import {
   taipeiDate,
   weekDates,
   ymdInt,
+  type ApprovalKind,
   type AttendanceResponse,
   type FieldCostInput,
   type LarkUserApprovals,
@@ -90,13 +93,17 @@ async function employeeIdMap(openIds: string[], force: boolean): Promise<Map<str
 }
 
 // 部門（含全部子部門）底下的人 employee_id。
+// 考勤組成員集合是以 employee_id 比對（group detail 用 employee_type=employee_id 回 bind_user_ids，
+// buildAttendanceView 也以 employee_id 判 isMember），所以這裡必須取 user_id（＝Lark 的 employee_id），
+// 不能用 open_id — 否則用部門綁定加入考勤組的人（非逐一綁定）會以 open_id 進集合、永遠對不上
+// employee_id 的比對而被判為「不在考勤組」，整列從 R04 消失。
 async function deptUsers(dept: string): Promise<string[]> {
   const ids = [dept];
   const kids = await pages<any>(`/contact/v3/departments/${encodeURIComponent(dept)}/children`, { department_id_type: "open_department_id", fetch_child: "true" }, (d) => d?.items ?? []);
   for (const k of kids) if (k?.open_department_id) ids.push(String(k.open_department_id));
   const out = new Set<string>();
   await mapPool(ids, LIMIT, async (id) => {
-    const us = await pages<any>("/contact/v3/users/find_by_department", { department_id: id, department_id_type: "open_department_id", user_id_type: "open_id" }, (d) => d?.items ?? []);
+    const us = await pages<any>("/contact/v3/users/find_by_department", { department_id: id, department_id_type: "open_department_id", user_id_type: "user_id" }, (d) => d?.items ?? []);
     for (const u of us) if (u?.user_id) out.add(String(u.user_id));
   });
   return [...out];
@@ -210,6 +217,158 @@ async function compute(weekStart: number, now: number, force: boolean): Promise<
   } catch (e) {
     absorb(perm, e, SCOPES.task);
     if (perm.missing.size) return { status: "needs-permission", missing: [...perm.missing], hint: "請管理員在 PM週報 開發者後台開通上列權限並發布新版本。" };
+    return { status: "error", error: attendanceErrorText(e) };
+  }
+}
+
+// 「已請假＝正常」用：所選週內每位同事（人員名單 record_id，含同人多列的別名）請假／出差／外出的日子。
+// 給 R09／R10 把「有排未填／有排未做」自動判為正常。只回 record_id 與日期（非個資），經 HR 守門。
+export interface LeaveDaysResponse {
+  status: "ok" | "needs-permission" | "error" | "not-connected";
+  missing?: string[];
+  hint?: string;
+  error?: string;
+  // 人員名單 record_id → 當週請假／出差／外出的日子（YYYY-MM-DD）
+  days?: Record<string, { date: string; kind: ApprovalKind }[]>;
+  // 自訂區間超過 now+60d 上限，結束被夾到上限、只抓到上限那一週（route 設定，UI 用來提示）。
+  rangeClamped?: boolean;
+}
+
+async function computeLeaveDays(weekStart: number, force: boolean): Promise<LeaveDaysResponse> {
+  const dates = weekDates(weekStart);
+  const rosterSrc = sourceByKey("v3-people");
+  if (!rosterSrc) return { status: "error", error: "找不到人員名單來源" };
+  const rows = (await getSourceData(rosterSrc)).records as unknown as RosterRow[];
+  const { people } = buildRoster(rows, { name: PEOPLE_NAME, group: PEOPLE_GROUP, active: PEOPLE_ACTIVE, account: PEOPLE_ACCOUNT });
+  const perm: Perm = { missing: new Set() };
+  let employeeIds: Map<string, string>;
+  try {
+    employeeIds = await employeeIdMap(people.map((r) => r.openId), force);
+  } catch (e) {
+    absorb(perm, e, SCOPES.contact);
+    if (perm.missing.size) return { status: "needs-permission", missing: [...perm.missing], hint: "請管理員在 PM週報 開通假勤與通訊錄唯讀權限並發布新版本。" };
+    return { status: "error", error: attendanceErrorText(e) };
+  }
+  const allIds = people.map((r) => employeeIds.get(r.openId)).filter((x): x is string => !!x);
+  let byUser: Map<string, { date: string; kind: ApprovalKind }[]>;
+  try {
+    byUser = approvalDaysByUser(await queryApprovals(allIds, dates[0], dates[6]), dates);
+  } catch (e) {
+    absorb(perm, e, SCOPES.task);
+    if (perm.missing.size) return { status: "needs-permission", missing: [...perm.missing], hint: "請管理員在 PM週報 開通假勤唯讀權限並發布新版本。" };
+    return { status: "error", error: attendanceErrorText(e) };
+  }
+  const days: Record<string, { date: string; kind: ApprovalKind }[]> = {};
+  for (const p of people) {
+    const eid = employeeIds.get(p.openId);
+    const d = eid ? byUser.get(eid) : undefined;
+    if (!d) continue;
+    for (const rid of [p.recordId, ...(p.altRecordIds ?? [])]) if (rid) days[rid] = d;
+  }
+  return { status: "ok", days };
+}
+
+// The Taipei Monday (epoch ms) of the Mon–Sun week containing `ms`.
+const mondayOf = (ms: number) => Date.parse(`${weekDates(ms)[0]}T00:00:00+08:00`);
+
+async function fetchLeaveWeek(monday: number, now: number, force: boolean): Promise<LeaveDaysResponse> {
+  const isCurrent = weekDates(monday).includes(taipeiDate(now)) && taipeiDate(now) <= weekDates(monday)[6];
+  const ttl = (v: LeaveDaysResponse) => (v.status === "ok" ? (isCurrent ? 5 * 60000 : 6 * 3600000) : 60000);
+  return memo(`att:leave:${monday}`, ttl, () => computeLeaveDays(monday, force), force);
+}
+
+// 請假／出差／外出的日子。自訂日期區間（R09／R10）可跨多週：以 `end`（exclusive ms）決定
+// 要抓哪幾個週一～週日的週，逐週抓（各自快取）後合併，否則只有起始週的請假會被讀到。
+export async function getLeaveDays(weekStart: number, opts: { force?: boolean; now?: number; end?: number } = {}): Promise<LeaveDaysResponse> {
+  const now = opts.now ?? Date.now();
+  try {
+    const first = mondayOf(weekStart);
+    const last = opts.end && opts.end > weekStart ? mondayOf(opts.end - 1) : first;
+    const mondays: number[] = [];
+    for (let m = first; m <= last; m += 7 * 86400000) mondays.push(m);
+    const results = await Promise.all(mondays.map((m) => fetchLeaveWeek(m, now, !!opts.force)));
+    const bad = results.find((r) => r.status !== "ok");
+    if (bad) return bad;
+    const days: Record<string, { date: string; kind: ApprovalKind }[]> = {};
+    for (const r of results) for (const [rid, list] of Object.entries(r.days ?? {})) (days[rid] ??= []).push(...list);
+    return { status: "ok", days };
+  } catch (e) {
+    return { status: "error", error: attendanceErrorText(e) };
+  }
+}
+
+// 每日檢查（item 3）：所選週內每位同事（人員名單 record_id）的請假／出差／外出、有效打卡日，與是否為考勤組成員。
+// 只回 record_id 與日期（非個資），經 HR 守門。
+export interface DailyStatusResponse {
+  status: "ok" | "needs-permission" | "error" | "not-connected";
+  missing?: string[];
+  hint?: string;
+  error?: string;
+  leave?: Record<string, { date: string; kind: ApprovalKind }[]>; // record_id → 請假／出差／外出日
+  punch?: Record<string, string[]>; // record_id → 有有效打卡的日子
+  members?: string[]; // 屬於考勤組的 record_id（會打卡；其餘為外業／不打卡）
+}
+
+async function computeDailyStatus(weekStart: number, now: number, force: boolean): Promise<DailyStatusResponse> {
+  const dates = weekDates(weekStart);
+  const today = taipeiDate(now);
+  const rosterSrc = sourceByKey("v3-people");
+  if (!rosterSrc) return { status: "error", error: "找不到人員名單來源" };
+  const rows = (await getSourceData(rosterSrc)).records as unknown as RosterRow[];
+  const { people } = buildRoster(rows, { name: PEOPLE_NAME, group: PEOPLE_GROUP, active: PEOPLE_ACTIVE, account: PEOPLE_ACCOUNT });
+
+  const perm: Perm = { missing: new Set() };
+  const [em, gm] = await Promise.allSettled([employeeIdMap(people.map((r) => r.openId), force), groupMembers(force)]);
+  if (em.status === "rejected") absorb(perm, em.reason, SCOPES.contact);
+  if (gm.status === "rejected") absorb(perm, gm.reason, [...SCOPES.rule, ...SCOPES.contact]);
+  if (perm.missing.size) return { status: "needs-permission", missing: [...perm.missing], hint: "請管理員在 PM週報 開通假勤與通訊錄唯讀權限並發布新版本。" };
+  if (perm.other) return { status: "error", error: attendanceErrorText(perm.other) };
+  const employeeIds = (em as PromiseFulfilledResult<Map<string, string>>).value;
+  const { members } = (gm as PromiseFulfilledResult<{ members: Set<string>; groupCount: number }>).value;
+
+  const allIds = people.map((r) => employeeIds.get(r.openId)).filter((x): x is string => !!x);
+  const memberIds = allIds.filter((x) => members.has(x));
+  const last = dates[6] < today ? dates[6] : today;
+  let leaveByUser: Map<string, { date: string; kind: ApprovalKind }[]>;
+  let punchByUser: Map<string, Set<string>>;
+  try {
+    const [t, approvals] = await Promise.all([
+      dates[0] > today || !memberIds.length ? Promise.resolve({ tasks: [] as LarkUserTask[], invalid: 0 }) : queryTasks(memberIds, dates[0], last),
+      queryApprovals(allIds, dates[0], dates[6]),
+    ]);
+    leaveByUser = approvalDaysByUser(approvals, dates);
+    punchByUser = punchedDays(t.tasks, dates);
+  } catch (e) {
+    absorb(perm, e, SCOPES.task);
+    if (perm.missing.size) return { status: "needs-permission", missing: [...perm.missing], hint: "請管理員在 PM週報 開通假勤唯讀權限並發布新版本。" };
+    return { status: "error", error: attendanceErrorText(e) };
+  }
+  const leave: Record<string, { date: string; kind: ApprovalKind }[]> = {};
+  const punch: Record<string, string[]> = {};
+  const memberRids: string[] = [];
+  for (const p of people) {
+    const eid = employeeIds.get(p.openId);
+    if (!eid) continue;
+    const rids = [p.recordId, ...(p.altRecordIds ?? [])].filter((x): x is string => !!x);
+    const lv = leaveByUser.get(eid);
+    const pu = punchByUser.get(eid);
+    for (const rid of rids) {
+      if (lv) leave[rid] = lv;
+      if (pu) punch[rid] = [...pu];
+      if (members.has(eid)) memberRids.push(rid);
+    }
+  }
+  return { status: "ok", leave, punch, members: memberRids };
+}
+
+export async function getDailyStatus(weekStart: number, opts: { force?: boolean; now?: number } = {}): Promise<DailyStatusResponse> {
+  const now = opts.now ?? Date.now();
+  const monday = Date.parse(`${weekDates(weekStart)[0]}T00:00:00+08:00`);
+  const isCurrent = weekDates(monday).includes(taipeiDate(now)) && taipeiDate(now) <= weekDates(monday)[6];
+  const ttl = (v: DailyStatusResponse) => (v.status === "ok" ? (isCurrent ? 5 * 60000 : 6 * 3600000) : 60000);
+  try {
+    return await memo(`att:daily:${monday}`, ttl, () => computeDailyStatus(monday, now, !!opts.force), opts.force);
+  } catch (e) {
     return { status: "error", error: attendanceErrorText(e) };
   }
 }

@@ -38,6 +38,7 @@ export const INTERNAL_FLAGS = ["⚠組別權重=0", "⚠案件不符", "⚠工�
 export const RETURNED = "已退回";
 export const KIND_UNPLANNED = "未排有填";
 export const KIND_UNFILLED = "有排未填";
+export const KIND_UNFILLED_LEAVE = "有排未填（已請假）"; // 自動判定：預排了沒填單，但當天請假／出差／外出＝正常
 export type CaseResult = "有排有做" | "有排未做" | "未排有做";
 
 const NO_TEAM = "（未填組別）";
@@ -168,8 +169,8 @@ function refs(r: Rec, field: string | undefined): { id?: string; title: string }
   return Array.from({ length: n }, (_, i) => ({ id: ids[i], title: titles[i] ?? "" }));
 }
 
-export function buildInternalReport(p: { work: TableData; cost?: TableData; sched?: TableData; cases?: TableData; start: number; end: number }): InternalReport {
-  const { work, cost, sched, cases: caseTable, start, end } = p;
+export function buildInternalReport(p: { work: TableData; cost?: TableData; sched?: TableData; cases?: TableData; start: number; end: number; leave?: Map<string, Set<number>> }): InternalReport {
+  const { work, cost, sched, cases: caseTable, start, end, leave } = p;
   const notes: string[] = [];
   const winFirst = taipeiDay(start);
   const winLast = taipeiDay(end - 1);
@@ -540,7 +541,9 @@ export function buildInternalReport(p: { work: TableData; cost?: TableData; sche
       const a = actual.get(pk);
       for (const [d, byCase] of byDay) {
         if (a?.has(d)) continue;
-        for (const [ck, ns] of byCase) addAcc([KIND_UNFILLED], primaryTeam(pk), pk, ck, d, null, ns.length ? `預排備註：${ns.join("；")}` : "");
+        // 已請假／出差／外出＝正常：自動改判，不算「有排未填」（業主 2026-10-14）。
+        const kind = leave?.get(pk)?.has(d) ? KIND_UNFILLED_LEAVE : KIND_UNFILLED;
+        for (const [ck, ns] of byCase) addAcc([kind], primaryTeam(pk), pk, ck, d, null, ns.length ? `預排備註：${ns.join("；")}` : "");
       }
     }
     // 未排有填：有成本單、那天沒有預排
@@ -563,7 +566,7 @@ export function buildInternalReport(p: { work: TableData; cost?: TableData; sche
     const kinds = [...o.flags, ...(o.returned ? [RETURNED] : [])];
     if (kinds.length) addAcc(kinds, o.team, o.pk, o.caseKey, o.day, o.points ?? 0, o.note);
   }
-  const kindRank = (k: string[]) => (k[0] === KIND_UNPLANNED ? 0 : k[0] === KIND_UNFILLED ? 1 : 2);
+  const kindRank = (k: string[]) => (k[0] === KIND_UNPLANNED ? 0 : k[0] === KIND_UNFILLED ? 1 : k[0] === KIND_UNFILLED_LEAVE ? 2 : 3);
   const exceptions: ExceptionRow[] = [];
   for (const a of accs.values()) {
     const info = caseInfo.get(a.caseKey) ?? { code: a.caseKey, name: "" };
