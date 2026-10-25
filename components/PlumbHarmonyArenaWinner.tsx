@@ -25,7 +25,7 @@ interface ClientThread {
    avatarColor: string;
   caseCode: string;
   shortPreview: string;
-  statusLabel: "待確認寄出" | "待補書面確認" | "已寄出";
+  statusLabel: "同事已認領送中樞" | "待補書面確認" | "中樞已最終發出";
   timeLabel: string;
   unread: boolean;
   colleagueHandoff: {
@@ -58,11 +58,11 @@ const INITIAL_THREADS: ClientThread[] = [
     avatarColor: "#3730a3",
     caseCode: "C115094-4",
     shortPreview: "C115094-4 成果圖資寄送",
-    statusLabel: "待確認寄出",
+    statusLabel: "同事已認領送中樞",
     timeLabel: "剛剛",
     unread: true,
     colleagueHandoff: {
-      senderLabel: "恆安（內業同仁）轉來草稿",
+      senderLabel: "內業同仁已認領送中樞（待中樞審核，尚未對外發出）",
       time: "剛剛",
       summaryText:
         "請幫忙把 C115094-4 的測量成果圖資寄給中鼎卓育賢工程師，裡面已經附上技師簽證 PDF 跟 CAD 檔。",
@@ -80,7 +80,7 @@ const INITIAL_THREADS: ClientThread[] = [
         { name: "C115094-4_成果圖資.dwg", size: "5.1 MB", kind: "cad" },
       ],
       body: "卓工程師您好：\n\n附上 C115094-4 測量成果圖資一式（含技師簽證 PDF 與 CAD 檔），請查收。\n若有需要調整或補充之處，請隨時與我們聯繫。\n\n詠祥測量 敬上",
-      safetyNote: "✓ 已自動移除內部轉寄語句 · 附件 2 個檔案已齊全",
+      safetyNote: "🔒 同事已認領送中樞（待中樞審核，尚未對外發出）· 已移除內部轉寄語句 · 附件 2 個已齊全",
       sent: false,
     },
   },
@@ -93,11 +93,11 @@ const INITIAL_THREADS: ClientThread[] = [
     avatarColor: "#065f46",
     caseCode: "C114109",
     shortPreview: "麥寮北側地形測量成果",
-    statusLabel: "待確認寄出",
+    statusLabel: "同事已認領送中樞",
     timeLabel: "10 分鐘前",
     unread: true,
     colleagueHandoff: {
-      senderLabel: "恆安（內業同仁）轉來草稿",
+      senderLabel: "內業同仁已認領送中樞（待中樞審核，尚未對外發出）",
       time: "10 分鐘前",
       summaryText:
         "王主辦來信詢問 C114109 麥寮北側地形測量成果，我已經整理好圖資準備回傳給他。",
@@ -127,11 +127,11 @@ const INITIAL_THREADS: ClientThread[] = [
     avatarColor: "#1e40af",
     caseCode: "Q115715",
     shortPreview: "報價單 #115715 回傳確認",
-    statusLabel: "待確認寄出",
+    statusLabel: "同事已認領送中樞",
     timeLabel: "28 分鐘前",
     unread: true,
     colleagueHandoff: {
-      senderLabel: "業務部轉來草稿",
+      senderLabel: "業務同仁已認領送中樞（待中樞審核，尚未對外發出）",
       time: "28 分鐘前",
       summaryText:
         "漢翔林小姐請我們提供廠區管線地形測量的正式報價單（#115715），已整理好明細請確認寄出。",
@@ -195,11 +195,11 @@ const INITIAL_THREADS: ClientThread[] = [
     avatarColor: "#6b21a8",
     caseCode: "C115102",
     shortPreview: "出入廠憑單申請附件",
-    statusLabel: "待確認寄出",
+    statusLabel: "同事已認領送中樞",
     timeLabel: "昨天",
     unread: false,
     colleagueHandoff: {
-      senderLabel: "行政部轉來草稿",
+      senderLabel: "行政同仁已認領送中樞（待中樞審核，尚未對外發出）",
       time: "昨天",
       summaryText:
         "下週二外業人員要進通霄電廠施測，出入廠憑單與 4 位人員團保證明已經備齊，請確認寄給帥玉康監工。",
@@ -230,11 +230,11 @@ const INITIAL_THREADS: ClientThread[] = [
     avatarColor: "#3f3f46",
     caseCode: "C115062",
     shortPreview: "C115062 期中請款入帳核對",
-    statusLabel: "已寄出",
+    statusLabel: "中樞已最終發出",
     timeLabel: "週五",
     unread: false,
     colleagueHandoff: {
-      senderLabel: "財務部通知",
+      senderLabel: "同仁已認領送中樞 ➔ 中樞已最終發出",
       time: "週五 15:20",
       summaryText:
         "大陸工程 C115062 期中請款已經入帳兌現，正式用印成果圖與 CAD 檔已寄給吳主任。",
@@ -251,7 +251,7 @@ const INITIAL_THREADS: ClientThread[] = [
         { name: "C115062_完整測量圖資.dwg", size: "6.8 MB", kind: "cad" },
       ],
       body: "吳主任您好：\n\n感謝貴司協助辦理期中款項。附上 C115062 正式用印測量成果圖 PDF 與 CAD 原始檔一式，請查收。\n\n詠祥測量 敬上",
-      safetyNote: "✓ 款項已兌現 · 正式圖資已於週五 15:42 寄出",
+      safetyNote: "🔒 同事已認領送中樞 ➔ ✅ 中樞已最終發出（週五 15:42 已同步寫入 PM DB）",
       sent: true,
       sentTime: "週五 15:42",
     },
@@ -334,7 +334,7 @@ export default function PlumbHarmonyArenaWinner() {
         t.id === activeThread.id
           ? {
               ...t,
-              statusLabel: "已寄出",
+              statusLabel: "中樞已最終發出",
               unread: false,
               draft: {
                 ...t.draft,
@@ -417,7 +417,7 @@ export default function PlumbHarmonyArenaWinner() {
 
         return {
           ...t,
-          statusLabel: "待確認寄出",
+          statusLabel: "同事已認領送中樞",
           draft: {
             ...t.draft,
             body: updatedBody,
@@ -451,7 +451,7 @@ export default function PlumbHarmonyArenaWinner() {
       avatarColor: "#3730a3",
       caseCode: "新聯繫",
       shortPreview: instructionText.slice(0, 18),
-      statusLabel: "待確認寄出",
+      statusLabel: "同事已認領送中樞",
       timeLabel: "剛剛",
       unread: false,
       colleagueHandoff: {
@@ -595,7 +595,7 @@ export default function PlumbHarmonyArenaWinner() {
         >
           {filteredThreads.map((item) => {
             const isSelected = item.id === activeThread.id;
-            const isDone = item.draft.sent || item.statusLabel === "已寄出";
+            const isDone = item.draft.sent || item.statusLabel === "中樞已最終發出";
             return (
               <button
                 key={item.id}
@@ -703,7 +703,7 @@ export default function PlumbHarmonyArenaWinner() {
                         fontWeight: isDone ? 500 : 600,
                       }}
                     >
-                      {isDone ? "已寄出" : item.statusLabel}
+                      {isDone ? "中樞已最終發出" : item.statusLabel === "同事已認領送中樞" ? "同事已認領送中樞（待中樞審核）" : item.statusLabel}
                     </span>
                   </div>
                 </div>
@@ -923,8 +923,8 @@ export default function PlumbHarmonyArenaWinner() {
                   }}
                 >
                   {activeThread.draft.sent
-                    ? `✓ 已寄出（${activeThread.draft.sentTime || "剛剛"}）`
-                    : "待你確認"}
+                    ? `🟢 中樞已最終發出（${activeThread.draft.sentTime || "剛剛"}）`
+                    : "🟡 同事已認領送中樞（待中樞審核）"}
                 </span>
               </div>
 
@@ -1158,7 +1158,7 @@ export default function PlumbHarmonyArenaWinner() {
                       cursor: activeThread.draft.sent ? "default" : "pointer",
                     }}
                   >
-                    {activeThread.draft.sent ? "已確認寄出" : "確認並寄出"}
+                    {activeThread.draft.sent ? "中樞已最終發出" : "中樞確認並發出"}
                   </button>
                 </div>
               </div>
