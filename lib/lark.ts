@@ -289,7 +289,12 @@ function normalizeValue(raw: unknown, kind: FieldKind): CellValue {
   }
   if (kind === "date") {
     const v = Array.isArray(raw) ? raw[0] : raw;
-    return typeof v === "number" ? v : null;
+    if (typeof v === "number") return v;
+    if (typeof v === "string" && v.trim()) {
+      const n = /^-?\d+(\.\d+)?$/.test(v.trim()) ? Number(v.trim()) : Date.parse(v.trim());
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
   }
   if (kind === "checkbox") return Boolean(raw);
   if (kind === "multiselect") return Array.isArray(raw) ? raw.map(String) : [String(raw)];
