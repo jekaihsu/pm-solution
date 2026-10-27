@@ -54,6 +54,8 @@ const otPerson = (i: number) => (i % 7 === 6 ? "周小華" : otPeople[i % 7]); /
 export const demoOpenId = (name: string) => `ou_demo_${name}`;
 
 const SPECS: Record<string, { n: number; spec: Spec }> = {
+  "contact-log": { n: 8, spec: [["活動時間", "date", r => inWeeks(r)], ["工程編號", "text", (_, i) => caseOf(i)], ["內容摘要", "text", () => "聯繫進度"]] },
+  "v3-contact-log": { n: 8, spec: [["聯繫日期", "date", r => inWeeks(r)], ["工程編號", "text", (_, i) => caseOf(i)], ["聯繫內容/業主回覆", "text", () => "確認進度"]] },
   "field-work": {
     n: 220,
     spec: [
