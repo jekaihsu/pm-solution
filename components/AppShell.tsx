@@ -29,7 +29,7 @@ function crumb(pathname: string): string {
   if (pathname === "/") return "總覽";
   if (pathname === "/sources") return "資料來源";
   const r = REPORTS.find((x) => pathname === `/reports/${x.slug}`);
-  return r ? `${r.id} ${r.name}` : "";
+  return r ? r.name : "";
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -40,9 +40,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [manual, setManual] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [user, setUser] = useState<{ name: string; avatar?: string } | null>(null);
+  const [showDebugDemo, setShowDebugDemo] = useState(false);
   const pathname = usePathname();
 
-  useEffect(() => setNavOpen(false), [pathname]);
+  useEffect(() => {
+    setNavOpen(false);
+    setShowDebugDemo(new URLSearchParams(window.location.search).get("debug_demo") === "1");
+  }, [pathname]);
   useEffect(() => {
     fetch("/api/auth/me")
       .then((r) => r.json())
@@ -74,7 +78,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <span className="ws-logo">PM</span>
             <span className="ws-text">
               <span className="ws-name">PM 週報</span>
-              <span className="ws-sub">Lark Base · 唯讀</span>
+              <span className="ws-sub">工程進度 · 營運彙整</span>
             </span>
           </Link>
 
@@ -86,7 +90,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <div className="nav-label">報告</div>
             {REPORTS.map((r) => (
               <Link key={r.id} href={`/reports/${r.slug}`} className={`nav-item ${pathname === `/reports/${r.slug}` ? "active" : ""}`}>
-                <span className="nav-rid">{r.id.slice(1)}</span>
                 <span className="nav-text">{r.name}</span>
               </Link>
             ))}
@@ -98,12 +101,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="sidebar-foot">
-            <label className="switch">
-              <input type="checkbox" checked={demo} onChange={(e) => setDemo(e.target.checked)} />
-              <span className="switch-ui" aria-hidden />
-              <FlaskConical size={14} strokeWidth={1.75} />
-              示範資料
-            </label>
+            {showDebugDemo && (
+              <label className="switch">
+                <input type="checkbox" checked={demo} onChange={(e) => setDemo(e.target.checked)} />
+                <span className="switch-ui" aria-hidden />
+                <FlaskConical size={14} strokeWidth={1.75} />
+                示範資料
+              </label>
+            )}
             {user && (
               <div className="me">
                 {user.avatar ? <img src={user.avatar} alt="" className="avatar" /> : <span className="avatar">{user.name.slice(0, 1)}</span>}
@@ -141,13 +146,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <ChevronRight size={16} />
                 </button>
               </div>
-              <div className="seg" role="group" aria-label="資料版本">
-                {(["all", "v3", "v4"] as const).map((v) => (
-                  <button key={v} className={version === v ? "on" : ""} onClick={() => setVersion(v)} aria-pressed={version === v}>
-                    {v === "all" ? "全部" : v.toUpperCase()}
-                  </button>
-                ))}
-              </div>
+              {pathname !== "/reports/r08" && (
+                <div className="seg" role="group" aria-label="資料版本">
+                  {(["all", "v3", "v4"] as const).map((v) => (
+                    <button key={v} className={version === v ? "on" : ""} onClick={() => setVersion(v)} aria-pressed={version === v}>
+                      {v === "all" ? "全部" : v.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              )}
               <button className="icon-btn bordered" onClick={ctx.refresh} aria-label="重新整理" title="重新整理">
                 <RefreshCw size={15} strokeWidth={1.75} />
               </button>

@@ -301,7 +301,7 @@ export const REPORTS: ReportDef[] = [
     id: "R08",
     slug: "r08",
     name: "業主聯繫紀錄",
-    purpose: "業主聯繫逐筆紀錄（週報表）：串接正式 CRM《跟進／拜訪紀錄》與 V3《聯絡業主記錄》，依聯繫日期抓取至最近有效日（支援同案同日取最後一筆），提供鍾總表 11 欄格式檢視、篩選與一鍵匯出週報 PDF / CSV。",
+    purpose: "即時彙整各工程案業主聯繫進度，支援依日期區間、組別、聯繫人與主題篩選，並可一鍵匯出標準 11 欄週報 PDF 或 Excel。",
     sources: ["v3-contact-log", "contact-log", "v3-cases", "v3-people", "owner-contacts"],
     mustHave: ["聯繫逐筆紀錄", "篩選與匯出週報"],
     pending: [],

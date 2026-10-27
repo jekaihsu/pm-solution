@@ -32,14 +32,16 @@ export default function ReportView({ report }: { report: ReportDef }) {
     <div className="page">
       <header className="page-head">
         <div className="page-title">
-          <div className="eyebrow">報告 {report.id}</div>
+          {report.id !== "R08" && <div className="eyebrow">報告 {report.id}</div>}
           <h1>{report.name}</h1>
           <p className="page-sub">{report.purpose}</p>
         </div>
-        <button className={`btn ${showSpec ? "on" : ""}`} onClick={() => setShowSpec((s) => !s)} aria-expanded={showSpec}>
-          <Info size={15} strokeWidth={1.75} />
-          報告定義
-        </button>
+        {report.id !== "R08" && (
+          <button className={`btn ${showSpec ? "on" : ""}`} onClick={() => setShowSpec((s) => !s)} aria-expanded={showSpec}>
+            <Info size={15} strokeWidth={1.75} />
+            報告定義
+          </button>
+        )}
       </header>
 
       {showSpec && (
@@ -67,7 +69,7 @@ export default function ReportView({ report }: { report: ReportDef }) {
       {report.id === "R01" || report.id === "R02" || report.id === "R04" || report.id === "R07" || report.id === "R08" || report.id === "R09" || report.id === "R10" || report.id === "R11" ? (
         <>
           {report.id === "R08" ? <OwnerContactReport /> : report.id === "R04" ? <HrBoard /> : report.id === "R07" ? <EquipmentBoard /> : report.id === "R09" ? <InternalReport /> : report.id === "R10" ? <FieldReport /> : report.id === "R11" ? <AdminBoard /> : <GroupBoard key={report.id} cfg={report.id === "R01" ? BOARDS.r01 : BOARDS.r02} />}
-          <details className="raw-data" onToggle={(e) => setRawOpen((e.target as HTMLDetailsElement).open)}>
+          {report.id !== "R08" && <details className="raw-data" onToggle={(e) => setRawOpen((e.target as HTMLDetailsElement).open)}>
             <summary>查看原始資料表</summary>
             {rawOpen && (
             <div className="raw-data-body">
@@ -91,7 +93,7 @@ export default function ReportView({ report }: { report: ReportDef }) {
       )}
             </div>
             )}
-          </details>
+          </details>}
         </>
       ) : (
         <>
