@@ -812,12 +812,12 @@ const get = (f:Record<string,unknown>, ...keys:string[]) => { for (const k of ke
 const ts = (v:unknown):number => { if(typeof v === "number") return v; const s=str(v); if(!s) return 0; const n=Date.parse(/^\d{4}-\d\d-\d\d$/.test(s) ? s+"T00:00:00+08:00" : s); return Number.isFinite(n)?n:0; };
 const date = (v:unknown) => { const n=ts(v); return n ? new Date(n+8*3600000).toISOString().slice(0,10) : ""; };
 const slash = (s:string) => s.replaceAll("-", "/");
-const groups:Record<string,string> = {"朱雅琪":"工務助理","郭倢瑛":"工務助理","林瑩瑄":"工務助理","鍾智偉":"PM","吳重樺":"PM","吳科翰":"PM"};
-const known:Record<string,string> = {"C115180-3":"115年度第二辦公室安全觀測 / 115年明潭發電廠大觀二廠廠區邊坡監測工作"};
+const groups:Record<string,string> = {"朱雅琪":"工務助理","郭倢瑛":"工務助理","林瑩瑄":"工務助理","鍾智偉":"PM","吳柏頤":"PM","吳重樺":"控制組","張家彬":"控制組","吳科翰":"外業經理"};
+const known:Record<string,string> = {"C115180-3":"115年度第二辦公室安全觀測 / 115年明潭發電廠大觀二廠廠區邊坡監測工作","C115259-01":"鋼構垂直度測量","C115259":"鋼構垂直度測量"};
 export function computeOwnerContacts(inputs:{crm?:Input; v3?:Input; cases?:Input; people?:Input; [key:string]:Input}, params:Params = {}) {
  const cases:Record<string,string>={...known}, people:Record<string,string>={...groups};
  for(const r of (inputs.cases ?? inputs["v3-cases"])?.records ?? []) { const f=r.fields, code=get(f,"工程編號","案件編號"), name=get(f,"工程名稱","案件名稱"); if(code && name) cases[code]=name; }
- for(const r of (inputs.people ?? inputs["v3-people"])?.records ?? []) { const f=r.fields, name=get(f,"姓名"), group=get(f,"所屬組別"); if(name && group) people[name]=group; }
+ for(const r of (inputs.people ?? inputs["v3-people"])?.records ?? []) { const f=r.fields, name=get(f,"姓名"), group=get(f,"所屬組別"); if(name && group && !groups[name]) people[name]=group; }
  const collect=(base: {record_id:string; [key:string]:unknown}[], live:Input) => { const map=new Map<string,Record<string,unknown>>(); if(params.seed !== false) for(const r of base) { const {record_id,...fields}=r; map.set(record_id,fields); } for(const r of live?.records ?? []) map.set(r.id,{...(map.get(r.id) ?? {}),...Object.fromEntries(Object.entries(r.fields).filter(([,v])=>str(v)!==""))}); return map; };
  const crm=collect(crmBaseline,inputs.crm ?? inputs["contact-log"]), v3=collect(v3Baseline,inputs.v3 ?? inputs["v3-contact-log"]);
  const normalize=(id:string,f:Record<string,unknown>,source:"crm"|"v3"):OwnerContactRow => {
@@ -825,7 +825,7 @@ export function computeOwnerContacts(inputs:{crm?:Input; v3?:Input; cases?:Input
   const case_code=vals(get(f,"工程編號","報編（尚未成案可填）","同步報價編號","報價編號")).join(", "); const case_name=vals(get(f,"工程名稱") || case_code.split(", ").map(c=>cases[c]||"").filter(Boolean).join(", ")).join(", ");
   const person=get(f,"執行人","聯繫人員","原建立者","建立人"), methods=vals(f["聯繫方式"]).map(x=>/^(line|mail)$/i.test(x)?x.toUpperCase():x), topics=vals(f["聯繫主題"]), next_date=date(get(f,"下一跟進日","下次追蹤日"));
   const result0=get(f,"處理結果","結果"), completed=/^(OK|已完成)$/i.test(result0)||f["已完成"]===true, result=completed?"已完成":result0;
-  return {id,source,orig_id:get(f,"原記錄ID") || undefined,contact_date,contact_date_slash:slash(contact_date),sort_ts,case_code,case_name,person,group:get(f,"所屬組別")||people[person]||"",client_contact:get(f,"業主窗口","客戶(同步)","同步業主"),method:methods.join(" / "),methods,topic:topics.join("、"),topics,content:get(f,"內容摘要","聯繫內容/業主回覆","聯繫內容"),next_date,next_date_slash:slash(next_date),special_note:get(f,"下一步","待辦事項","特別事項","摘要"),result,result_status:completed?"completed":"pending",same_day_count:1,link:`https://yong-xiang-survey.jp.larksuite.com/base/${source==="crm"?"Yda8bPhWFaAuFisOJt9jsy2QpDf?table=tblReHxTlKydHguQ":"Sdw1bG1djaHsVGsRPvmjyVWipgg?table=tblJW1agkDHqZJ9k"}&record=${encodeURIComponent(id)}`};
+  return {id,source,orig_id:get(f,"原記錄ID") || undefined,contact_date,contact_date_slash:slash(contact_date),sort_ts,case_code,case_name,person,group:groups[person]||get(f,"所屬組別")||people[person]||"",client_contact:get(f,"業主窗口","客戶(同步)","同步業主"),method:methods.join(" / "),methods,topic:topics.join("、"),topics,content:get(f,"內容摘要","聯繫內容/業主回覆","聯繫內容"),next_date,next_date_slash:slash(next_date),special_note:get(f,"下一步","待辦事項","特別事項","摘要"),result,result_status:completed?"completed":"pending",same_day_count:1,link:`https://yong-xiang-survey.jp.larksuite.com/base/${source==="crm"?"Yda8bPhWFaAuFisOJt9jsy2QpDf?table=tblReHxTlKydHguQ":"Sdw1bG1djaHsVGsRPvmjyVWipgg?table=tblJW1agkDHqZJ9k"}&record=${encodeURIComponent(id)}`};
  };
  const rows:OwnerContactRow[]=[]; const used=new Set<string>();
  for(const [id,f] of crm) { const orig=get(f,"原記錄ID"), other=v3.get(orig); if(other) used.add(orig); const merged={...other,...Object.fromEntries(Object.entries(f).filter(([,v])=>str(v)!==""))}; if(other && str(other["聯繫日期"])) merged["活動時間"]=other["聯繫日期"]; rows.push(normalize(id,merged,"crm")); }
