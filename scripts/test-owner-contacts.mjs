@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+const source=readFileSync(new URL('../lib/ownerContacts.ts',import.meta.url),'utf8');
+const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {computeOwnerContacts}=await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
+const fields={工程編號:'C115180-3',聯繫日期:'2026-10-22T09:00:00+08:00',聯繫內容:'測試',聯繫方式:['line','電話'],聯繫人員:'朱雅琪'};
+const input={crm:{records:[{id:'crm',fields:{原記錄ID:'v3',活動時間:'2026-10-22T09:00:00+08:00',工程編號:'C115180-3',內容摘要:'測試'}}]},v3:{records:[{id:'v3',fields},{id:'v3b',fields:{...fields,聯繫日期:'2026-10-22T11:00:00+08:00',聯繫內容:'後續'}}]}};
+const all=computeOwnerContacts(input,{seed:false,dedup_mode:'all'}); assert.equal(all.total,2); assert.equal(all.items.find(r=>r.id==='crm').case_name.includes('115年度第二辦公室'),true); assert.equal(all.items.find(r=>r.id==='crm').method,'LINE / 電話');
+const last=computeOwnerContacts(input,{seed:false}); assert.equal(last.total,1);assert.equal(last.items[0].same_day_count,2);assert.equal(last.items[0].id,'v3b');
+for(const k of ['contact_date_slash','case_code','case_name','person','client_contact','method','topic','content','next_date_slash','special_note','result']) assert.ok(k in last.items[0]);
+const week=computeOwnerContacts({},{from:'2026-10-19',to:'2026-10-22',dedup_mode:'all'});assert.equal(week.kpi.cases_count,7); assert.ok(week.items.every(r=>r.contact_date>='2026-10-19'&&r.contact_date<='2026-10-22'));
+const today=computeOwnerContacts({},{from:'2026-10-27',to:'2026-10-27',dedup_mode:'all'});assert.ok(today.items.some(r=>r.person==='朱雅琪'));assert.ok(today.items.every(r=>r.contact_date==='2026-10-27'));
+console.log('Owner contact tests passed', {week:week.total,today:today.total});

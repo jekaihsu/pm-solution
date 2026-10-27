@@ -51,6 +51,7 @@ const PEOPLE_ALLOW = ["姓名", "Lark帳號", "所屬組別", "在職"];
 export const peopleField = (name: string) => PEOPLE_ALLOW.includes(name);
 
 const V3 = "Sdw1bG1djaHsVGsRPvmjyVWipgg"; // 詠翔日報系統 v3
+const CRM_BASE = "Yda8bPhWFaAuFisOJt9jsy2QpDf"; // 正式 CRM Base（跟進／拜訪紀錄）
 const V4 = "H7W6b0PFWaVF1BsgqXJj3pQ9pXb"; // 詠翔日報系統 V4
 const SALES_BASE = "JoOqbggsVar0ATsVgbcjh6IIp1g";
 const SALARY_BASE = "VwAsbezz9app3YsramgjduLYp2U"; // 薪水計算 Base
@@ -212,11 +213,8 @@ export const SOURCES: SourceDef[] = [
   }),
   // 「資料表」：業主同事說是某位同事自己拉的、來源不明，不再當主要來源；R07 主畫面不顯示，只留在「查看原始資料表」。
   eqSys("equipment-rates", "儀器管理系統：資料表（非正式、來源不明）", "tblZmvrjDC5Q3sIp", "非正式、來源不明（某同事自己拉的）；R07 主畫面不使用，只供查看原始資料。含日租金、啟用、狀態。", { optional: true }),
-  {
-    key: "contact-log",
-    name: "業主聯繫紀錄",
-    note: "尚未找到正式使用中的資料表。候選：CRM 雛型「跟進與拜訪紀錄」（測試資料）、舊版 v2「⑬業主聯繫紀錄表」（目前 0 筆），皆未接入。",
-  },
+  { key: "contact-log", name: "跟進／拜訪紀錄（CRM）", baseToken: CRM_BASE, tableId: "tblReHxTlKydHguQ", dateField: "活動時間", optional: true, note: "正式 CRM《跟進／拜訪紀錄》（Yda8bPhWFaAuFisOJt9jsy2QpDf / tblReHxTlKydHguQ，視圖 vewVdsD510）" },
+  { key: "v3-contact-log", name: "聯絡業主記錄（V3）", version: "v3", baseToken: V3, tableId: "tblJW1agkDHqZJ9k", dateField: "聯繫日期", note: "V3《聯絡業主記錄》（Sdw1bG1djaHsVGsRPvmjyVWipgg / tblJW1agkDHqZJ9k，視圖 vewHZQoT9z），與正式 CRM 自動去重合併" },
 ];
 
 export const VERSION_LABEL: Record<DataVersion, string> = { v3: "V3", v4: "V4" };
@@ -303,10 +301,10 @@ export const REPORTS: ReportDef[] = [
     id: "R08",
     slug: "r08",
     name: "業主聯繫紀錄",
-    purpose: "掌握所有進行中案件的業主聯繫、進度回報及待辦。",
-    sources: ["contact-log", "owner-contacts"],
-    mustHave: ["每個進行中案件都要涵蓋", "聯繫日期、負責人、摘要、待辦、下次追蹤日"],
-    pending: ["最小欄位與每案聯繫頻率（D-08）", "進行中案件定義（D-06）"],
+    purpose: "業主聯繫逐筆紀錄（週報表）：串接正式 CRM《跟進／拜訪紀錄》與 V3《聯絡業主記錄》，依聯繫日期抓取至最近有效日（支援同案同日取最後一筆），提供鍾總表 11 欄格式檢視、篩選與一鍵匯出週報 PDF / CSV。",
+    sources: ["v3-contact-log", "contact-log", "v3-cases", "v3-people", "owner-contacts"],
+    mustHave: ["聯繫逐筆紀錄", "篩選與匯出週報"],
+    pending: [],
   },
   {
     id: "R09",
