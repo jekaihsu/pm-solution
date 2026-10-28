@@ -62,7 +62,7 @@ export default function ReportView({ report }: { report: ReportDef }) {
               ))}
             </ul>
           </div>
-          {sources.some((s) => s.version) && <p className="spec-note">V3 與 V4 是不同系統的原始資料，分開列出，不相加也不去重。</p>}
+          {report.id !== "R04" && sources.some((s) => s.version) && <p className="spec-note">V3 與 V4 是不同系統的原始資料，分開列出，不相加也不去重。</p>}
         </div>
       )}
 
@@ -78,7 +78,7 @@ export default function ReportView({ report }: { report: ReportDef }) {
           {sources.map((s) => (
             <button key={s.key} role="tab" aria-selected={s.key === current?.key} className={s.key === current?.key ? "active" : ""} onClick={() => setActive(s.key)}>
               {s.name}
-              {s.version && <span className={`ver ver-${s.version}`}>{s.version.toUpperCase()}</span>}
+              {report.id !== "R04" && s.version && <span className={`ver ver-${s.version}`}>{s.version.toUpperCase()}</span>}
             </button>
           ))}
         </nav>
@@ -102,7 +102,7 @@ export default function ReportView({ report }: { report: ReportDef }) {
           {sources.map((s) => (
             <button key={s.key} role="tab" aria-selected={s.key === current?.key} className={s.key === current?.key ? "active" : ""} onClick={() => setActive(s.key)}>
               {s.name}
-              {s.version && <span className={`ver ver-${s.version}`}>{s.version.toUpperCase()}</span>}
+              {report.id !== "R04" && s.version && <span className={`ver ver-${s.version}`}>{s.version.toUpperCase()}</span>}
             </button>
           ))}
         </nav>

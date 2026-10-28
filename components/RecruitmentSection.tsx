@@ -423,7 +423,7 @@ export default function RecruitmentSection() {
 
       <ul className="cg-notes">
         <li>
-          <UserPlus size={14} /> 資料來源：《104履歷統計》與 Lark Base《人事系統 · 01 招聘候選人池》（<code>PQYybxyGHaQwIjsG7goj5gQSpte</code> / <code>tblIxj9iPY0fKFzF</code>）。主管審閱履歷請點右上角「👔 主管專用視圖」，在「主管確認要不要面試（是否需要一面）」選擇「需要面試」並填寫「主管可配合時段（請填 3 個）」，系統即自動通知行政羅薇安排面試。
+          <UserPlus size={14} /> 資料來源：《104履歷統計》與《人事系統 · 01 招聘候選人池》。主管審閱履歷請點右上角「👔 主管專用視圖」，在「主管確認要不要面試（是否需要一面）」選擇「需要面試」並填寫「主管可配合時段（請填 3 個）」，系統即自動通知行政羅薇安排面試。
         </li>
       </ul>
     </section>

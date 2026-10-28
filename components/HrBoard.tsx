@@ -184,7 +184,7 @@ function SalaryOvertime({ state, peopleState, weekStart }: { state: SourceState;
         <p>{state.error}</p>
         {state.openId && (
           <p className="muted small">
-            你的 Lark ID：<code className="mono">{state.openId}</code>（如需查看，請提供給管理員加入 HR_VIEWERS）
+            你的帳號識別碼：<code className="mono">{state.openId}</code>（如需查看，請聯繫管理員開通人事資料查看權限）
           </p>
         )}
       </div>
@@ -254,7 +254,7 @@ function SalaryOvertime({ state, peopleState, weekStart }: { state: SourceState;
       )}
       {!sum.hasDirectory && (
         <p className="bad-text small">
-          V3 人員名單讀取失敗，暫時無法歸組別（下表組別顯示「—」）{peopleState.error ? `：${peopleState.error}` : ""}。
+          人員名單（公司組織架構）讀取失敗，暫時無法歸組別（下表組別顯示「—」）{peopleState.error ? `：${peopleState.error}` : ""}。
         </p>
       )}
       {month && (
@@ -304,7 +304,7 @@ function SalaryOvertime({ state, peopleState, weekStart }: { state: SourceState;
       </p>
       {sum.hasDirectory && (
         <p className="muted small">
-          人＝「發起人」（發起人空白才用「加班人」{sum.fallbackToOvertimer > 0 ? `，這樣的單 ${sum.fallbackToOvertimer} 張` : ""}）；組別依 V3 人員名單的所屬組別（公司組織架構）：先用發起人的 open_id 對人員名單的 Lark帳號，對不到時以姓名完全相同對。未對應組別 {month?.unmapped ?? 0} 張（{periodLabel || (byWeek ? "本週" : "本月")}；全部期間 {sum.unmapped} 張）：發起人不在人員名單、名單沒填所屬組別，或同名無法判斷。
+          人＝「發起人」（發起人空白才用「加班人」{sum.fallbackToOvertimer > 0 ? `，這樣的單 ${sum.fallbackToOvertimer} 張` : ""}）；組別依人員名單的所屬組別（公司組織架構）：先用發起人的 Lark 帳號比對人員名單，對不到時以姓名完全相同比對。未對應組別 {month?.unmapped ?? 0} 張（{periodLabel || (byWeek ? "本週" : "本月")}；全部期間 {sum.unmapped} 張）：發起人不在人員名單、名單沒填所屬組別，或同名無法判斷。
           {sum.multiPerson > 0 ? `人填了多位的單 ${sum.multiPerson} 張，整張算一列、時數不拆分；這類單的人都同組才歸該組，否則歸未對應組別。` : ""}
         </p>
       )}
@@ -333,7 +333,7 @@ export default function HrBoard() {
         </div>
         <ul className="cg-notes">
           <li>
-            <CircleAlert size={14} /> 取自薪水計算 Base 的「詠翔加班」，只讀發起人（加班人備援）、開始時間、加班類型、申請狀態與時數；組別取自 V3 人員名單（只讀姓名、Lark帳號、所屬組別、在職）。底薪、總薪資、加班費等其他欄位不讀取。誰能看由 HR_VIEWERS 設定。
+            <CircleAlert size={14} /> 取自薪資系統「詠翔加班」審批紀錄，只讀發起人（加班人備援）、開始時間、加班類型、申請狀態與時數；組別取自人員名單（只讀姓名、Lark帳號、所屬組別、在職）。底薪、總薪資、加班費等其他欄位不讀取。僅授權主管與人事人員可查看。
           </li>
         </ul>
         <SalaryOvertime state={salary} peopleState={people} weekStart={week.start} />

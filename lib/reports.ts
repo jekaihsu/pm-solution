@@ -130,7 +130,7 @@ export const SOURCES: SourceDef[] = [
   raw("v3-people", "人員名單（組織架構）", "v3", "tblmlpA6nG5Ou7NQ", {
     allowField: peopleField,
     restricted: "hr",
-    note: "R04 加班用它把發起人（備援：加班人）對到「所屬組別」（公司組織架構）；只讀姓名、Lark帳號、所屬組別、在職，其他欄位一律不讀。依 HR_VIEWERS 設定才看得到。",
+    note: "R04 加班用它把發起人（備援：加班人）對到「所屬組別」（公司組織架構）；只讀姓名、Lark帳號、所屬組別、在職，其他欄位一律不讀。僅授權主管與人事人員可查看。",
   }),
   raw("v4-schedule", "工作預排", "v4", "tblZz6Mkhv9gHrB2", { dateField: "開始日期", columns: COLS.schedule, ...DASH.schedule }),
   // R09 內業報告用：案件編號（主欄）與案件名稱。整張表讀進伺服器，頁面只投影這兩欄（請款、成本等欄位不外送）；V4 沒有對應表。
@@ -185,7 +185,7 @@ export const SOURCES: SourceDef[] = [
     allowField: hrPoolField,
     restricted: "hr",
     url: tableUrl(HR_POOL_BASE, "tblIxj9iPY0fKFzF", "vewMkRjOqx"),
-    note: "串接 Lark Base《人事系統 · 01 招聘候選人池》（PQYybxyGHaQwIjsG7goj5gQSpte / tblIxj9iPY0fKFzF，預設視圖：👔 主管專用 vewMkRjOqx），自動排除黑名單封存紀錄，彙整 104 履歷統計與本週招聘進度。",
+    note: "串接《人事系統 · 01 招聘候選人池》（預設視圖：👔 主管專用），自動排除黑名單封存紀錄，彙整 104 履歷統計與本週招聘進度。",
   },
   {
     key: "salary-overtime",
@@ -195,7 +195,7 @@ export const SOURCES: SourceDef[] = [
     allowField: (n) => salaryField(n),
     restricted: "hr",
     url: tableUrl(SALARY_BASE, "tblomH0DXCzXgenE"),
-    note: "逐筆加班審批單；只讀發起人（加班人為備援）、開始時間、加班類型、申請狀態、加班時數，只計「已通过」；組別依 V3 人員名單。金額、薪資、身分等欄一律不讀。需 PM週報 在該 Base 有唯讀角色。依 HR_VIEWERS 設定才看得到。",
+    note: "逐筆加班審批單；只讀發起人（加班人為備援）、開始時間、加班類型、申請狀態、加班時數，只計「已通过」；組別依人員名單（公司組織架構）。金額、薪資、身分等欄一律不讀。需 PM週報 在該 Base 有唯讀角色。僅授權主管與人事人員可查看。",
   },
   // R07: 儀器管理系統 Base（業主 2026-10-13 提供）。與 V3／V4 的儀器費率、車輛分開，不相加、不去重。
   eqSys("equipment-system", "儀器管理系統：儀器總表（正式清單）", "tblHZFEypeKfWOsF", "正式儀器清單（業主同事 2026-10-13 確認），編號＝「ID」欄。借用狀態（可借用／已借出）、rent_type 月租型／日租型、系統封存＝已下架。只讀 ID、設備、設備類別、rent_type、owner_group、狀態、系統封存（不讀價格、購入成本）。", {

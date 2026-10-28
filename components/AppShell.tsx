@@ -146,7 +146,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <ChevronRight size={16} />
                 </button>
               </div>
-              {pathname !== "/reports/r08" && (
+              {pathname !== "/reports/r08" && pathname !== "/reports/r04" && (
                 <div className="seg" role="group" aria-label="資料版本">
                   {(["all", "v3", "v4"] as const).map((v) => (
                     <button key={v} className={version === v ? "on" : ""} onClick={() => setVersion(v)} aria-pressed={version === v}>

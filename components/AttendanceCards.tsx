@@ -176,7 +176,7 @@ export default function AttendanceCards() {
             </div>
             <ul className="cg-notes">
               <li>
-                <CircleAlert size={14} /> 口徑（業主 2026-10-13 確認）：分母＝考勤組成員（綁定人員＋展開綁定部門－排除名單）×應打卡日，加上外業人員。外業不打卡，以「有外業成本單（日報）的日子」當出勤（成本單的組長與實際出工人都算，組長開單代表全組）；外業人員＝不在任何考勤組、本週有成本單的在職同事（{ok.notes.fieldPeople} 人，不需要 Lark帳號；其中 {ok.notes.fieldNoApproval} 人沒有 employee_id，查不到請假／出差／外出審批，這些日子照成本單算）。
+                <CircleAlert size={14} /> 口徑（業主 2026-10-13 確認）：分母＝考勤組成員（綁定人員＋展開綁定部門－排除名單）×應打卡日，加上外業人員。外業不打卡，以「有外業成本單（日報）的日子」當出勤（成本單的組長與實際出工人都算，組長開單代表全組）；外業人員＝不在任何考勤組、本週有成本單的在職同事（{ok.notes.fieldPeople} 人，不需要 Lark帳號；其中 {ok.notes.fieldNoApproval} 人尚未綁定假勤員工編號，查不到請假／出差／外出審批，這些日子照成本單算）。
               </li>
               <li>
                 外業平日沒填日報的日子不列入應到、也不算缺卡（待確認，格子顯示「無日報」）；外業週末沒出工顯示「—」（免打卡），不再顯示「無日報」雜訊，週末有成本單仍算出勤；國定假日目前沒有行事曆可判斷，平日的國定假日外業同事仍可能顯示「無日報」（待接假日行事曆）。外業在平日請假、出差、外出照樣從分母扣除。
@@ -186,7 +186,7 @@ export default function AttendanceCards() {
               {reminder && <li>{reminder}。</li>}
               {!!ok.notes.rosterShared && <li>人員名單有 {ok.notes.rosterShared} 列和別列共用同一 Lark帳號但名字不同（在職的已併為同一人、離職舊列不併入），請檢查名單。</li>}
               <li>
-                在職 {ok.notes.rosterInService} 人：{ok.notes.noAccount} 人沒有 Lark帳號、{ok.notes.unmapped} 人換不到 employee_id（以上除非是有成本單的外業人員，否則不列入）、考勤組另有 {ok.notes.outsideRoster} 人不在人員名單，不列入。
+                在職 {ok.notes.rosterInService} 人：{ok.notes.noAccount} 人沒有 Lark帳號、{ok.notes.unmapped} 人尚未綁定假勤員工編號（以上除非是有成本單的外業人員，否則不列入）、考勤組另有 {ok.notes.outsideRoster} 人不在人員名單，不列入。
                 {ok.source === "demo" ? "（示範資料）" : ""}
               </li>
             </ul>

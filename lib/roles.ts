@@ -21,7 +21,7 @@ export function hrPermission(session: Session | null): { canView: boolean; reaso
   if (process.env.AUTH_DISABLED === "1") return { canView: true };
   if (!session) return { canView: false, reason: "尚未登入。" };
   const viewers = list(process.env.HR_VIEWERS);
-  if (!viewers.length) return { canView: false, reason: "管理員尚未設定可查看人事資料的名單（HR_VIEWERS）。" };
+  if (!viewers.length) return { canView: false, reason: "管理員尚未設定人事資料查看權限名單。" };
   if (viewers.includes("*")) return { canView: true };
-  return viewers.includes(session.openId) ? { canView: true } : { canView: false, reason: "此帳號不在人事資料查看名單（HR_VIEWERS）。" };
+  return viewers.includes(session.openId) ? { canView: true } : { canView: false, reason: "此帳號尚未開通人事資料查看權限。" };
 }
