@@ -69,7 +69,14 @@ export default function AttendanceCards() {
     if (demo) qs.set("demo", "1");
     if (tick > 0 && manual) qs.set("refresh", "1");
     fetch(`/api/attendance?${qs}`)
-      .then((r) => r.json())
+      .then(async (r) => {
+        const j = await r.json();
+        if (r.status === 401 || (r.status === 403 && !j.openId)) {
+          qs.set("demo", "1");
+          return (await fetch(`/api/attendance?${qs}`)).json();
+        }
+        return j;
+      })
       .then((res: AttendanceResponse) => !off && setState({ tag, res }))
       .catch((e) => !off && setState({ tag, error: String(e) }));
     return () => {

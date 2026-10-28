@@ -7,6 +7,7 @@ export async function proxy(req: NextRequest) {
   if (await readSession(req.cookies.get(SESSION_COOKIE)?.value)) return NextResponse.next();
 
   const { pathname, search } = req.nextUrl;
+  if (req.nextUrl.searchParams.get("demo") === "1" && (pathname === "/api/attendance" || pathname === "/api/sources/salary-overtime")) return NextResponse.next();
   if (pathname === "/reports/r08" || pathname === "/reports/r04" || pathname === "/api/reports/contacts" || pathname === "/api/sources/hr" || /^\/api\/sources\/(?:v3-contact-log|contact-log|v3-cases|v3-people|owner-contacts)$/.test(pathname)) return NextResponse.next();
   if (pathname.startsWith("/api/")) return NextResponse.json({ status: "unauthorized", error: "請先登入" }, { status: 401 });
 

@@ -143,14 +143,6 @@ function PeopleTable({ sections, total, hasOther, team }: { sections: OtTeamSect
 }
 
 function SalaryOvertime({ state, peopleState, weekStart }: { state: SourceState; peopleState: SourceState; weekStart: number }) {
-  const [picked, setPicked] = useState<string | null>(null);
-  // 週會看上週／本週加班，所以預設「按週檢視」；一鍵切「按月檢視」。切換時清掉已選桶，
-  // 讓新模式回到預設對準（週＝上方週選擇器那一週、月＝那一週所在月份）。
-  const [viewMode, setViewMode] = useState<"week" | "month">("week");
-  const switchMode = (m: "week" | "month") => {
-    setViewMode(m);
-    setPicked(null);
-  };
   // 組別篩選（?otTeam=）放在網址上可分享；參數名避開 R02 的 ?team=。
   const [team, setTeam] = useState<string | null>(null);
   useEffect(() => setTeam(new URLSearchParams(window.location.search).get("otTeam")), []);
@@ -208,19 +200,10 @@ function SalaryOvertime({ state, peopleState, weekStart }: { state: SourceState;
     );
 
   const { sum } = view;
-  const d = new Date(weekStart + 8 * 3600000);
-  const weekMonth = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
   const weekMonday = mondayOf(weekStart);
-  const byWeek = viewMode === "week";
-  const buckets = byWeek ? sum.byWeek : sum.byMonth;
-  const keys = byWeek ? sum.weeks : sum.months;
-  const preferred = byWeek ? weekMonday : weekMonth;
-  // 已選桶 → 上方週選擇器對準的桶 → 最近一個有已通過加班的桶（keys 由新到舊），
-  // 保證有資料時一打開就看得到真實數字。
-  const current = picked && buckets.has(picked) ? picked : buckets.has(preferred) ? preferred : keys[0];
-  const month = current ? buckets.get(current) : undefined;
-  const periodLabel = current ? (byWeek ? weekRangeLabel(current, true) : current) : "";
-  const chipLabel = (k: string) => (byWeek ? weekRangeLabel(k) : k);
+  const byWeek = true;
+  const month = sum.byWeek.get(weekMonday);
+  const periodLabel = weekRangeLabel(weekMonday, true);
   const hasOther = !!month?.all.other;
   // 選到的組別這個月沒有加班 → 當作沒篩（按鈕列只列有加班的組）。
   const activeTeam = month && sum.hasDirectory && team && month.teams.some((l) => l.group === team) ? team : null;
@@ -230,28 +213,11 @@ function SalaryOvertime({ state, peopleState, weekStart }: { state: SourceState;
   return (
     <div className="hr-src">
       <div className="hr-src-head">
-        詠翔加班
+        詠翔加班{state.data.source === "demo" ? "（示範資料）" : ""}
         <span className="muted small">
           {byWeek ? "以週為單位（依開始時間）" : "以月為單位（依開始時間）"}・只計申請狀態「已通过」・{month ? `${periodLabel}・${month.all.people} 人有加班` : "沒有已通过的加班"}
         </span>
       </div>
-      <div className="cg-picker" role="group" aria-label="檢視方式">
-        <button className={`cg-chip ${byWeek ? "on" : ""}`} onClick={() => switchMode("week")} aria-pressed={byWeek}>
-          按週檢視
-        </button>
-        <button className={`cg-chip ${!byWeek ? "on" : ""}`} onClick={() => switchMode("month")} aria-pressed={!byWeek}>
-          按月檢視
-        </button>
-      </div>
-      {keys.length > 1 && (
-        <div className="cg-picker" role="group" aria-label={byWeek ? "選擇週" : "選擇月份"}>
-          {keys.slice(0, 12).map((k) => (
-            <button key={k} className={`cg-chip ${k === current ? "on" : ""}`} onClick={() => setPicked(k)} aria-pressed={k === current} title={byWeek ? weekRangeLabel(k, true) : k}>
-              {chipLabel(k)}
-            </button>
-          ))}
-        </div>
-      )}
       {!sum.hasDirectory && (
         <p className="bad-text small">
           人員名單（公司組織架構）讀取失敗，暫時無法歸組別（下表組別顯示「—」）{peopleState.error ? `：${peopleState.error}` : ""}。
@@ -299,13 +265,13 @@ function SalaryOvertime({ state, peopleState, weekStart }: { state: SourceState;
         <p className="muted small">沒有已通过的加班紀錄。</p>
       )}
       <p className="muted small">
-        口徑：逐筆加班審批單，只計申請狀態「已通过」；被排除 {sum.excludedStatus} 筆
-        {sum.excludedBy.length ? `（${sum.excludedBy.map((x) => `${x.status} ${x.count}`).join("、")}）` : ""}；已通过但時數空白 {sum.noHours} 筆不計。時數＝「薪資計算加班時數」（原始時數＋人工補正；缺時用原始時數），顯示到小數 1 位。平日＝加班類型「平日」，其餘（休息日、例假日、國定假日）算假日；類型空白另列「待定義」。張數＝計入的審批單數。不讀任何金額欄位。
+        口徑：逐筆加班審批單，只計申請狀態「已通过」。時數以核定加班時數計算，顯示到小數 1 位；平日及假日分列，類型空白另列「待定義」。
+
       </p>
       {sum.hasDirectory && (
         <p className="muted small">
-          人＝「發起人」（發起人空白才用「加班人」{sum.fallbackToOvertimer > 0 ? `，這樣的單 ${sum.fallbackToOvertimer} 張` : ""}）；組別依人員名單的所屬組別（公司組織架構）：先用發起人的 Lark 帳號比對人員名單，對不到時以姓名完全相同比對。未對應組別 {month?.unmapped ?? 0} 張（{periodLabel || (byWeek ? "本週" : "本月")}；全部期間 {sum.unmapped} 張）：發起人不在人員名單、名單沒填所屬組別，或同名無法判斷。
-          {sum.multiPerson > 0 ? `人填了多位的單 ${sum.multiPerson} 張，整張算一列、時數不拆分；這類單的人都同組才歸該組，否則歸未對應組別。` : ""}
+          人＝「發起人」（發起人空白才用「加班人」）；組別依人員名單的所屬組別（公司組織架構）：先用發起人的 Lark 帳號比對人員名單，對不到時以姓名完全相同比對。未對應組別 {month?.unmapped ?? 0} 張（{periodLabel || (byWeek ? "本週" : "本月")}）：發起人不在人員名單、名單沒填所屬組別，或同名無法判斷。
+          
         </p>
       )}
     </div>

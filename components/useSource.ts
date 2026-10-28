@@ -38,7 +38,14 @@ export function useSource(key: string, opts: SourceOptions = {}): SourceState {
     if (demo) qs.set("demo", "1");
     if (tick > 0 && manual) qs.set("refresh", "1");
     fetch(`/api/sources/${key}?${qs}`)
-      .then((r) => r.json())
+      .then(async (r) => {
+        const j = await r.json();
+        if ((r.status === 401 || (r.status === 403 && !j.openId)) && ["salary-overtime", "v3-people"].includes(key)) {
+          qs.set("demo", "1");
+          return (await fetch(`/api/sources/${key}?${qs}`)).json();
+        }
+        return j;
+      })
       .then((j) => !cancelled && setState({ status: j.status, data: j.data, error: j.error, openId: j.openId, tag }))
       .catch((e) => !cancelled && setState((prev) => (prev.tag === tag ? { ...prev, status: prev.data ? "ok" : "error", error: String(e) } : { status: "error", error: String(e), tag })));
     return () => {

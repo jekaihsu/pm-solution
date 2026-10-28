@@ -1606,10 +1606,11 @@ export function sumStatRows(rows: RecruitmentStatRow[], label = "合計"): Recru
 }
 
 export function summarizeRecruitment(
-  liveRecords?: { id: string; fields: Record<string, unknown> }[],
-  weekStartMs?: number,
+  liveRecords: { id: string; fields: Record<string, unknown> }[] | undefined,
+  weekStartMs: number,
+  weekEndMs = weekStartMs + 7 * 86400000,
 ): RecruitmentSummary {
-  const sourceRecords = liveRecords && liveRecords.length > 0 ? liveRecords : RECRUITMENT_POOL_SNAPSHOT;
+  const sourceRecords = liveRecords ?? [];
   const candidates: RecruitmentCandidate[] = [];
 
   for (const r of sourceRecords) {
@@ -1642,6 +1643,10 @@ export function summarizeRecruitment(
     });
   }
 
+  const start = new Date(weekStartMs + 8 * 3600000).toISOString().slice(0, 10);
+  const end = new Date(weekEndMs + 8 * 3600000).toISOString().slice(0, 10);
+  const weekly = candidates.filter(c => c.applyDate >= start && c.applyDate < end);
+
   // Group live records by role, ordered by JK screenshot core roles first, then by total desc
   const roleOrder = [
     "測量助理工程師",
@@ -1660,7 +1665,7 @@ export function summarizeRecruitment(
   ];
 
   const byRole = new Map<string, RecruitmentStatRow>();
-  for (const c of candidates) {
+  for (const c of weekly) {
     const row = byRole.get(c.role) ?? {
       role: c.role,
       total: 0,
@@ -1701,40 +1706,25 @@ export function summarizeRecruitment(
   const liveTotal = sumStatRows(liveRows, "合計");
   const baselineSum = sumStatRows(STATS_104_BASELINE, "合計");
 
-  // Calculate weekly new candidates for the selected week (or latest week if 0)
-  let weekStartStr = "2026-10-19";
-  let weekEndStr = "2026-10-28";
-  if (weekStartMs) {
-    weekStartStr = new Date(weekStartMs + 8 * 3600000).toISOString().slice(0, 10);
-    weekEndStr = new Date(weekStartMs + 6 * 86400000 + 8 * 3600000).toISOString().slice(0, 10);
-  }
-  const inSelectedWeek = candidates.filter((c) => c.applyDate >= weekStartStr && c.applyDate <= weekEndStr);
-  const inRecent7Days = candidates.filter((c) => c.applyDate >= "2026-10-21" && c.applyDate <= "2026-10-28");
-  const weeklyNewCount = inSelectedWeek.length > 0 ? inSelectedWeek.length : inRecent7Days.length;
-
-  const hired = candidates.filter(
-    (c) => c.stage === "已發Offer" || c.evalResult.includes("已發Offer") || c.evalResult.includes("錄取"),
-  );
-  const hiredNames = hired.map((c) => `${c.name}（${c.role}）`);
-
-  const recentCandidates = [...candidates]
-    .sort((a, b) => (b.applyDate || "").localeCompare(a.applyDate || ""))
-    .slice(0, 15);
+  const weeklyNewCount = weekly.length;
+  const hired = weekly.filter(c => c.stage === "已發Offer" || c.evalResult.includes("已發Offer") || c.evalResult === "錄取");
+  const hiredNames = hired.map(c => `${c.name}（${c.role}）`);
+  const recentCandidates = [...weekly].sort((a, b) => (b.applyDate || "").localeCompare(a.applyDate || "")).slice(0, 15);
 
   return {
     weeklyNewCount,
-    interviewCount: baselineSum.accepted ?? 19,
-    notifiedCount: baselineSum.notified ?? 44,
-    unnotifiedCount: baselineSum.unnotified ?? 23,
-    hiredCount: hired.length || 2,
-    hiredNames: hiredNames.length ? hiredNames : ["吳沛柔（行政人員）", "沈坤裕（測量助理工程師）"],
+    interviewCount: liveTotal.accepted ?? 0,
+    notifiedCount: liveTotal.notified ?? 0,
+    unnotifiedCount: liveTotal.unnotified ?? 0,
+    hiredCount: hired.length,
+    hiredNames,
     totalActivePool: candidates.length,
-    baselineTotal: baselineSum.total,
+    baselineTotal: liveTotal.total,
     baselineUnnotified: baselineSum.unnotified ?? 23,
     baselineNotified: baselineSum.notified ?? 44,
     baselineAccepted: baselineSum.accepted ?? 19,
-    baselineDeclined: baselineSum.declined ?? 11,
-    baselineNoanswer: baselineSum.noanswer ?? 15,
+    baselineDeclined: liveTotal.declined ?? 0,
+    baselineNoanswer: liveTotal.noanswer ?? 0,
     liveRows,
     liveTotal,
     baselineRows: STATS_104_BASELINE,

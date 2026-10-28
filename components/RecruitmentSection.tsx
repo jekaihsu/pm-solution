@@ -13,18 +13,17 @@ const cellText = (v: number | null | undefined) => (v === null || v === undefine
 export default function RecruitmentSection() {
   const { week } = useShell();
   const hrSource = useSource("hr");
-  const [dataMode, setDataMode] = useState<"104_baseline" | "lark_live">("104_baseline");
   const [onlyPending, setOnlyPending] = useState(false);
 
   const summary = useMemo(() => {
     const liveRecords =
-      hrSource.status === "ok" && hrSource.data?.source !== "demo" && hrSource.data?.records?.length
+      hrSource.status === "ok" && hrSource.data?.records
         ? (hrSource.data.records as { id: string; fields: Record<string, unknown> }[])
         : undefined;
-    return summarizeRecruitment(liveRecords, week.start);
-  }, [hrSource.status, hrSource.data, week.start]);
+    return summarizeRecruitment(liveRecords, week.start, week.end);
+  }, [hrSource.status, hrSource.data, week.start, week.end]);
 
-  const rawRows: RecruitmentStatRow[] = dataMode === "104_baseline" ? summary.baselineRows : summary.liveRows;
+  const rawRows: RecruitmentStatRow[] = summary.liveRows;
   const shownRows = onlyPending ? rawRows.filter((r) => (r.unnotified ?? 0) > 0) : rawRows;
   const shownTotal = sumStatRows(shownRows, "合計");
 
@@ -33,9 +32,7 @@ export default function RecruitmentSection() {
       <div className="hr-card-head">
         <UserPlus size={16} />
         <h2>招聘數據（104履歷統計）</h2>
-        <span className="muted small">
-          串接 Lark Base《人事系統 · 01 招聘候選人池》（{hrSource.status === "ok" && hrSource.data?.source !== "demo" ? "即時連線" : "已同步最新池內 89 筆候選人紀錄"}）
-        </span>
+        <span className="muted small">所選週應徵資料{hrSource.data?.source === "demo" ? "（示範資料）" : hrSource.status !== "ok" ? "（資料尚未取得）" : ""}</span>
       </div>
 
       {/* 頂部 4 個週會核心摘要卡片 */}
@@ -43,9 +40,7 @@ export default function RecruitmentSection() {
         <div className="kpi">
           <div className="kpi-label">本週新應徵人數</div>
           <div className="kpi-value">{summary.weeklyNewCount}</div>
-          <div className="kpi-sub">
-            104履歷統計總數 {summary.baselineTotal} 人｜Lark 候選人池累計 {summary.totalActivePool} 人
-          </div>
+
         </div>
         <div className="kpi">
           <div className="kpi-label">安排面試人數（答應邀約）</div>
@@ -70,23 +65,6 @@ export default function RecruitmentSection() {
 
       {/* 工具列：切換統計模式、篩選未通知、快速跳轉 Lark Base */}
       <div className="toolbar" style={{ gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-        <div className="cg-picker" role="group" aria-label="資料顯示模式" style={{ margin: 0 }}>
-          <button
-            className={`cg-chip ${dataMode === "104_baseline" ? "on" : ""}`}
-            onClick={() => setDataMode("104_baseline")}
-            aria-pressed={dataMode === "104_baseline"}
-          >
-            104履歷統計報表（69份）
-          </button>
-          <button
-            className={`cg-chip ${dataMode === "lark_live" ? "on" : ""}`}
-            onClick={() => setDataMode("lark_live")}
-            aria-pressed={dataMode === "lark_live"}
-          >
-            Lark 候選人池全量展開（{summary.totalActivePool}人）
-          </button>
-        </div>
-
         <label className="switch" style={{ cursor: "pointer" }}>
           <input type="checkbox" checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} />
           <span className="switch-ui" aria-hidden />
@@ -101,7 +79,7 @@ export default function RecruitmentSection() {
             rel="noopener noreferrer"
             style={{ display: "inline-flex", alignItems: "center", gap: 4, textDecoration: "none" }}
           >
-            <ExternalLink size={13} strokeWidth={1.9} /> 👔 主管專用視圖（Lark Base）
+            <ExternalLink size={13} strokeWidth={1.9} /> 👔 主管專用視圖
           </a>
           <a
             className="pill"
@@ -143,7 +121,7 @@ export default function RecruitmentSection() {
                   letterSpacing: "0.04em",
                 }}
               >
-                104履歷統計
+                104履歷統計（本週）
               </th>
             </tr>
             <tr>
@@ -423,7 +401,7 @@ export default function RecruitmentSection() {
 
       <ul className="cg-notes">
         <li>
-          <UserPlus size={14} /> 資料來源：《104履歷統計》與《人事系統 · 01 招聘候選人池》。主管審閱履歷請點右上角「👔 主管專用視圖」，在「主管確認要不要面試（是否需要一面）」選擇「需要面試」並填寫「主管可配合時段（請填 3 個）」，系統即自動通知行政羅薇安排面試。
+          <UserPlus size={14} /> 統計所選週應徵者目前的聯絡及面試狀態。
         </li>
       </ul>
     </section>
