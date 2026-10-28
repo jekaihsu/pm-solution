@@ -11,7 +11,7 @@ const DAY = 86400000;
 export const pickField = (fields: FieldMeta[], names: string[], kinds?: FieldMeta["kind"][]) =>
   names.map((n) => fields.find((f) => f.name === n && (!kinds || kinds.includes(f.kind)))).find(Boolean);
 
-const text = (v: CellValue): string => (v === null || v === undefined ? "" : Array.isArray(v) ? v.join("、") : String(v));
+const text = (v: CellValue | undefined): string => (v === null || v === undefined ? "" : Array.isArray(v) ? v.join("、") : String(v));
 const truthy = (v: CellValue) =>
   v === true || (typeof v === "number" && v !== 0) || (Array.isArray(v) && v.length > 0) || (typeof v === "string" && v.trim() !== "" && !/^(否|false|0|無)$/i.test(v.trim()));
 
@@ -41,9 +41,9 @@ export function resolveWorkFields(fields: FieldMeta[], checkNames: string[] = ["
   return {
     group: pickField(fields, ["組別"]),
     orderNo: pickField(fields, ["工作單號"]),
-    jobNo: pickField(fields, ["案件編號", "工程編號", "工作編號", "可能確認單工作編號", "可能的確認單工編(若暫無確認單才需填寫)"]),
+    jobNo: pickField(fields, ["案件編號", "工程編號", "所屬案件", "可能的確認單工編(若暫無確認單才需填寫)", "備註工編淨", "工作編號", "可能確認單工作編號"]),
     item: pickField(fields, ["合約工項", "內業工項", "工作項目", "工項"]),
-    qty: pickField(fields, ["完成數量", "計價數量", "對外計價數量", "數量"], ["number"]),
+    qty: pickField(fields, ["執行工作數量", "完成數量", "計價數量", "對外計價數量", "數量"], ["number"]),
     revenue: pickField(fields, ["最終營業額點數", "營業額點數", "點數"], ["number"]),
     check: pickField(fields, checkNames),
     status: pickField(fields, ["檢核狀態"]),
@@ -58,6 +58,7 @@ export function resolveWorkFields(fields: FieldMeta[], checkNames: string[] = ["
 export function classifyCheck(r: TableData["records"][number], wf: WorkFields): CheckResult {
   const status = wf.status ? text(r.fields[wf.status.name]) : "";
   if (/退回/.test(status)) return "fail";
+  if (/已通過/.test(status)) return "pass";
   if (!wf.check) return "unchecked";
   const v = r.fields[wf.check.name];
   if (typeof v === "boolean") return v ? "pass" : "unchecked";
@@ -85,7 +86,7 @@ export interface FixDiff {
 
 export function resolveFixFields(fields: FieldMeta[]): FixFields {
   return {
-    qtyOrig: pickField(fields, ["完成數量", "計價數量", "數量"]),
+    qtyOrig: pickField(fields, ["執行工作數量", "完成數量", "計價數量", "數量"]),
     qtyFixed: pickField(fields, ["修改後數量"]),
     revOrig: pickField(fields, ["營業額點數", "點數"]),
     revFixed: pickField(fields, ["修改後營業額", "修改後營業額點數", "最終營業額點數"]),
@@ -163,7 +164,7 @@ export function resolveScheduleFields(fields: FieldMeta[]): ScheduleFields {
     start: byId(SCHEDULE_FIDS.start) ?? pickField(fields, ["開始日期", "日期", "預排開始日", "預排日期"], ["date"]),
     end: byId(SCHEDULE_FIDS.end) ?? pickField(fields, ["結束日期", "預排結束日"], ["date"]),
     points: byId(SCHEDULE_FIDS.points) ?? pickField(fields, ["預估營業額點數", "預排點數", "預排營業額點數", "營業額點數", "點數"], ["number"]),
-    job: pickField(fields, ["案件", "案件編號", "工程編號"]),
+    job: pickField(fields, ["案件", "工程確認單", "案件編號", "工程編號"]),
   };
 }
 
@@ -448,7 +449,7 @@ export function resolvePersonScheduleFields(fields: FieldMeta[]): PersonSchedule
     group: byId(SCHEDULE_FIDS.group) ?? pickField(fields, ["組別"]),
     kind: byId(SCHEDULE_FIDS.kind) ?? pickField(fields, ["條類型"]),
     points: byId(SCHEDULE_FIDS.points) ?? pickField(fields, ["預估營業額點數", "預排點數", "預排營業額點數"], ["number"]),
-    job: pickField(fields, ["案件", "案件編號", "工程編號"]),
+    job: pickField(fields, ["案件", "工程確認單", "案件編號", "工程編號"]),
   };
 }
 
@@ -659,17 +660,138 @@ export function filterByTeam(rows: GroupRow[], sel: string | null): GroupRow[] {
 // Field names the dashboards request from the server (see /api/sources projection).
 export const WORK_FIELDS = [
   "組別", "工作單號", "案件編號", "工程編號", "工作編號", "可能確認單工作編號", "可能的確認單工編(若暫無確認單才需填寫)",
-  "合約工項", "內業工項", "工作項目", "工項", "完成數量", "計價數量", "對外計價數量", "數量",
-  "最終營業額點數", "營業額點數", "點數", "控制組檢核", "雅雯檢核", "檢核狀態", "所屬成本單", "業別", "工作類別", "修改後數量", "修改後營業額", "修改後營業額點數", "出工人", "組長", "填報人", "~SOP", "~備註", "~備注", "~留言", "~原因",
-  "所屬案件", "案件", "工程名稱", "交期", "合約交期", "預定完成日", "完工期限", "到期日", "⚠*", "@dates",
+  "合約工項", "內業工項", "工作項目", "工項", "完成數量", "執行工作數量", "計價數量", "對外計價數量", "數量",
+  "最終營業額點數", "營業額點數", "點數", "控制組檢核", "雅雯檢核", "品管檢核", "檢核狀態", "退回原因", "檢核時間", "所屬成本單", "業別", "工作類別", "修改後數量", "修改後營業額", "修改後營業額點數", "出工人", "組長", "填報人", "~SOP", "~備註", "~備注", "~留言", "~原因",
+  "所屬案件", "原所屬案件", "對應合約明細", "~工編", "~計價數量", "填報時間", "案件", "工程名稱", "交期", "合約交期", "預定完成日", "完工期限", "到期日", "⚠*", "@dates",
 ];
-export const COST_FIELDS = ["工作日期", "內業組別", "所屬組別", "組別", "填報人", "@dates"];
+export const COST_FIELDS = ["工作日期", "內業組別", "所屬組別", "組別", "填報人", "填報時間", "⚠補填", "@dates"];
 export const FIELD_COST_FIELDS = ["工作日期", "組別", "組長", "工作單列", "@dates"];
 export const SCHEDULE_FIELDS = [
   "業別", "組別", "開始日期", "日期", "預排開始日", "預排日期", "結束日期", "預排結束日",
   "預排點數", "預排營業額點數", "營業額點數", "點數", "案件", "案件編號", "工程編號", "@dates",
   // R02 以人為單位：人員（link，要 record_id）、條類型、預估營業額點數
-  "人員", "條類型", "預估營業額點數",
+  "人員", "條類型", "預估營業額點數", "備註", "工程確認單", "工作內容", "預排工作項目", "#fldnzMsrzZ", "#fldpFvkV6G",
   // 依 field id 取欄（日期／點數不看欄名）：真起日、真訖日、組別、業別、預估營業額點數
   `#${SCHEDULE_FIDS.start}`, `#${SCHEDULE_FIDS.end}`, `#${SCHEDULE_FIDS.group}`, `#${SCHEDULE_FIDS.trade}`, `#${SCHEDULE_FIDS.points}`,
 ];
+
+// R02 daily points use the same work-date and revenue fields as the existing person rows.
+export function buildDailyPersonRevenue(rows: GroupRow[], wf: WorkFields, dateField: string | null, weekStart: string) {
+  const start = Date.parse(`${weekStart}T00:00:00+08:00`);
+  const days = () => [0, 0, 0, 0, 0, 0, 0] as [number, number, number, number, number, number, number];
+  const people = rows.map((row) => {
+    const daily = days(); let totalQty = 0;
+    for (const order of row.orders) {
+      const raw = dateField ? order.fields[dateField] : null;
+      const t = typeof raw === "number" ? raw : typeof raw === "string" ? Date.parse(raw) : NaN;
+      const day = dayIndex(t) - dayIndex(start);
+      if (day < 0 || day > 6 || !Number.isFinite(day)) continue;
+      daily[day] += wf.revenue ? num(order.fields[wf.revenue.name]) ?? 0 : 0;
+      totalQty += wf.qty ? num(order.fields[wf.qty.name]) ?? 0 : 0;
+    }
+    return { row, days: daily, weekTotal: daily.reduce((a, b) => a + b, 0), totalQty };
+  });
+  const aggregate = (list: typeof people) => ({ days: list.reduce((a, p) => { p.days.forEach((v, i) => { a[i] += v; }); return a; }, days()), weekTotal: list.reduce((a, p) => a + p.weekTotal, 0), totalQty: list.reduce((a, p) => a + p.totalQty, 0) });
+  const teams = teamSections(rows).map((section) => ({ team: section.team, people: people.filter((p) => section.rows.includes(p.row)), ...aggregate(people.filter((p) => section.rows.includes(p.row))) }));
+  const reports = people.filter((p) => /^圖報/.test(p.row.team ?? ""));
+  const grand = aggregate(people);
+  return { people, teams, reportTotal: reports.length ? aggregate(reports) : null, grandDays: grand.days, grandTotal: grand.weekTotal, totalQty: grand.totalQty };
+}
+
+export interface R02InspectionRow {
+  id: string; workOrderNo: string; date: string; people: string; group: string; caseCode: string; workItem: string;
+  executedQty: number | null; pricingQty: number | null; modifiedQty: number | null; revenuePoints: number | null; modifiedRevenue: number | null;
+  isReturned: boolean; returnReason: string; reviewStatus: "已通過" | "已退回" | "待檢核";
+}
+
+export function r02InspectionRows(records: TableData["records"], wf: WorkFields, dateField: string): R02InspectionRow[] {
+  return records.map((r) => {
+    const f = r.fields;
+    const result = classifyCheck(r, wf);
+    const date = f[dateField];
+    return { id: r.id, workOrderNo: text(f["工作單號"]), date: typeof date === "number" ? new Date(date + 8 * 3600000).toISOString().slice(0, 10) : text(date),
+      people: text(f["填報人"]), group: text(f["組別"]), caseCode: text(f["案件編號"] ?? f["所屬案件"]), workItem: text(f["內業工項"] ?? f["工作項目"]),
+      executedQty: num(f["執行工作數量"]) ?? num(f["計價數量"]) ?? num(f["對外計價數量"]), pricingQty: num(f["計價數量"]), modifiedQty: num(f["修改後數量"]),
+      revenuePoints: num(f["營業額點數"]) ?? num(f["最終營業額點數"]), modifiedRevenue: num(f["修改後營業額"]),
+      isReturned: result === "fail", returnReason: text(f["退回原因"]).trim(), reviewStatus: result === "fail" ? "已退回" : result === "pass" ? "已通過" : "待檢核" };
+  });
+}
+
+export const INTERNAL_TEAM_NAMES = ["控制", "圖報A", "圖報B", "經理"];
+export const isInternalTeamName = (team: string) => /^(控制|圖報A|圖報B|圖資|報告|經理|內業)$/.test(groupKey(team));
+export const EXEMPT_DAILY_REPORT_NAMES = new Set(["許茂坤", "許喆凱", "Vincent", "張爲斌", "張為斌"]);
+export const V4_CASE_FIELDS = ["工程確認單編號", "工程編號", "工編淨", "所屬案件", "工程名稱", "狀態", "合約狀態", "控制總工天", "圖資總工天", "報告總工天", "合約總額", "B｜報價(營業額)", "累計點數", "剩餘額度", "契約剩餘天", "@dates"];
+export const V4_CONTRACT_ITEM_FIELDS = ["工編號碼", "所屬案件", "所屬成案確認單（日報關聯）", "合約項次", "合約工作項目", "明細狀態", "合約數量", "數量", "合約單位", "外業數量", "控制數量", "圖資數量", "報告數量", "控制預估工天", "圖資預估工天", "報告預估工天", "預期營業額點數", "已施作營業額", "餘額", "合約金額(報出)", "分項金額(報出)", "合約金額(原始)", "@dates"];
+export const V4_REPORT_ITEM_FIELDS = ["填報工項", "工編號碼", "所屬案件", "工項類別", "工項名稱", "合約工作項目", "基準數量", "標準點數", "對應合約明細", "對應營業額", "已填報外業營業額", "本工項剩餘營ˊ業額", "@dates"];
+const TZ = 8 * 3600000;
+const dayIndex = (n: number) => Math.floor((n + TZ) / DAY);
+const timestamp = (v: CellValue): number | null => typeof v === "number" ? v : typeof v === "string" && v ? (Number.isFinite(Date.parse(v)) ? Date.parse(v) : null) : null;
+const names = (v: CellValue): string[] => (Array.isArray(v) ? v : text(v).split(/[、,，]/)).map(x => x.trim()).filter(Boolean);
+// Requirement 140: project-level schedule, attendance and V4 progress calculations.
+import type { PeopleDirectory } from "./people";
+const extractCaseCode = (raw: string) => {
+  const s = raw.trim(); const match = s.match(/([A-Z]\d{6}|\b1\d{5}\b)/i);
+  return match ? (match[1].toUpperCase() === "C000000" ? "" : match[1].toUpperCase()) : s;
+};
+const isoOffset = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY).toISOString().slice(0,10);
+const dateIso = (v: CellValue | undefined) => {
+  if (typeof v === "string" && /^\d{4}[-/]\d{2}[-/]\d{2}/.test(v)) return v.slice(0,10).replaceAll("/","-");
+  const t = typeof v === "number" ? (v < 1e11 ? v * 1000 : v) : Date.parse(text(v));
+  return Number.isFinite(t) ? new Date(t + TZ).toISOString().slice(0,10) : "";
+};
+const submittedTime = (v: CellValue | undefined) => {
+  if (typeof v === "number") return v < 1e11 ? v * 1000 : v;
+  const s = text(v).trim(); if (!s) return NaN;
+  return Date.parse(/^\d{4}[-/]\d\d[-/]\d\d[ T]\d\d:\d\d(?::\d\d)?$/.test(s) ? s.replaceAll("/","-").replace(" ","T") + "+08:00" : s);
+};
+export function buildInternalScheduleExecution(scheduleRecords: TableData["records"], workRecords: TableData["records"], sf: ScheduleFields, wf: WorkFields, weekStart: number, weekEnd: number, peopleDir?: PeopleDirectory, caseNameByCode?: Map<string,string>) {
+  void peopleDir;
+  const map = new Map<string,{caseCode:string;caseName:string;people:string[];scheduleRows:number;plannedPoints:number;actualOrders:number;actualQty:number;actualRevenue:number}>();
+  for (const r of scheduleRecords) {
+    if (!keepInternalSchedule(text(sf.trade ? r.fields[sf.trade.name] : r.fields["業別"]),text(sf.group ? r.fields[sf.group.name] : r.fields["組別"])) || /休假|請假|特休|病假|事假|公假|補休/.test(text(r.fields["條類型"]))) continue;
+    const s = timestamp(r.fields[sf.start?.name ?? "開始日期"]), e = timestamp(r.fields[sf.end?.name ?? "結束日期"]); if (s === null || dayIndex(s) > dayIndex(weekEnd-1) || dayIndex(e ?? s) < dayIndex(weekStart)) continue;
+    const raw = text(r.fields["案件"] ?? r.fields["案件編號"] ?? r.fields["工程編號"] ?? r.fields["備註"]); const code = extractCaseCode(raw); if (!code) continue;
+    const p = map.get(code) ?? {caseCode:code,caseName:caseNameByCode?.get(code) ?? raw.replace(new RegExp(`^.*?${code}(?:-\\d+)?`,"i"),"").replace(/^[\s:：\-]+/,""),people:[],scheduleRows:0,plannedPoints:0,actualOrders:0,actualQty:0,actualRevenue:0};
+    p.people = [...new Set([...p.people,...names(r.fields["人員"])])]; p.scheduleRows++; p.plannedPoints += num(r.fields[sf.points?.name ?? "預估營業額點數"]) ?? 0; map.set(code,p);
+  }
+  const extraWorkOrders: {id:string;orderNo:string;date:string;person:string;team:string;caseCode:string;item:string;qty:number;revenue:number}[] = [];
+  for (const r of workRecords) { const f=r.fields; const raw=text(f["所屬案件"] ?? f["案件編號"] ?? f["工程編號"] ?? f["可能的確認單工編(若暫無確認單才需填寫)"] ?? f["備註工編淨"] ?? f["原所屬案件"] ?? f["對應合約明細"]); const code=extractCaseCode(raw), p=map.get(code);
+    if (p) {p.actualOrders++; p.actualQty += wf.qty ? num(f[wf.qty.name]) ?? 0 : 0; p.actualRevenue += wf.revenue ? num(f[wf.revenue.name]) ?? 0 : 0;}
+    else extraWorkOrders.push({id:r.id,orderNo:text(f[wf.orderNo?.name ?? "工作單號"]),date:text(f[JOINED_DATE] ?? f["日期"]),person:text(f["填報人"] ?? f["姓名"]),team:text(f[JOINED_GROUP] ?? f["組別"]),caseCode:code || raw || "未填案件",item:text(f[wf.item?.name ?? "內業工項"]),qty:(wf.qty ? num(f[wf.qty.name]) : null) ?? num(f["計價數量"]) ?? 0,revenue:(wf.revenue ? num(f[wf.revenue.name]) : null) ?? num(f["最終營業額點數"]) ?? 0});
+  }
+  const plannedCases=[...map.values()].map(p=>({...p,executed:p.actualOrders>0})), executedPlannedCaseCount=plannedCases.filter(p=>p.executed).length;
+  return {plannedCases,plannedCaseCount:plannedCases.length,executedPlannedCaseCount,executionRate:plannedCases.length ? executedPlannedCaseCount/plannedCases.length : null,extraWorkOrders,extraWorkOrderCount:extraWorkOrders.length,extraRevenue:extraWorkOrders.reduce((s,o)=>s+o.revenue,0),extraQty:extraWorkOrders.reduce((s,o)=>s+o.qty,0)};
+}
+export function buildPersonAttendanceAndBackfill(rows: GroupRow[], costRecordsInWeek: TableData["records"], wf: WorkFields, dateField: string | null, weekStartIso: string, todayIso: string, leaveByPerson: Record<string,Record<string,string>> = {}, rosterStaff: Array<{name:string;team:string}> = []) {
+  void wf; const workdays=[0,1,2,3,4].map(i=>isoOffset(weekStartIso,i)).filter(d=>d<=todayIso), end=isoOffset(weekStartIso,6);
+  const combined=[...rows]; for(const p of rosterStaff) if (isInternalTeamName(p.team) && !combined.some(r=>r.group===p.name)) combined.push({...blankRow(p.name),team:p.team});
+  const costById=new Map(costRecordsInWeek.map(r=>[r.id,r]));
+  const people=combined.filter(row=>isInternalTeamName(row.team ?? "")).map(row=>{ const costs=costRecordsInWeek.filter(r=>names(r.fields["填報人"]).includes(row.group)); const dates=new Set<string>(); const add=(v:CellValue|undefined)=>{const d=dateIso(v); if(d>=weekStartIso && d<=end) dates.add(d);};
+    row.orders.forEach(r=>add((dateField ? r.fields[dateField] : null) ?? r.fields[JOINED_DATE] ?? r.fields["日期"])); costs.forEach(r=>add(r.fields["工作日期"] ?? r.fields["日期"]));
+    let before1030Count=0,after1030Count=0; const linked=new Set<string>();
+    const count=(r:TableData["records"][number],cost?:TableData["records"][number])=>{const d=dateIso((dateField ? r.fields[dateField] : null) ?? r.fields[JOINED_DATE] ?? r.fields["日期"] ?? cost?.fields["工作日期"]); if(!d || d<weekStartIso || d>end) return; const dayStart=Date.parse(`${d}T00:00:00+08:00`); const valid=(t:number)=>Number.isFinite(t) && t>=dayStart; const workTime=submittedTime(r.fields["填報時間"]), costTime=submittedTime(cost?.fields["填報時間"]); const cloned=(t:number)=>d<"2026-08-10" && dateIso(t)==="2026-08-11"; const isCost=costById.has(r.id); const t=!isCost && valid(workTime) ? workTime : isCost && valid(workTime) && !cloned(workTime) ? workTime : valid(costTime) && !cloned(costTime) ? costTime : NaN; const e=Date.parse(`${d}T23:59:59.999+08:00`), cutoff=Date.parse(`${isoOffset(d,1)}T10:30:00.000+08:00`); if(t>cutoff) after1030Count++; else if(t>e || (!Number.isFinite(t) && text(r.fields["⚠補填"] ?? cost?.fields["⚠補填"]))) before1030Count++;};
+    for(const r of row.orders){const id=r.links?.["所屬成本單"]?.[0]; if(id) linked.add(id); count(r,id ? costById.get(id) : undefined);} for(const c of costs) if(!linked.has(c.id) && !row.orders.some(r=>dateIso((dateField ? r.fields[dateField] : null) ?? r.fields[JOINED_DATE])===dateIso(c.fields["工作日期"]))) count(c);
+    const actualWorkDays=dates.size, dailyAvgRevenue=actualWorkDays ? row.revenue/actualWorkDays : null, missingDates=EXEMPT_DAILY_REPORT_NAMES.has(row.group)?[]:workdays.filter(d=>!dates.has(d) && !leaveByPerson[row.group]?.[d]);
+    return {person:row.group,team:row.team ?? "",actualWorkDays,workDates:[...dates].sort(),missingDates,missingReportDays:missingDates.length,before1030Count,after1030Count,revenue:row.revenue,qty:row.qty,dailyAvgRevenue,efficiencyRate:dailyAvgRevenue}; });
+  const total=(f:(p:typeof people[number])=>number)=>people.reduce((s,p)=>s+f(p),0), actualWorkDays=total(p=>p.actualWorkDays), totalRevenue=total(p=>p.revenue), dailyAvgRevenue=actualWorkDays ? totalRevenue/actualWorkDays : null;
+  return {people,totals:{actualWorkDays,missingReportDays:total(p=>p.missingReportDays),before1030Count:total(p=>p.before1030Count),after1030Count:total(p=>p.after1030Count),totalRevenue,totalQty:total(p=>p.qty),dailyAvgRevenue,efficiencyRate:dailyAvgRevenue}};
+}
+export function buildV4ProjectProgress(v4Cases:TableData["records"], v4ContractItems:TableData["records"], v4ReportItems:TableData["records"], v4InternalWork:TableData["records"], v3Cases:TableData["records"] = []) {
+ type Item={name:string;contractQty:number|null;contractRevenue:number|null;completedQty:number;completedRevenue:number;orderCount:number};
+ type Project={caseCode:string;caseName:string;status:string;contractQty:number|null;contractRevenue:number|null;completedQty:number;completedRevenue:number;orderCount:number;isV4Contract:boolean;hasWork:boolean;items:Item[];caseRevenue:number|null;itemQty:number|null;itemRevenue:number|null;reportQty:number|null;reportRevenue:number|null;caseAmount:number|null;itemAmount:number|null;remainingAmount:number|null};
+ const projects=new Map<string,Project>(), ids=new Map<string,string>(), itemIds=new Map<string,{code:string;item:Item}>(), fallback=new Map<string,string>();
+ const codeOf=(r:TableData["records"][number], fields:string[])=>{for(const k of fields){const raw=text(r.fields[k]); const m=raw.match(/([A-Z]\d{6}|\b1\d{5}\b)/i); if(m && m[1].toUpperCase()!=="C000000") return m[1].toUpperCase(); for(const id of r.links?.[k] ?? []) {const c=ids.get(id);if(c)return c;}} return "";};
+ const get=(code:string)=>{let p=projects.get(code); if(!p){p={caseCode:code,caseName:fallback.get(code) ?? "",status:"",contractQty:null,contractRevenue:null,completedQty:0,completedRevenue:0,orderCount:0,isV4Contract:false,hasWork:false,items:[],caseRevenue:null,itemQty:null,itemRevenue:null,reportQty:null,reportRevenue:null,caseAmount:null,itemAmount:null,remainingAmount:null};projects.set(code,p);}return p;};
+ const sumFields=(r:TableData["records"][number], keys:string[])=>{const values=keys.map(k=>num(r.fields[k])).filter((v):v is number=>v!==null);return values.length ? values.reduce((a,b)=>a+b,0) : null;};
+ const add=(a:number|null,b:number|null)=>b===null?a:(a ?? 0)+b;
+ const positive=(n:number|null)=>n !== null && n > 0 ? n : null;
+ const reportByItem=new Map<Item,number>();
+ for(const r of v3Cases){const c=codeOf(r,["案件編號"]);if(c)fallback.set(c,text(r.fields["案件名稱"]));}
+ for(const r of v4Cases){const c=codeOf(r,["工程編號","所屬案件","工編淨","工程確認單編號"]);if(!c)continue;ids.set(r.id,c);const p=get(c);p.isV4Contract=true;p.caseName=text(r.fields["工程名稱"]) || p.caseName;p.status=text(r.fields["狀態"]);p.caseRevenue=add(p.caseRevenue,sumFields(r,["控制總工天","圖資總工天","報告總工天"]));p.caseAmount=add(p.caseAmount,num(r.fields["B｜報價(營業額)"]) ?? num(r.fields["合約總額"]));p.remainingAmount=add(p.remainingAmount,num(r.fields["剩餘額度"]));}
+ for(const r of v4ContractItems){const c=codeOf(r,["工編號碼","工程編號","所屬案件","所屬成案確認單（日報關聯）"]);if(!c)continue;ids.set(r.id,c);const p=get(c);p.isV4Contract=true;const qty=sumFields(r,["控制數量","圖資數量","報告數量"]), rev=positive(num(r.fields["預期營業額點數"])) ?? sumFields(r,["控制預估工天","圖資預估工天","報告預估工天"]);p.itemAmount=add(p.itemAmount,num(r.fields["合約金額(報出)"]));p.itemQty=add(p.itemQty,qty);p.itemRevenue=add(p.itemRevenue,rev);const item={name:text(r.fields["合約工作項目"] ?? r.fields["工項名稱"] ?? r.fields["合約項次"]) || "未命名工項",contractQty:qty,contractRevenue:rev,completedQty:0,completedRevenue:0,orderCount:0};p.items.push(item);itemIds.set(r.id,{code:c,item});}
+ for(const r of v4ReportItems){if(!/^(控制|圖資|報告)$/.test(text(r.fields["工項類別"])))continue;const c=codeOf(r,["工編號碼","工程編號","所屬案件","對應合約明細"]);if(!c)continue;ids.set(r.id,c);const p=get(c);p.reportQty=add(p.reportQty,num(r.fields["基準數量"]));const standard=positive(num(r.fields["標準點數"]));p.reportRevenue=add(p.reportRevenue,standard);for(const id of r.links?.["對應合約明細"] ?? []){const linked=itemIds.get(id);if(linked?.code===c && standard!==null) reportByItem.set(linked.item,(reportByItem.get(linked.item) ?? 0)+standard);}if(!p.items.length || p.itemQty===null){const item={name:text(r.fields["工項名稱"] ?? r.fields["填報工項"]) || "未命名工項",contractQty:num(r.fields["基準數量"]),contractRevenue:num(r.fields["標準點數"]),completedQty:0,completedRevenue:0,orderCount:0};p.items.push(item);itemIds.set(r.id,{code:c,item});}}
+ for(const r of v4InternalWork){const c=codeOf(r,["所屬案件","案件編號","對應合約明細","備註工編淨","可能的確認單工編(若暫無確認單才需填寫)"]);if(!c)continue;const p=get(c);p.hasWork=true;const q=num(r.fields["執行工作數量"]) ?? num(r.fields["計價數量"]) ?? num(r.fields["對外計價數量"]) ?? 0, rev=num(r.fields["最終營業額點數"]) ?? num(r.fields["營業額點數"]) ?? 0;p.completedQty+=q;p.completedRevenue+=rev;p.orderCount++;const item=(r.links?.["對應合約明細"] ?? []).map(id=>itemIds.get(id)).find(x=>x?.code===c)?.item ?? p.items.find(i=>i.name===text(r.fields["內業工項"] ?? r.fields["合約工項"]));if(item){item.completedQty+=q;item.completedRevenue+=rev;item.orderCount++;}}
+ for(const [item,standard] of reportByItem) item.contractRevenue=standard;
+ const allProjects=[...projects.values()].map(p=>{const contractQty=p.itemQty ?? p.reportQty, contractRevenue=positive(p.reportRevenue) ?? positive(p.itemRevenue) ?? p.caseRevenue ?? p.itemRevenue; return {...p,contractAmount:p.caseAmount ?? p.itemAmount,contractQty,contractRevenue,remainingQty:contractQty===null?null:Math.max(0,contractQty-p.completedQty),remainingRevenue:contractRevenue===null?null:Math.max(0,contractRevenue-p.completedRevenue),completionRate:contractRevenue && contractRevenue>0?p.completedRevenue/contractRevenue:contractQty && contractQty>0?p.completedQty/contractQty:null,items:p.items.map(i=>({...i,remainingQty:i.contractQty===null?null:Math.max(0,i.contractQty-i.completedQty),remainingRevenue:i.contractRevenue===null?null:Math.max(0,i.contractRevenue-i.completedRevenue)}))};});
+ return {allProjects,v4ContractProjects:allProjects.filter(p=>p.isV4Contract),activeWorkProjects:allProjects.filter(p=>p.hasWork)};
+}

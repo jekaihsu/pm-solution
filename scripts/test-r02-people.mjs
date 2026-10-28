@@ -272,3 +272,44 @@ test("組別篩選：單組、圖報合計（A＋B）、不選＝全部", () => 
   assert.equal(filterByTeam(rows3, REPORT_MERGED).length, 3);
   assert.equal(filterByTeam(rows3, "經理").length, 0);
 });
+
+test("R02 每日點數依週一至週日分桶並加總數量", async () => {
+  const { blankRow, buildDailyPersonRevenue } = await import("../lib/controlGroup.ts");
+  const wf = resolveWorkFields([field("計價數量", "number"), field("最終營業額點數", "number")]);
+  const a = { ...blankRow("甲"), team: "控制", orders: [{ id: "1", fields: { 日期: at(0), 計價數量: 3, 最終營業額點數: 2 } }, { id: "2", fields: { 日期: at(6), 計價數量: 4, 最終營業額點數: 1 } }] };
+  const b = { ...blankRow("乙"), team: "圖報A", orders: [{ id: "3", fields: { 日期: at(1), 計價數量: 2, 最終營業額點數: 4 } }] };
+  const result = buildDailyPersonRevenue([a, b], wf, "日期", "2026-10-05");
+  assert.deepEqual(result.grandDays, [2, 4, 0, 0, 0, 0, 1]);
+  assert.equal(result.grandTotal, 7);
+  assert.equal(result.totalQty, 9);
+  assert.equal(result.teams.find((t) => t.team === "控制").weekTotal, 3);
+  assert.equal(result.reportTotal.weekTotal, 4);
+});
+
+test("Requirement 140 schedule compares normalized cases and extra work", async () => {
+  const {buildInternalScheduleExecution} = await import('../lib/controlGroup.ts');
+  const sf=resolvePersonScheduleFields(schedFields), wf=resolveWorkFields([field('計價數量','number'),field('最終營業額點數','number')]);
+  const schedules=table(schedFields,[{'結束日期':at(0),'開始日期':at(0),'業別':'內業','組別':'控制','人員':['甲'],'案件':'C115264-1 大樓','預估營業額點數':2},{'結束日期':at(0),'業別':'內業','組別':'控制','條類型':'特休','案件':'A115227'}]).records;
+  const work=table([], [{'所屬案件':'C115264-2','計價數量':3,'最終營業額點數':4},{'所屬案件':'115552-1','計價數量':2,'最終營業額點數':1}]).records;
+  const result=buildInternalScheduleExecution(schedules,work,sf,wf,weekStart,weekEnd);
+  assert.equal(result.plannedCaseCount,1); assert.equal(result.plannedCases[0].actualQty,3); assert.equal(result.executionRate,1); assert.equal(result.extraQty,2);
+});
+test("Requirement 140 attendance counts leave and Taipei cutoff", async () => {
+  const {buildPersonAttendanceAndBackfill,blankRow}=await import('../lib/controlGroup.ts');
+  const row={...blankRow('甲'),team:'控制',revenue:2,qty:3,orders:[{id:'w',fields:{'工作日期':'2026-10-05','填報時間':'2026-10-06 10:30:00'}}]};
+  const result=buildPersonAttendanceAndBackfill([row],[],resolveWorkFields([]),'工作日期','2026-10-05','2026-10-07',{'甲':{'2026-10-06':'休假'}},[{name:'乙',team:'圖資'}]);
+  assert.equal(result.people[0].before1030Count,1); assert.deepEqual(result.people[0].missingDates,['2026-10-07']); assert.equal(result.people[0].dailyAvgRevenue,2); assert.equal(result.people[1].missingReportDays,3);
+});
+test("Requirement 140 V4 progress retains legacy work and does not double count baselines", async () => {
+  const {buildV4ProjectProgress}=await import('../lib/controlGroup.ts');
+  const rec=(id,fields,links)=>({id,fields,...(links?{links}:{})});
+  const result=buildV4ProjectProgress([rec('c',{'工程編號':'C115264','工程名稱':'甲','控制總工天':10})],[rec('i',{'所屬案件':'C115264','控制數量':8,'合約工作項目':'測量'})],[rec('r',{'所屬案件':'C115264','工項類別':'控制','基準數量':8,'標準點數':10})],[rec('w',{'所屬案件':'C115264','計價數量':3,'最終營業額點數':4},{'對應合約明細':['i']}),rec('w2',{'案件編號':'115552-1','計價數量':1})]);
+  assert.equal(result.allProjects.length,2); assert.equal(result.v4ContractProjects[0].remainingQty,5); assert.equal(result.v4ContractProjects[0].remainingRevenue,6); assert.equal(result.v4ContractProjects[0].items[0].completedQty,3); assert.equal(result.activeWorkProjects.length,2);
+});
+
+ test("免填日報名單包含張為斌", async () => {
+  const {buildPersonAttendanceAndBackfill, blankRow, EXEMPT_DAILY_REPORT_NAMES} = await import('../lib/controlGroup.ts');
+  assert.ok(EXEMPT_DAILY_REPORT_NAMES.has('張為斌'));
+  const result=buildPersonAttendanceAndBackfill([{...blankRow('張為斌'),team:'控制'}],[],resolveWorkFields([]),'工作日期','2026-10-05','2026-10-09');
+  assert.equal(result.people[0].missingReportDays,0);
+});

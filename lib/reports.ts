@@ -57,7 +57,8 @@ const SALES_BASE = "JoOqbggsVar0ATsVgbcjh6IIp1g";
 const SALARY_BASE = "VwAsbezz9app3YsramgjduLYp2U"; // 薪水計算 Base
 const HR_POOL_BASE = "PQYybxyGHaQwIjsG7goj5gQSpte"; // 人事系統 · 01 招聘候選人池
 const HR_POOL_ALLOW = [
-  "應徵日期", "候選人", "職缺", "分派部門", "招聘階段", "104聯絡狀態",
+  "應徵日期", "候選人", "年齡", "性別", "職缺", "分派部門", "招聘階段", "104聯絡狀態",
+  "部門主管是否面試",
   "主管確認要不要面試（是否需要一面）", "是否需要一面", "主管可配合時段（請填 3 個）",
   "約定面試時間", "會議連結", "面試評價與錄取結果(面試後)", "面試評價與錄取結果",
   "面試會議紀錄（妙記）", "行政分派動作", "來源"
@@ -123,6 +124,9 @@ export const SOURCES: SourceDef[] = [
   raw("v3-field-cost", "外業成本單", "v3", "tblQCy3eU0wsUj1I", { dateField: "工作日期", columns: COLS.fieldCost, ...DASH.fieldCost, note: "R01 用來判定一組拆成多組出工（同組同日組長不同）。" }),
   // 週篩選依「工作日期-營業額明細」（與成本單工作日期一致）；預設的「填報時間」是填單當下時間，會漏掉補填的單（上週 84 張而非 96 張）。
   raw("v3-internal-work", "內業工作單", "v3", "tblTP5Naz52FBpFg", { dateField: "工作日期-營業額明細", columns: COLS.internalWork, ...DASH.internalWork, note: "R02 與 R09 共用；「最終營業額點數」欄名含「最終」不代表已核定。" }),
+  { key: "v4-cases", name: "工程確認單", version: "v4", baseToken: V4, tableId: "tblmSQrcCs9vPQZx", url: tableUrl(V4, "tblmSQrcCs9vPQZx"), note: "V4 工程確認單（含工程編號、工程名稱、狀態、合約總額、控制/圖資/報告/外業總工天）" },
+  { key: "v4-contract-items", name: "合約明細工項", version: "v4", baseToken: V4, tableId: "tblobs4qPy2w9MZ6", url: tableUrl(V4, "tblobs4qPy2w9MZ6"), note: "V4 合約明細工項（含工編號碼、所屬案件、合約工作項目、合約數量、控制/圖資/報告工項與數量及預估工天）" },
+  { key: "v4-report-items", name: "合約填報工項", version: "v4", baseToken: V4, tableId: "tblwQPYk3c9RvCU7", url: tableUrl(V4, "tblwQPYk3c9RvCU7"), note: "V4 合約填報工項（含工編號碼、填報工項、工項名稱、工項類別、基準數量、對應營業額、標準點數、本工項剩餘營業額）" },
   raw("v4-internal-work", "內業工作單", "v4", "tblrCo8KeZiuJUNh", { columns: COLS.internalWork, ...DASH.internalWork, note: "R02、R03、R09 共用；含品管檢核、業主數量覆寫欄位。" }),
   raw("v3-internal-cost", "內業成本單", "v3", "tbl8JdWLLwlPFuoF", { dateField: "工作日期", columns: COLS.internalCost, ...DASH.internalCost }),
   raw("v4-internal-cost", "內業成本單", "v4", "tblKwSDRg6WaGHYr", { dateField: "工作日期", columns: COLS.internalCost, ...DASH.internalCost }),

@@ -2,15 +2,16 @@
 import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, CircleAlert, CircleCheck, Minus } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
-import { COST_FIELDS, FIELD_COST_FIELDS, JOINED_DATE, keepFieldSchedule, keepInternalSchedule, planDiffTotals, personRows, plannedByPerson, resolvePersonScheduleFields, splitCrews, sumRows, teamSections, teamSummary, filterByTeam, REPORT_MERGED, REPORT_MERGED_LABEL, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, dayOfWeek, errorRate, fixDiffs, groupRows, orderNotes, violatesSop, joinInternal, plannedPoints, resolveFixFields, resolveScheduleFields, resolveWorkFields, type FixFields, type GroupRow, type ScheduleFields, type TeamSummaryLine, type WorkFields } from "@/lib/controlGroup";
+import { buildDailyPersonRevenue, r02InspectionRows, COST_FIELDS, FIELD_COST_FIELDS, JOINED_DATE, keepFieldSchedule, keepInternalSchedule, planDiffTotals, personRows, plannedByPerson, resolvePersonScheduleFields, splitCrews, sumRows, teamSections, teamSummary, filterByTeam, REPORT_MERGED, REPORT_MERGED_LABEL, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, dayOfWeek, errorRate, fixDiffs, groupRows, orderNotes, violatesSop, joinInternal, plannedPoints, resolveFixFields, resolveScheduleFields, resolveWorkFields, type FixFields, type GroupRow, type ScheduleFields, type TeamSummaryLine, type WorkFields } from "@/lib/controlGroup";
 import { inRange, resolveDateField } from "@/lib/metrics";
 import { sourceByKey, type DataVersion } from "@/lib/reports";
 import type { CellValue, TableData } from "@/lib/types";
-import { formatDate, weekName } from "@/lib/week";
+import { formatDate, weekName, weekdayCn } from "@/lib/week";
 import { useShell } from "./AppShell";
 import EmptyState from "./EmptyState";
 import { MOBILE, useMedia } from "./useMedia";
 import OwnerProgress from "./OwnerProgress";
+import R02Sections from "./R02Sections";
 import { STATUS_TEXT, useSource } from "./useSource";
 
 export interface BoardConfig {
@@ -121,7 +122,7 @@ function OrderDetail({ row, wf, checkLabel, ff, dateField, onlyDay, weekStart }:
             <th>工作單號</th>
             <th>工作編號</th>
             <th>工作項目</th>
-            <th className="num">工作數量</th>
+            <th className="num">{row.personId ? "執行工作數量（計價數量）" : "工作數量"}</th>
             <th className="num">營業額點數</th>
             <th>修改（出錯）</th>
             <th>{checkLabel.replace(/（.*）/, "")}</th>
@@ -139,7 +140,7 @@ function OrderDetail({ row, wf, checkLabel, ff, dateField, onlyDay, weekStart }:
             const d = r.fields[dateField];
             return (
               <tr key={r.id} className={fixes.length ? "cg-err" : undefined}>
-                <td>{typeof d === "number" ? `${formatDate(d).slice(5)}（${WEEKDAYS[dayOfWeek(d, weekStart)] ?? ""}）` : "—"}</td>
+                <td>{typeof d === "number" ? `${formatDate(d).slice(5)}（${weekdayCn(d)}）` : "—"}</td>
                 <td>{no}</td>
                 <td>{wf.jobNo ? text(r.fields[wf.jobNo.name]) : "—"}</td>
                 <td>{wf.item ? text(r.fields[wf.item.name]) : "—"}</td>
@@ -186,7 +187,9 @@ function OrderDetail({ row, wf, checkLabel, ff, dateField, onlyDay, weekStart }:
   );
 }
 
-const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
+const DAY = 86400000;
+// 區間天數：週＝7，自訂日期區間可為任意天數（週一～週日模型以外）。
+const rangeDays = (weekStart: number, weekEnd: number) => Math.max(1, Math.round((weekEnd - weekStart) / DAY));
 
 // 列的唯一鍵與顯示名：以組為單位＝組別名；以人為單位＝「內業組別|人員 record_id」與「人名（組別）」。
 const rk = (r: GroupRow) => r.key ?? r.group;
@@ -197,8 +200,8 @@ interface DayCell {
   errors: number;
 }
 
-function dayCells(row: GroupRow, ff: FixFields, dateField: string, weekStart: number): DayCell[] {
-  const cells = WEEKDAYS.map(() => ({ orders: 0, errors: 0 }));
+function dayCells(row: GroupRow, ff: FixFields, dateField: string, weekStart: number, nDays: number): DayCell[] {
+  const cells: DayCell[] = Array.from({ length: nDays }, () => ({ orders: 0, errors: 0 }));
   for (const r of row.orders) {
     const t = r.fields[dateField];
     if (typeof t !== "number") continue;
@@ -236,12 +239,14 @@ function DayCellView({ c, on, onClick }: { c: DayCell; on?: boolean; onClick?: (
 }
 
 function dayHead(i: number, weekStart: number) {
-  return `${WEEKDAYS[i]} ${formatDate(weekStart + i * 86400000).slice(5)}`;
+  const ms = weekStart + i * DAY;
+  return `${weekdayCn(ms)} ${formatDate(ms).slice(5)}`;
 }
 
-// 每組每天有沒有出錯：rows = groups, columns = Mon–Sun.
-function DayGrid({ rows, ff, dateField, weekStart, onPick }: { rows: GroupRow[]; ff: FixFields; dateField: string; weekStart: number; onPick: (g: string, day: number) => void }) {
+// 每組每天有沒有出錯：rows = groups, columns = 區間內每一天（週＝7 天，自訂區間為 N 天）。
+function DayGrid({ rows, ff, dateField, weekStart, weekEnd, onPick }: { rows: GroupRow[]; ff: FixFields; dateField: string; weekStart: number; weekEnd: number; onPick: (g: string, day: number) => void }) {
   const people = rows.some((r) => r.personId);
+  const nDays = rangeDays(weekStart, weekEnd);
   return (
     <div className="cg-days">
       <div className="cg-days-head">
@@ -253,15 +258,15 @@ function DayGrid({ rows, ff, dateField, weekStart, onPick }: { rows: GroupRow[];
           <thead>
             <tr>
               <th>{people ? "人員" : "組別"}</th>
-              {WEEKDAYS.map((_, i) => (
+              {Array.from({ length: nDays }, (_, i) => (
                 <th key={i}>{dayHead(i, weekStart)}</th>
               ))}
-              <th className="num">本週出錯</th>
+              <th className="num">出錯</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => {
-              const cells = dayCells(r, ff, dateField, weekStart);
+              const cells = dayCells(r, ff, dateField, weekStart, nDays);
               const err = cells.reduce((s, c) => s + c.errors, 0);
               const errDays = cells.filter((c) => c.errors).length;
               return (
@@ -375,7 +380,7 @@ function FailPanel({ rows, wf, cfg, dateField, weekStart, onPick }: { rows: Grou
                 return (
                   <tr key={o.id}>
                     <td className="cg-group">{perPerson ? row.team : row.group}</td>
-                    <td>{typeof d === "number" ? `${formatDate(d).slice(5)}（${WEEKDAYS[dayOfWeek(d, weekStart)] ?? ""}）` : "—"}</td>
+                    <td>{typeof d === "number" ? `${formatDate(d).slice(5)}（${weekdayCn(d)}）` : "—"}</td>
                     <td>{wf.orderNo ? text(o.fields[wf.orderNo.name]) || o.id : o.id}</td>
                     <td className="strong">{perPerson ? row.group : wf.person ? text(o.fields[wf.person.name]) || "—" : "—"}</td>
                     <td>{wf.jobNo ? text(o.fields[wf.jobNo.name]) || "—" : "—"}</td>
@@ -440,6 +445,7 @@ function SheetTable({ rows, planOn, wf, ff, hasCheck, hasFix, onPick }: { rows: 
                   <td>{pct(errorRate(d.r))}</td>
                   <td>{hasFix ? n(d.fixed, true) : "—"}</td>
                   <td>{n(d.viol, true)}</td>
+                  {byPerson && <td>{wf.qty ? n(d.r.qty) : "—"}</td>}
                   <td>{wf.revenue ? n(d.r.revenue) : "—"}</td>
                   <td>{d.r.planned ? n(d.r.planned.points) : planOn ? "未排" : "—"}</td>
                   <td>
@@ -485,6 +491,7 @@ function SheetTable({ rows, planOn, wf, ff, hasCheck, hasFix, onPick }: { rows: 
               <th>失誤率</th>
               <th>被修改</th>
               <th>違反 SOP</th>
+              {byPerson && <th>執行工作數量</th>}
               <th>營業額點數</th>
               <th>預排點數</th>
               <th>與預排差異</th>
@@ -502,6 +509,7 @@ function SheetTable({ rows, planOn, wf, ff, hasCheck, hasFix, onPick }: { rows: 
               <td>{pct(t.checked ? t.fail / t.checked : null)}</td>
               <td>{hasFix ? n(t.fixed, true) : "—"}</td>
               <td>{wf.sopViolation ? n(t.viol, true) : "—"}</td>
+              {byPerson && <td>{wf.qty ? n(rows.reduce((a, r) => a + r.qty, 0)) : "—"}</td>}
               <td>{wf.revenue ? n(t.revenue) : "—"}</td>
               <td>{t.hasPlan ? n(t.planned) : "—"}</td>
               <td>
@@ -531,6 +539,12 @@ const num1 = (v: number | null, bad = false) => (v === null ? <span className="m
 
 // R02 組別總結：每個內業組別一列、圖報合計（圖報A＋圖報B）、最後全部合計。
 // 人數同一人跨組只算一次（圖報合計、全部合計去重）；張數、點數直接加總。永遠顯示全部組別，點一組＝只看該組的人。
+function DailyRevenue({ rows, wf, dateField, weekStart }: { rows: GroupRow[]; wf: WorkFields; dateField: string; weekStart: number }) {
+  const daily = buildDailyPersonRevenue(rows, wf, dateField, formatDate(weekStart));
+  const line = (label: string, values: { days: number[]; weekTotal: number; totalQty: number }) => <tr className="cg-team"><td>{label}</td>{values.days.map((v, i) => <td key={i}>{num1(v)}</td>)}<td>{num1(values.weekTotal)}</td><td>{num1(values.totalQty)}</td></tr>;
+  return <section className="cg"><h3>1. 內業每天／週各人營業額點數（週一～週日）</h3><div className="cg-sheet"><table><thead><tr><th>組別／人員</th>{["一", "二", "三", "四", "五", "六", "日"].map((d, i) => <th key={d}>週{d} ({formatDate(weekStart + i * 86400000).slice(5)})</th>)}<th>當週營業額合計</th><th>執行工作數量</th></tr></thead><tbody>{daily.teams.map((t) => <Fragment key={t.team}>{line(`${t.team}小計`, t)}{t.people.map((p) => <tr key={p.row.key ?? p.row.group}><td>{p.row.group}</td>{p.days.map((v, i) => <td key={i}>{num1(v)}</td>)}<td>{num1(p.weekTotal)}</td><td>{num1(p.totalQty)}</td></tr>)}</Fragment>)}{daily.reportTotal && line("圖報合計", daily.reportTotal)}</tbody><tfoot>{line("全部內業合計", { days: daily.grandDays, weekTotal: daily.grandTotal, totalQty: daily.totalQty })}</tfoot></table></div></section>;
+}
+
 function TeamSummary({ lines, selected, planOn, wf, ff, hasCheck, hasFix, onPick }: { lines: TeamSummaryLine[]; selected: string | null; planOn: boolean; wf: WorkFields; ff: FixFields; hasCheck: boolean; hasFix: boolean; onPick: (team: string | null) => void }) {
   const cells = (l: TeamSummaryLine) => {
     const r = l.total;
@@ -546,6 +560,7 @@ function TeamSummary({ lines, selected, planOn, wf, ff, hasCheck, hasFix, onPick
         <td>{pct(errorRate(r))}</td>
         <td>{hasFix ? num1(fixed, true) : "—"}</td>
         <td>{num1(viol, true)}</td>
+        <td>{wf.qty ? num1(r.qty) : "—"}</td>
         <td>{wf.revenue ? num1(r.revenue) : "—"}</td>
         <td>{hasPlan ? num1(l.plan.points) : planOn ? "未排" : "—"}</td>
         <td>
@@ -575,6 +590,7 @@ function TeamSummary({ lines, selected, planOn, wf, ff, hasCheck, hasFix, onPick
               <th>失誤率</th>
               <th>被修改</th>
               <th>違反 SOP</th>
+              <th>執行工作數量</th>
               <th>營業額點數</th>
               <th>預排點數</th>
               <th>與預排差異</th>
@@ -627,7 +643,7 @@ function SopPanel({ items, wf, dateField, weekStart, onPick }: { items: { key: s
               return (
                 <tr key={o.id} className="cg-link" onClick={() => onPick(key)}>
                   <td className="cg-group">{group}</td>
-                  <td>{typeof d === "number" ? `${formatDate(d).slice(5)}（${WEEKDAYS[dayOfWeek(d, weekStart)] ?? ""}）` : "—"}</td>
+                  <td>{typeof d === "number" ? `${formatDate(d).slice(5)}（${weekdayCn(d)}）` : "—"}</td>
                   <td>{wf.orderNo ? text(o.fields[wf.orderNo.name]) || o.id : o.id}</td>
                   <td className="strong">{wf.person ? text(o.fields[wf.person.name]) || "—" : "—"}</td>
                   <td>{wf.jobNo ? text(o.fields[wf.jobNo.name]) || "—" : "—"}</td>
@@ -646,11 +662,11 @@ function SopPanel({ items, wf, dateField, weekStart, onPick }: { items: { key: s
 }
 
 // One group, one week: every R01 item for that group on a single screen.
-function GroupFocus({ row, group, wf, cfg, hasCheck, hasFlags, ff, hasFix, dateField, weekStart, day, setDay }: { row?: GroupRow; group: string; wf: WorkFields; cfg: BoardConfig; hasCheck: boolean; hasFlags: boolean; ff: FixFields; hasFix: boolean; dateField: string; weekStart: number; day: number | null; setDay: (d: number | null) => void }) {
+function GroupFocus({ row, group, wf, cfg, hasCheck, hasFlags, ff, hasFix, dateField, weekStart, weekEnd, day, setDay }: { row?: GroupRow; group: string; wf: WorkFields; cfg: BoardConfig; hasCheck: boolean; hasFlags: boolean; ff: FixFields; hasFix: boolean; dateField: string; weekStart: number; weekEnd: number; day: number | null; setDay: (d: number | null) => void }) {
   const [failOpen, setFailOpen] = useState(false);
   if (!row) return <EmptyState kind="empty" title={`${group.includes("|") ? "這位人員" : group} 這週沒有${cfg.workLabel}`} />;
   const diff = row.planned && wf.revenue ? row.revenue - row.planned.points : null;
-  const cells = dayCells(row, ff, dateField, weekStart);
+  const cells = dayCells(row, ff, dateField, weekStart, rangeDays(weekStart, weekEnd));
   const errOrders = cells.reduce((s, c) => s + c.errors, 0);
   const errDays = cells.filter((c) => c.errors).length;
   return (
@@ -731,6 +747,18 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const cost = useSource(cfg.costKey ? cfg.costKey(version) : cfg.workKey(version), { fields: cfg.costKey ? COST_FIELDS : WORK_FIELDS, links: true });
   const crew = useSource(cfg.crewKey ? cfg.crewKey(version) : cfg.workKey(version), { fields: cfg.crewKey ? FIELD_COST_FIELDS : WORK_FIELDS, links: true });
   const sched = useSource(cfg.scheduleKey(version), { fields: SCHEDULE_FIELDS, links: true });
+  const v3Cost = useSource("v3-internal-cost", { fields: COST_FIELDS, links: true });
+  const rosterSource = useSource("v3-people", { fields: ["姓名", "所屬組別", "在職"], enabled: cfg.unit === "person" });
+  const [leaveDays, setLeaveDays] = useState<Record<string, {date:string;kind:string}[]>>({});
+  useEffect(() => {
+    if (cfg.unit !== "person") return;
+    let cancelled = false;
+    setLeaveDays({});
+    fetch(`/api/attendance/leave?start=${formatDate(week.start)}&end=${formatDate(week.end - 86400000)}`)
+      .then(r => r.ok ? r.json() : null).then(j => { if (!cancelled) setLeaveDays(j?.status === "ok" ? j.days ?? {} : {}); })
+      .catch(() => { if (!cancelled) setLeaveDays({}); });
+    return () => { cancelled = true; };
+  }, [cfg.unit, week.start, week.end]);
   const isMobile = useMedia(MOBILE);
   const [open, setOpen] = useState<Set<string>>(new Set());
   // Selected group stays put across weeks (so you can step through one group's
@@ -746,7 +774,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const [failOpen, setFailOpen] = useState(false);
   const [layout, setLayout] = useState<"sheet" | "detail">("sheet");
   const [sopOpen, setSopOpen] = useState(false);
-  useEffect(() => setDay(null), [version, week.start]);
+  useEffect(() => setDay(null), [version, week.start, week.end]);
   const pick = (g: string | null, d: number | null = null) => {
     setFocus(g);
     setDay(d);
@@ -844,6 +872,9 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const byPerson = cfg.unit === "person";
   // R02 選了內業組別（或圖報合計）：下方人員表、每日出錯、失誤率明細都只看該組的人；組別總結仍列全部組別。
   const rows = byPerson ? filterByTeam(allRows, team) : allRows;
+  const roster = (rosterSource.data?.records ?? []).filter(r => r.fields["在職"] === true).map(r => ({name: text(r.fields["姓名"]), team: text(r.fields["所屬組別"]), id:r.id})).filter(r => !team || r.team === team || (team === REPORT_MERGED && /^圖報[AB]$/.test(r.team)));
+  const leave: Record<string, Record<string,string>> = {};
+  for (const r of [...roster, ...allRows.map(r => ({name:r.group, team:r.team ?? "", id:r.personId ?? ""}))]) for (const d of leaveDays[r.id] ?? []) (leave[r.name] ??= {})[d.date] = d.kind;
   const totals = rows.reduce(
     (t, r) => ({ orders: t.orders + r.orders.length, revenue: t.revenue + r.revenue, pass: t.pass + r.pass, fail: t.fail + r.fail, anomaly: t.anomaly + r.anomalyCount }),
     { orders: 0, revenue: 0, pass: 0, fail: 0, anomaly: 0 },
@@ -1135,7 +1166,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
       )}
 
       {focus ? (
-        <GroupFocus row={allRows.find((r) => rk(r) === focus)} group={focus} wf={wf} cfg={cfg} hasCheck={hasCheck} hasFlags={hasFlags} ff={ff} hasFix={hasFix} dateField={dateField} weekStart={week.start} day={day} setDay={setDay} />
+        <GroupFocus row={allRows.find((r) => rk(r) === focus)} group={focus} wf={wf} cfg={cfg} hasCheck={hasCheck} hasFlags={hasFlags} ff={ff} hasFix={hasFix} dateField={dateField} weekStart={week.start} weekEnd={week.end} day={day} setDay={setDay} />
       ) : rows.length === 0 ? (
         <EmptyState kind="empty" title={`${weekName(week.offset)}${byPerson && team ? `「${team}」` : ""}沒有${cfg.workLabel}`} />
       ) : null}
@@ -1154,6 +1185,8 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
         </div>
       )}
 
+      {!focus && byPerson && <DailyRevenue rows={rows} wf={wf} dateField={dateField} weekStart={week.start} />}
+      {!focus && byPerson && <R02Sections rows={rows} wf={wf} dateField={dateField} sched={sched.data} cost={cost.data} v3Cost={version === "v4" ? v3Cost.data : undefined} sf={sf} start={week.start} end={week.end} leave={leave} roster={roster} />}
       {!focus && byPerson && allRows.length > 0 && <TeamSummary lines={summary} selected={team} planOn={planOn} wf={wf} ff={ff} hasCheck={hasCheck} hasFix={hasFix} onPick={(t) => pickTeam(t)} />}
 
       {!focus && rows.length > 0 && layout === "sheet" && <SheetTable rows={rows} planOn={planOn} wf={wf} ff={ff} hasCheck={hasCheck} hasFix={hasFix} onPick={(g) => pick(g)} />}
@@ -1164,7 +1197,19 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
         </>
       )}
 
-      {!focus && rows.length > 0 && hasFix && <DayGrid rows={rows} ff={ff} dateField={dateField} weekStart={week.start} onPick={(g, d) => pick(g, d)} />}
+      {!focus && rows.length > 0 && hasFix && <DayGrid rows={rows} ff={ff} dateField={dateField} weekStart={week.start} weekEnd={week.end} onPick={(g, d) => pick(g, d)} />}
+
+      {byPerson && !focus && (() => {
+        const inspection = r02InspectionRows(rows.flatMap((row) => row.orders), wf, dateField);
+        const value = (n: number | null) => n === null ? "—" : formatNumber(n);
+        return <section className="cg">
+          <div className="cg-head"><div><h2>6. 雅雯檢核表｜內業工作單執行數量與檢核退回狀態</h2>
+          <p className="muted small">總工作單數 {inspection.length}・已通過 {inspection.filter((r) => r.reviewStatus === "已通過").length}・已退回 {inspection.filter((r) => r.isReturned).length}・待檢核 {inspection.filter((r) => r.reviewStatus === "待檢核").length}・執行工作總數量 {formatNumber(inspection.reduce((s, r) => s + (r.executedQty ?? 0), 0))}</p></div></div>
+          <div className="cg-table"><table><thead><tr>{["工作單號", "工作日期", "填報人", "組別", "案件編號", "內業工項", "執行工作數量", "計價數量", "修改後數量", "營業額點數", "修改後營業額", "檢核狀態", "退回原因 / 修正欄位"].map((h) => <th key={h}>{h}</th>)}</tr></thead><tbody>
+          {inspection.map((r) => <tr key={r.id}><td>{r.workOrderNo || "—"}</td><td>{r.date || "—"}</td><td>{r.people || "—"}</td><td>{r.group || "—"}</td><td>{r.caseCode || "—"}</td><td>{r.workItem || "—"}</td><td>{value(r.executedQty)}</td><td>{value(r.pricingQty)}</td><td>{value(r.modifiedQty)}</td><td>{value(r.revenuePoints)}</td><td>{value(r.modifiedRevenue)}</td><td><span className="tag">{r.reviewStatus}</span></td><td>{[r.returnReason, r.modifiedQty !== null ? "修改後數量" : "", r.modifiedRevenue !== null ? "修改後營業額" : ""].filter(Boolean).join("、") || "—"}</td></tr>)}
+          </tbody></table></div>
+        </section>;
+      })()}
 
       <p className="cg-foot">
         失誤率＝{cfg.checkLabel}「不通過」÷ 已檢核（未檢核不計）。{byPerson ? `一列一個人（內業成本單的填報人），依成本單的內業組別分段，每組一列小計；同一人在不同內業組別填單時，每組各一列。預排點數＝預排表${cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}依「人員＋日期」比對（組別不參與，預排「人員」欄多人逐人展開，休假條不算），有填「預估營業額點數」就分攤到每天，未填以每人每天 1 點計（同人同日多條只算一次，標 *）；預排日期認欄位 id，不看欄名。` : `預排點數＝預排表${cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}點數欄，未填以每組每天 1 點計（標 *）。`}差異＝營業額點數（原值）− 預排點數。
@@ -1172,7 +1217,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
         {view.records.length > 0 && ` 資料至 ${formatDate(Math.max(...view.records.map((r) => (r.fields[view.dateField] as number) ?? 0)))}。`}
       </p>
 
-      {cfg.ownerProgress && <OwnerProgress data={view.data} wf={wf} dateField={view.dateField} weekStart={week.start} weekEnd={week.end} />}
+      {byPerson && cfg.ownerProgress && !focus && <OwnerProgress data={view.data} wf={wf} dateField={view.dateField} weekStart={week.start} weekEnd={week.end} />}
     </section>
   );
 }
