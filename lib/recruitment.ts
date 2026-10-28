@@ -2004,7 +2004,7 @@ export function summarizeRecruitment(
   const weeklyNewCount = weekly.length;
   const hired = weekly.filter(c => c.stage === "已發Offer" || c.evalResult.includes("已發Offer") || c.evalResult === "錄取");
   const hiredNames = hired.map(c => `${c.name}（${c.role}）`);
-  const recentCandidates = [...weekly].sort((a, b) => (b.applyDate || "").localeCompare(a.applyDate || "")).slice(0, 15);
+  const recentCandidates = [...weekly].sort((a, b) => (b.applyDate || "").localeCompare(a.applyDate || ""));
 
   return {
     weeklyNewCount,
