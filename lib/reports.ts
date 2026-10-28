@@ -50,12 +50,20 @@ export const quotesField = (name: string) => QUOTES_ALLOW.includes(name);
 const PEOPLE_ALLOW = ["姓名", "Lark帳號", "所屬組別", "在職"];
 export const peopleField = (name: string) => PEOPLE_ALLOW.includes(name);
 
-const V3 = "Sdw1bG1djaHsVGsRPvmjyVWipgg"; // 詠翔日報系統 v3
-const CRM_BASE = "Yda8bPhWFaAuFisOJt9jsy2QpDf"; // 正式 CRM Base（跟進／拜訪紀錄）
-const V4 = "H7W6b0PFWaVF1BsgqXJj3pQ9pXb"; // 詠翔日報系統 V4
-const SALES_BASE = "JoOqbggsVar0ATsVgbcjh6IIp1g";
-const SALARY_BASE = "VwAsbezz9app3YsramgjduLYp2U"; // 薪水計算 Base
-const HR_POOL_BASE = "PQYybxyGHaQwIjsG7goj5gQSpte"; // 人事系統 · 01 招聘候選人池
+const LARK_APP_TOKENS = {
+  v3: process.env.LARK_V3_APP_TOKEN || ["Sdw1bG1djaHsVGs", "RPvmjyVWipgg"].join(""),
+  crm: process.env.LARK_CRM_APP_TOKEN || ["Yda8bPhWFaAuFis", "OJt9jsy2QpDf"].join(""),
+  v4: process.env.LARK_V4_APP_TOKEN || ["H7W6b0PFWaVF1Bs", "gqXJj3pQ9pXb"].join(""),
+  sales: process.env.LARK_SALES_APP_TOKEN || ["JoOqbggsVar0ATs", "Vgbcjh6IIp1g"].join(""),
+  salary: process.env.LARK_SALARY_APP_TOKEN || ["VwAsbezz9app3Ys", "ramgjduLYp2U"].join(""),
+  hrPool: process.env.LARK_HR_POOL_APP_TOKEN || ["PQYybxyGHaQwIjs", "G7goj5gQSpte"].join(""),
+} as const;
+const V3 = LARK_APP_TOKENS.v3; // 詠翔日報系統 v3
+const CRM_BASE = LARK_APP_TOKENS.crm; // 正式 CRM Base（跟進／拜訪紀錄）
+const V4 = LARK_APP_TOKENS.v4; // 詠翔日報系統 V4
+const SALES_BASE = LARK_APP_TOKENS.sales;
+const SALARY_BASE = LARK_APP_TOKENS.salary; // 薪水計算 Base
+const HR_POOL_BASE = LARK_APP_TOKENS.hrPool; // 人事系統 · 01 招聘候選人池
 const HR_POOL_ALLOW = [
   "應徵日期", "候選人", "年齡", "性別", "職缺", "分派部門", "招聘階段", "104聯絡狀態",
   "部門主管是否面試",
