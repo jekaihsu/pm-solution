@@ -40,7 +40,7 @@ def psql_json(sql: str, db_name: str = PG_DB) -> Any:
         "ASSERT current_database() = 'yongxiang_plumb_r39_clone'; END $$;\n" + sql
     )
     out = subprocess.check_output(
-        ["psql", "-X", "-d", "postgresql://postgres:postgres@127.0.0.1:5432/yongxiang_plumb_r39_clone", "-v", "ON_ERROR_STOP=1", "-Atqc", guarded],
+        ["psql", "-X", "-d", "postgresql://127.0.0.1:5432/yongxiang_plumb_r39_clone", "-v", "ON_ERROR_STOP=1", "-Atqc", guarded],
         text=True,
     )
     lines = [line.strip() for line in out.splitlines() if line.strip()]

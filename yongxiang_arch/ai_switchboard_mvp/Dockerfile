@@ -18,7 +18,7 @@ RUN chmod +x /app/entrypoint.sh && \
     rm -f /app/seed_switchboard_clean.sql.gz && \
     service postgresql stop
 ENV PORT=8080
-ENV SWITCHBOARD_PG_DSN="postgresql://box@127.0.0.1:5432/yongxiang_plumb_r39_clone"
+ENV SWITCHBOARD_PG_DSN="postgresql://127.0.0.1:5432/yongxiang_plumb_r39_clone"
 ENV SMTP_HOST=""
 ENV SMTP_PASS=""
 ENV SMTP_DISABLED="1"

@@ -5,10 +5,10 @@ from psycopg.rows import dict_row
 
 DATABASE = "yongxiang_plumb_r39_clone"
 ENV = dict(PGHOST="127.0.0.1", PGPORT="5432", PGUSER="postgres",
-           PGPASSWORD="postgres", PGDATABASE=DATABASE, SMTP_DISABLED="1",
+           PGDATABASE=DATABASE, SMTP_DISABLED="1",
            SWITCHBOARD_SANDBOX_MODE="SANDBOX_LOOPBACK")
 os.environ.update(ENV)
-DSN = "host=127.0.0.1 port=5432 user=postgres password=postgres dbname=" + DATABASE
+DSN = "host=127.0.0.1 port=5432 user=postgres dbname=" + DATABASE
 
 
 def connect(*, autocommit=True, name="r50_part2", timeout="3s"):

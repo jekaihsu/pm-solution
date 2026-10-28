@@ -15,7 +15,7 @@ r54_12084_independent_reconcile.py — R54 Sheet 12,084 列「獨立內容對帳
   * 唯讀：不寫 DB、不發信（actual_sends = 0）。
 
 用法：
-  PG_DSN=postgresql://postgres:postgres@127.0.0.1:5432/yongxiang_plumb_r39_clone \
+  PG_DSN=postgresql://127.0.0.1:5432/yongxiang_plumb_r39_clone \
     python r54_12084_independent_reconcile.py
 輸出：r54_reconcile_12084/{summary.json,summary.md,luowei_review_sample_3x30.csv,.md}
 """
@@ -224,7 +224,7 @@ def honest_bucket(rec: Reconciled) -> str:
 
 
 def main() -> int:
-    dsn = os.environ.get("PG_DSN") or "postgresql://postgres:postgres@127.0.0.1:5432/yongxiang_plumb_r39_clone"
+    dsn = os.environ.get("PG_DSN") or "postgresql://127.0.0.1:5432/yongxiang_plumb_r39_clone"
     sheet, emails = load_data(dsn)
     emails_by_day: dict[date, list[Email]] = {}
     for e in emails:

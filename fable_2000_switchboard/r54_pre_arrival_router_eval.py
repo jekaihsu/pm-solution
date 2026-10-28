@@ -15,7 +15,7 @@ r54_pre_arrival_router_eval.py — R54「時光機」評估：Pre-arrival-only �
   * 唯讀：本程式不寫 DB、不發信（actual_sends = 0）。
 
 用法：
-  PG_DSN=postgresql://postgres:postgres@127.0.0.1:5432/yongxiang_plumb_r39_clone \
+  PG_DSN=postgresql://127.0.0.1:5432/yongxiang_plumb_r39_clone \
     python r54_pre_arrival_router_eval.py
 輸出：r54_pre_arrival_eval_report.json / r54_pre_arrival_eval_report.md
 """
@@ -259,7 +259,7 @@ def render_md(rep: dict) -> str:
 
 
 def main() -> int:
-    dsn = os.environ.get("PG_DSN") or "postgresql://postgres:postgres@127.0.0.1:5432/yongxiang_plumb_r39_clone"
+    dsn = os.environ.get("PG_DSN") or "postgresql://127.0.0.1:5432/yongxiang_plumb_r39_clone"
     corpus = load_corpus(dsn)
     rep = build_report(corpus)
     (ROOT / "r54_pre_arrival_eval_report.json").write_text(

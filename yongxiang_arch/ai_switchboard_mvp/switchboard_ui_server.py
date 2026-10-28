@@ -31,10 +31,9 @@ from urllib.parse import parse_qs, quote as urllib_quote, unquote, urlparse
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-PG_DSN = "postgresql://postgres:postgres@127.0.0.1:5432/yongxiang_plumb_r39_clone"
-assert PG_DSN == "postgresql://postgres:postgres@127.0.0.1:5432/yongxiang_plumb_r39_clone"
+PG_DSN = os.environ.get("PG_DSN", "dbname=yongxiang_plumb_r39_clone")
 os.environ.update(PG_DSN=PG_DSN, PGHOST="127.0.0.1", PGPORT="5432", PGUSER="postgres",
-                  PGPASSWORD="postgres", PGDATABASE="yongxiang_plumb_r39_clone",
+                  PGDATABASE="yongxiang_plumb_r39_clone",
                   SMTP_DISABLED="1", SWITCHBOARD_SANDBOX_MODE="SANDBOX_LOOPBACK")
 
 UI_HTML = ROOT / "ui" / "index.html"

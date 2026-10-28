@@ -21,7 +21,7 @@ case "${PORT:-}" in
   ''|*[!0-9]*) export PORT=8080 ;;
 esac
 export PGDATABASE="yongxiang_plumb_r39_clone"
-export SWITCHBOARD_PG_DSN="postgresql://box@127.0.0.1:5432/yongxiang_plumb_r39_clone"
+export SWITCHBOARD_PG_DSN="postgresql://127.0.0.1:5432/yongxiang_plumb_r39_clone"
 export SMTP_HOST=""
 export SMTP_PASS=""
 export SMTP_DISABLED="1"

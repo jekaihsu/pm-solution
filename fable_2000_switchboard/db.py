@@ -8,7 +8,7 @@ import subprocess
 import threading
 
 ROOT = Path(__file__).resolve().parent
-DATABASE = 'postgresql://postgres:postgres@127.0.0.1:5432/yongxiang_plumb_r39_clone'
+DATABASE = 'postgresql://127.0.0.1:5432/yongxiang_plumb_r39_clone'
 HAS_PSQL = shutil.which('psql') is not None
 _SESSION_CONTEXT = threading.local()
 

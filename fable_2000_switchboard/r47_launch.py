@@ -80,14 +80,14 @@ def connection():
     try:
         import psycopg
         from psycopg.rows import dict_row
-        with psycopg.connect(host='127.0.0.1', port=5432, user='postgres', password='postgres', dbname='yongxiang_plumb_r39_clone', row_factory=dict_row) as conn:
+        with psycopg.connect(host='127.0.0.1', port=5432, user='postgres', dbname='yongxiang_plumb_r39_clone', row_factory=dict_row) as conn:
             name = conn.execute('SELECT current_database() AS name').fetchone()['name']
             assert name != 'yongxiang_plumb'
             assert name == 'yongxiang_plumb_r39_clone'
             yield conn
     except ImportError:
         import psycopg2
-        raw = psycopg2.connect(dbname='yongxiang_plumb_r39_clone', user='postgres', password='postgres', host='127.0.0.1', port=5432)
+        raw = psycopg2.connect(dbname='yongxiang_plumb_r39_clone', user='postgres', host='127.0.0.1', port=5432)
         try:
             conn = _Pg2CompatConn(raw)
             name = conn.execute('SELECT current_database() AS name').fetchone()['name']

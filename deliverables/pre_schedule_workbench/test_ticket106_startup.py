@@ -46,7 +46,7 @@ assert.equal(formatDateWithDay('2026-10-28'),'2026-10-28 (週三)');
 
 def test_clone_active_ids_and_report_policy():
     import os
-    env = dict(os.environ, PGHOST='127.0.0.1', PGPORT='5432', PGUSER='postgres', PGPASSWORD='postgres', PGDATABASE='yongxiang_plumb_r39_clone', PGOPTIONS='-c default_transaction_read_only=on')
+    env = dict(os.environ, PGHOST='127.0.0.1', PGPORT='5432', PGUSER='postgres', PGDATABASE='yongxiang_plumb_r39_clone', PGOPTIONS='-c default_transaction_read_only=on')
     sql = """select json_build_object(
       'db',current_database(),
       'ids',(select json_agg(id::text order by id) from employee where employment_status='active'),

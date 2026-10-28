@@ -102,11 +102,11 @@ DO $$ BEGIN
 END $$;"""
     env = {k: v for k, v in os.environ.items() if not k.startswith('PG')}
     env.update(PGHOST='127.0.0.1', PGPORT='5432', PGUSER='postgres',
-               PGPASSWORD='postgres', PGDATABASE=DATABASE, PGCONNECT_TIMEOUT='5',
+               PGDATABASE=DATABASE, PGCONNECT_TIMEOUT='5',
                SMTP_DISABLED='1', SWITCHBOARD_SANDBOX_MODE=MODE)
     if readonly:
         env['PGOPTIONS'] = '-c default_transaction_read_only=on -c statement_timeout=30000'
-    dsn = 'postgresql://postgres:postgres@127.0.0.1:5432/yongxiang_plumb_r39_clone'
+    dsn = 'postgresql://127.0.0.1:5432/yongxiang_plumb_r39_clone'
     p = subprocess.run(['psql', '-X', '-d', dsn, '-v', 'ON_ERROR_STOP=1', '-1', '-Atq'], input=guard+'\n'+statement, capture_output=True, text=True, env=env, timeout=40)
     if p.returncode:
         raise ValueError(p.stderr.strip())

@@ -20,7 +20,7 @@ from psycopg.rows import dict_row
 
 LARK_CLI = "/home/box/.local/bin/lark-cli"
 DB_NAME = "yongxiang_plumb_r39_clone"
-DSN = f"postgresql://postgres:postgres@127.0.0.1:5432/{DB_NAME}"
+DSN = f"postgresql://127.0.0.1:5432/{DB_NAME}"
 STATE_FILE = Path("/workspace/yongxiang_arch/ai_switchboard_mvp/jk_live_test_watcher_state.json")
 LOG_FILE = Path("/workspace/yongxiang_arch/ai_switchboard_mvp/jk_live_test_watcher.log")
 

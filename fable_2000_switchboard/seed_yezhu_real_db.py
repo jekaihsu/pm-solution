@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 import db
 
-PG_DSN = "postgresql://postgres:postgres@127.0.0.1:5432/yongxiang_plumb_r39_clone"
+PG_DSN = "postgresql://127.0.0.1:5432/yongxiang_plumb_r39_clone"
 
 FORBIDDEN_REPLACEMENTS = [
     ("張羅薇", "羅薇"),
