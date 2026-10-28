@@ -158,7 +158,7 @@ export default function AttendanceCards() {
                   </tr>
                 </thead>
                 <tbody>
-                  {shownPeople.map((p, pi) => (
+                  {ok.people.map((p, pi) => onlyAnomaly && !hasAnomaly(p.days) ? null : (
                     <tr key={`${pi}|${p.group}|${p.name}`}>
                       <td className="att-name">{p.name}</td>
                       <td>{p.group}</td>

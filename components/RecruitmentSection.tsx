@@ -399,6 +399,53 @@ export default function RecruitmentSection() {
         </table>
       </div>
 
+      {/* 本週應徵與面試候選人明細表（僅展示所選週） */}
+      <div className="cg-detail" style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
+          本週候選人明細（{summary.recentCandidates.length} 人）
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>應徵日期</th>
+              <th>候選人</th>
+              <th>性別</th>
+              <th>年齡</th>
+              <th>應徵職缺</th>
+              <th>分派部門</th>
+              <th>104聯絡狀態</th>
+              <th>部門主管是否面試</th>
+              <th>約定面試時間</th>
+              <th>面試評價與錄取結果</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summary.recentCandidates.length === 0 ? (
+              <tr>
+                <td colSpan={10} className="muted" style={{ textAlign: "center" }}>
+                  本週尚無應徵或面試候選人紀錄
+                </td>
+              </tr>
+            ) : (
+              summary.recentCandidates.map((c) => (
+                <tr key={c.id}>
+                  <td>{c.applyDate || "—"}</td>
+                  <td><b>{c.name}</b></td>
+                  <td>{c.gender}</td>
+                  <td>{c.age}</td>
+                  <td>{c.role}</td>
+                  <td>{c.dept || "—"}</td>
+                  <td>{c.contactStatus}</td>
+                  <td>{c.managerConfirm}</td>
+                  <td>{c.interviewTime || "—"}</td>
+                  <td>{c.evalResult || "待面試"}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
       <ul className="cg-notes">
         <li>
           <UserPlus size={14} /> 統計所選週應徵者目前的聯絡及面試狀態。
