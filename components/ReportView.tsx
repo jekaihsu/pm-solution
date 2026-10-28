@@ -1,15 +1,16 @@
 "use client";
+import dynamic from "next/dynamic";
 import { Info } from "lucide-react";
 import { useEffect, useState } from "react";
 import { sourceByKey, type ReportDef } from "@/lib/reports";
 import { showSource, useShell } from "./AppShell";
 import GroupBoard, { BOARDS } from "./GroupBoard";
-import EquipmentBoard from "./EquipmentBoard";
-import AdminBoard from "./AdminBoard";
-import InternalReport from "./InternalReport";
-import FieldReport from "./FieldReport";
-import HrBoard from "./HrBoard";
-import OwnerContactReport from "./OwnerContactReport";
+const EquipmentBoard = dynamic(() => import("./EquipmentBoard"));
+const AdminBoard = dynamic(() => import("./AdminBoard"));
+const InternalReport = dynamic(() => import("./InternalReport"));
+const FieldReport = dynamic(() => import("./FieldReport"));
+const HrBoard = dynamic(() => import("./HrBoard"));
+const OwnerContactReport = dynamic(() => import("./OwnerContactReport"));
 import EmptyState from "./EmptyState";
 import SourcePanel from "./SourcePanel";
 

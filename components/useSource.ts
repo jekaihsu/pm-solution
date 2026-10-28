@@ -34,22 +34,27 @@ export function useSource(key: string, opts: SourceOptions = {}): SourceState {
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
     const qs = new URLSearchParams(projection);
     if (demo) qs.set("demo", "1");
     if (tick > 0 && manual) qs.set("refresh", "1");
-    fetch(`/api/sources/${key}?${qs}`)
+    fetch(`/api/sources/${key}?${qs}`, { signal: controller.signal })
       .then(async (r) => {
         const j = await r.json();
         if ((r.status === 401 || (r.status === 403 && !j.openId)) && ["salary-overtime", "v3-people"].includes(key)) {
           qs.set("demo", "1");
-          return (await fetch(`/api/sources/${key}?${qs}`)).json();
+          return (await fetch(`/api/sources/${key}?${qs}`, { signal: controller.signal })).json();
         }
         return j;
       })
       .then((j) => !cancelled && setState({ status: j.status, data: j.data, error: j.error, openId: j.openId, tag }))
-      .catch((e) => !cancelled && setState((prev) => (prev.tag === tag ? { ...prev, status: prev.data ? "ok" : "error", error: String(e) } : { status: "error", error: String(e), tag })));
+      .catch((e) => !cancelled && setState((prev) => (prev.tag === tag ? { ...prev, status: prev.data ? "ok" : "error", error: String(e) } : { status: "error", error: String(e), tag })))
+      .finally(() => clearTimeout(timeout));
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
+      controller.abort();
     };
   }, [key, demo, tick, tag, manual, enabled, projection]);
 
