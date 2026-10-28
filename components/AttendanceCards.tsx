@@ -33,6 +33,10 @@ const fmt = (n: number) => (Number.isInteger(n) ? String(n) : (Math.round(n * 10
 const pct = (a: number, b: number) => (b > 0 ? `${(Math.round((a / b) * 1000) / 10).toFixed(1)}%` : "—");
 const WD = ["一", "二", "三", "四", "五", "六", "日"];
 
+// 週會要一眼抓紅字：缺卡／遲到／早退（含半天假的另半天）與外業無日報都算異常。
+const ANOMALY_CODES: ReadonlySet<DayCode> = new Set<DayCode>(["lack", "late", "early", "late-early", "leave-half-lack", "leave-half-late", "leave-half-early", "leave-half-late-early", "nofield"]);
+const hasAnomaly = (days: DayCode[]) => days.some((c) => ANOMALY_CODES.has(c));
+
 type State = { tag: string; res?: AttendanceResponse; error?: string };
 
 function Pending({ res }: { res: Extract<AttendanceResponse, { status: "needs-permission" }> }) {
@@ -58,6 +62,7 @@ export default function AttendanceCards() {
   const { week, demo, tick, manual } = useShell();
   const tag = `${week.start}|${demo}`;
   const [state, setState] = useState<State>({ tag: "" });
+  const [onlyAnomaly, setOnlyAnomaly] = useState(false);
   useEffect(() => {
     let off = false;
     const qs = new URLSearchParams({ week: String(week.start) });
@@ -98,6 +103,9 @@ export default function AttendanceCards() {
   const kpis: [string, string][] = ok
     ? [["應到人日", fmt(ok.summary.expected)], ["出勤人日", fmt(ok.summary.present)], ["出勤率", pct(ok.summary.present, ok.summary.expected)], ["其中外業出勤", fmt(ok.summary.field)], ["遲到", fmt(ok.summary.late)], ["早退", fmt(ok.summary.early)], ["缺卡", fmt(ok.summary.lack)], ["請假", fmt(ok.summary.leave)], ["出差", fmt(ok.summary.trip)], ["外出", fmt(ok.summary.out)]]
     : [];
+  // 「只顯示異常（紅字）」：缺卡／遲到／早退／外業無日報的人。X / Y＝異常人數 / 全部人數。
+  const anomalyPeople = ok ? ok.people.filter((p) => hasAnomaly(p.days)) : [];
+  const shownPeople = ok ? (onlyAnomaly ? anomalyPeople : ok.people) : [];
 
   return (
     <>
@@ -116,6 +124,18 @@ export default function AttendanceCards() {
                 </div>
               ))}
             </div>
+            <div className="toolbar" style={{ gap: 12, flexWrap: "wrap" }}>
+              <label className="switch" style={{ cursor: "pointer" }}>
+                <input type="checkbox" checked={onlyAnomaly} onChange={(e) => setOnlyAnomaly(e.target.checked)} />
+                <span className="switch-ui" aria-hidden />
+                只顯示異常（紅字）
+              </label>
+              <div className="toolbar-right">
+                <span className={`pill ${anomalyPeople.length ? "pill-bad" : "pill-good"}`}>
+                  異常 {anomalyPeople.length} / {ok.people.length} 人
+                </span>
+              </div>
+            </div>
             <div className="cg-sheet">
               <table>
                 <thead>
@@ -131,7 +151,7 @@ export default function AttendanceCards() {
                   </tr>
                 </thead>
                 <tbody>
-                  {ok.people.map((p, pi) => (
+                  {shownPeople.map((p, pi) => (
                     <tr key={`${pi}|${p.group}|${p.name}`}>
                       <td className="att-name">{p.name}</td>
                       <td>{p.group}</td>
@@ -144,10 +164,10 @@ export default function AttendanceCards() {
                       ))}
                     </tr>
                   ))}
-                  {ok.people.length === 0 && (
+                  {shownPeople.length === 0 && (
                     <tr>
                       <td colSpan={9} className="muted">
-                        考勤組沒有對得上人員名單的人。
+                        {ok.people.length === 0 ? "考勤組沒有對得上人員名單的人。" : "本週沒有異常（缺卡／遲到／早退／外業無日報）。"}
                       </td>
                     </tr>
                   )}
@@ -159,7 +179,7 @@ export default function AttendanceCards() {
                 <CircleAlert size={14} /> 口徑（業主 2026-10-13 確認）：分母＝考勤組成員（綁定人員＋展開綁定部門－排除名單）×應打卡日，加上外業人員。外業不打卡，以「有外業成本單（日報）的日子」當出勤（成本單的組長與實際出工人都算，組長開單代表全組）；外業人員＝不在任何考勤組、本週有成本單的在職同事（{ok.notes.fieldPeople} 人，不需要 Lark帳號；其中 {ok.notes.fieldNoApproval} 人沒有 employee_id，查不到請假／出差／外出審批，這些日子照成本單算）。
               </li>
               <li>
-                外業沒填日報的日子不列入應到、也不算缺卡（待確認，格子顯示「無日報」）；外業在平日請假、出差、外出照樣從分母扣除。
+                外業平日沒填日報的日子不列入應到、也不算缺卡（待確認，格子顯示「無日報」）；外業週末沒出工顯示「—」（免打卡），不再顯示「無日報」雜訊，週末有成本單仍算出勤；國定假日目前沒有行事曆可判斷，平日的國定假日外業同事仍可能顯示「無日報」（待接假日行事曆）。外業在平日請假、出差、外出照樣從分母扣除。
                 {ok.notes.fieldSheets === undefined ? "" : `本週到今天的外業成本單 ${ok.notes.fieldSheets} 筆；成本單裡有 ${ok.notes.fieldUnmatched} 位對不到在職名冊，不列入。整張成本單（不分週）工作日期空白 ${ok.notes.fieldNoDate ?? 0} 筆，其中日期、組長、實際出工人全空 ${ok.notes.fieldAllEmpty ?? 0} 筆（平常約 6 筆，暴增可能是 Lark 回了空白頁）。`}
               </li>
               <li>到班＝正常、遲到、早退與補卡（補卡、主管修正）；缺卡另計，今天沒打卡也算缺卡（今天已打上班卡、下班還沒到不算缺卡）。請假、出差、外出的日子從分母扣除、另列天數。請假依請假時刻判斷涵蓋上午（到 12:00）或下午（13:00 起）：只涵蓋一半算 0.5 天（請假 0.5、應到 0.5），另半天考勤組看打卡（忽略請假那半邊的打卡；正常算到班 0.5、缺卡算缺卡 0.5），外業看當天有沒有成本單；今天上午假而下午還沒結束、上班側也沒打卡時，另半天不入應到、不算缺卡，只計請假 0.5；只請午休不算請假；只有日期沒有時刻的單日半天假不分上下午（今天的這種假比照上午假）。半天假同日又有出差／外出，一律整天算出差／外出（請假不重複計）；整天假、出差、外出落在平日但 Lark 沒有打卡紀錄，照樣計入並從分母扣除；週末、補假等純免打卡日的請假不計。本週未過完只算到今天，未來日不算缺卡。</li>

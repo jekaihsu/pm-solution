@@ -2,7 +2,7 @@
 // Usage: node --test scripts/test-hr-overtime.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { summarizeOvertime, teamSummary, teamSections, UNMAPPED_GROUP } from "../lib/overtime.ts";
+import { summarizeOvertime, teamSummary, teamSections, mondayOf, UNMAPPED_GROUP } from "../lib/overtime.ts";
 import { buildPeopleDirectory, personRefs } from "../lib/people.ts";
 import { SOURCES, salaryField, peopleField } from "../lib/reports.ts";
 
@@ -438,4 +438,68 @@ test("示範資料：salary-overtime 用發起人（加班人空白），能對�
   const months = [...s.byMonth.values()];
   assert.ok(months.some((m) => m.teams.some((l) => l.group === "未對應組別")));
   for (const m of months) if (m.teams.some((l) => l.group === "未對應組別")) assert.equal(m.teams.at(-1).group, "未對應組別");
+});
+
+// ───────── 按「週」彙總（byWeek）：與月口徑相同，只是以台北週一分桶 ─────────
+
+test("mondayOf：台北週一 YYYY-MM-DD；跨週邊界用台北時區；非時間值歸（未填週）", () => {
+  assert.equal(mondayOf(at(2026, 10, 7, 15)), "2026-10-05"); // 週三 → 當週週一
+  assert.equal(mondayOf(at(2026, 10, 12, 0)), "2026-10-12"); // 週一 00:00（台北）
+  assert.equal(mondayOf(at(2026, 10, 11, 23)), "2026-10-05"); // 週日深夜仍屬該週
+  assert.equal(mondayOf(null), "（未填週）");
+  assert.equal(mondayOf("文字"), "（未填週）");
+});
+
+test("byWeek：依台北週（週一）分桶，weeks 由新到舊；跨週以台北時區切", () => {
+  const s = sum([
+    ids("ou_a", "甲", { "开始时间": at(2026, 10, 11, 23) }), // 週日深夜 → 週一 2026-10-05（時數 2）
+    ids("ou_a", "甲", { "开始时间": at(2026, 10, 12, 0), "薪資計算加班時數": 3 }), // 隔週週一 → 2026-10-12
+    ids("ou_b", "乙", { "开始时间": at(2026, 10, 5, 9), "薪資計算加班時數": 1 }), // 同屬 2026-10-05 週
+  ]);
+  assert.deepEqual(s.weeks, ["2026-10-12", "2026-10-05"]);
+  assert.equal(s.byWeek.get("2026-10-05").total, 3); // 甲 2 + 乙 1
+  assert.equal(s.byWeek.get("2026-10-12").total, 3); // 甲 3
+  assert.equal(s.byWeek.get("2026-10-05").all.people, 2); // 甲、乙
+  assert.equal(s.byWeek.get("2026-10-12").all.people, 1); // 只有甲
+});
+
+test("byWeek：桶結構與 byMonth 完全相同（組別總結、全部合計、未對應排最後）", () => {
+  const s = sum([
+    ids("ou_a", "甲"), // 2026-09-03（週四）→ 週一 2026-08-31、月 2026-09
+    ids("ou_a", "甲", { "加班类型": "休息日(六)", "薪資計算加班時數": 4 }),
+    ids("ou_b", "乙", { "薪資計算加班時數": 3 }),
+    ids("ou_x", "外人", { "薪資計算加班時數": 9 }),
+  ]);
+  assert.deepEqual(s.weeks, ["2026-08-31"]);
+  const w = s.byWeek.get("2026-08-31");
+  const m = s.byMonth.get("2026-09");
+  assert.deepEqual(w.teams, m.teams);
+  assert.deepEqual(w.all, m.all);
+  assert.equal(w.total, m.total);
+  assert.equal(w.unmapped, m.unmapped);
+  assert.equal(w.teams.at(-1).group, "未對應組別");
+});
+
+test("byWeek：只計已通過，未通過不進任何週桶；週桶時數總和＝月桶總和", () => {
+  const s = sum([
+    ids("ou_a", "甲", { "开始时间": at(2026, 10, 6), "薪資計算加班時數": 2 }), // 週二 → 2026-10-05
+    ids("ou_b", "乙", { "开始时间": at(2026, 10, 6), "申请状态": "审批中" }), // 不計
+    ids("ou_a", "甲", { "开始时间": at(2026, 10, 13), "薪資計算加班時數": 5 }), // 週二 → 2026-10-12
+  ]);
+  assert.deepEqual(s.weeks, ["2026-10-12", "2026-10-05"]);
+  assert.equal(s.byWeek.get("2026-10-05").all.people, 1);
+  assert.equal(s.byWeek.get("2026-10-05").total, 2);
+  assert.equal(s.byWeek.get("2026-10-12").total, 5);
+  const weekTotal = [...s.byWeek.values()].reduce((a, w) => a + w.total, 0);
+  const monthTotal = [...s.byMonth.values()].reduce((a, m) => a + m.total, 0);
+  assert.equal(weekTotal, 7);
+  assert.equal(weekTotal, monthTotal);
+});
+
+test("byWeek：讀不到人員名單（null）時，週桶組別一律「—」、不算未對應", () => {
+  const s = summarizeOvertime([ids("ou_a", "甲", { "开始时间": at(2026, 10, 6) }), ids("ou_x", "外人", { "开始时间": at(2026, 10, 6) })], null);
+  const w = s.byWeek.get("2026-10-05");
+  assert.ok(w.people.every((p) => p.group === "—"));
+  assert.equal(w.unmapped, 0);
+  assert.equal(w.all.people, 2);
 });

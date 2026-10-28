@@ -340,6 +340,16 @@ const SPECS: Record<string, { n: number; spec: Spec }> = {
       ["薪資計算加班時數", "number", (r) => Math.round((1 + r() * 7) * 2) / 2],
     ],
   },
+  "hr": {
+    n: 12,
+    spec: [
+      ["候選人", "text", (_, i) => `候選人${i + 1}`],
+      ["職缺", "select", (r) => pick(r, ["測量助理工程師", "行政人員", "AI應用工程師", "BIM工程師"])],
+      ["應徵日期", "date", (r) => inWeeks(r)],
+      ["招聘階段", "select", (r) => pick(r, ["待回覆", "已發一面邀請", "已發Offer"])],
+      ["104聯絡狀態", "select", (r) => pick(r, ["未通知", "答應邀約", "婉拒", "未接/未回電"])],
+    ],
+  },
   "owner-contacts": {
     n: 10,
     spec: [

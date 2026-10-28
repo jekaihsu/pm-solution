@@ -1,1 +1,1 @@
-export const APP_VERSION = "2026-10-27.126 owner-contacts-epoch-fix";
+export const APP_VERSION = "2026-10-28.128 hr-104-resume-stats";

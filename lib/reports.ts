@@ -55,6 +55,14 @@ const CRM_BASE = "Yda8bPhWFaAuFisOJt9jsy2QpDf"; // 正式 CRM Base（跟進／�
 const V4 = "H7W6b0PFWaVF1BsgqXJj3pQ9pXb"; // 詠翔日報系統 V4
 const SALES_BASE = "JoOqbggsVar0ATsVgbcjh6IIp1g";
 const SALARY_BASE = "VwAsbezz9app3YsramgjduLYp2U"; // 薪水計算 Base
+const HR_POOL_BASE = "PQYybxyGHaQwIjsG7goj5gQSpte"; // 人事系統 · 01 招聘候選人池
+const HR_POOL_ALLOW = [
+  "應徵日期", "候選人", "職缺", "分派部門", "招聘階段", "104聯絡狀態",
+  "主管確認要不要面試（是否需要一面）", "是否需要一面", "主管可配合時段（請填 3 個）",
+  "約定面試時間", "會議連結", "面試評價與錄取結果(面試後)", "面試評價與錄取結果",
+  "面試會議紀錄（妙記）", "行政分派動作", "來源"
+];
+export const hrPoolField = (name: string) => HR_POOL_ALLOW.includes(name);
 const LARK_WEB = "https://yong-xiang-survey.jp.larksuite.com";
 
 // V4 inclusion baseline (PM decision 2026-10-13): V4 counts only from 2026-10-13
@@ -169,9 +177,15 @@ export const SOURCES: SourceDef[] = [
   { key: "report-delivery", name: "成果送出 / 業主回覆", note: "V3、V4 都未找到明確的成果送出或業主回覆紀錄表；N+123 期程規則未定。" },
   {
     key: "hr",
-    name: "招聘 / 出勤 / 出差",
-    url: `${LARK_WEB}/wiki/S9DnwFRi5iEplKkUJvpj2hv3pQc`,
-    note: "招聘候選人池含個人資料，可見範圍（D-09）核定前不接入；出勤／出差在 Lark 差勤與審批，不是多維表格。",
+    name: "人事系統：01 招聘候選人池（104履歷統計）",
+    baseToken: HR_POOL_BASE,
+    tableId: "tblIxj9iPY0fKFzF",
+    viewId: "vewMkRjOqx",
+    dateField: "應徵日期",
+    allowField: hrPoolField,
+    restricted: "hr",
+    url: tableUrl(HR_POOL_BASE, "tblIxj9iPY0fKFzF", "vewMkRjOqx"),
+    note: "串接 Lark Base《人事系統 · 01 招聘候選人池》（PQYybxyGHaQwIjsG7goj5gQSpte / tblIxj9iPY0fKFzF，預設視圖：👔 主管專用 vewMkRjOqx），自動排除黑名單封存紀錄，彙整 104 履歷統計與本週招聘進度。",
   },
   {
     key: "salary-overtime",
@@ -267,7 +281,7 @@ export const REPORTS: ReportDef[] = [
     name: "人事數據",
     purpose: "讓授權主管掌握招聘、出勤、出差與加班的營運狀態與待處理事項。",
     sources: ["hr", "salary-overtime", "v3-people"],
-    mustHave: ["招聘（暫無）", "出勤紀錄", "出差紀錄", "加班紀錄"],
+    mustHave: ["招聘（104履歷統計＋本週招聘進度）", "出勤紀錄（支援只顯示異常紅字）", "出差紀錄", "加班紀錄（支援按週／按月切換）"],
     pending: ["出勤、出差需開通 Lark 假勤／審批 API 權限", "可見範圍與敏感欄位（D-09）", "加班時數是成本單層級，非每人實際時數"],
   },
   {

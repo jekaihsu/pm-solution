@@ -56,16 +56,22 @@ function pick(cands: Cand[] | undefined): string | null {
   return groups.size === 1 ? [...groups][0] : null;
 }
 
+const GROUP_OVERRIDES: Record<string, string> = {
+  "吳科翰": "外業經理",
+  "張家彬": "控制",
+  "吳重樺": "控制",
+};
+
 export function buildPeopleDirectory(rows: PeopleRow[]): PeopleDirectory {
   const byId = new Map<string, Cand[]>(); // open_id → 候選
   const byName = new Map<string, Cand[]>(); // 姓名（完全相同）→ 候選
   const add = (m: Map<string, Cand[]>, key: string, c: Cand) => m.set(key, [...(m.get(key) ?? []), c]);
   for (const r of rows) {
-    const group = text(r.fields[PEOPLE_GROUP]);
+    const name = text(r.fields[PEOPLE_NAME]);
+    const group = (name && GROUP_OVERRIDES[name]) || text(r.fields[PEOPLE_GROUP]);
     if (!group) continue; // 名單上沒填所屬組別的人，不能拿來決定組別
     const cand = { group, active: r.fields[PEOPLE_ACTIVE] === true };
     for (const p of r.people?.[PEOPLE_ACCOUNT] ?? []) if (p.id) add(byId, p.id, cand);
-    const name = text(r.fields[PEOPLE_NAME]);
     if (name) add(byName, name, cand);
   }
   return {

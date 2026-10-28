@@ -62,6 +62,8 @@ export interface OtMonth {
 export interface OtSummary {
   months: string[]; // newest first
   byMonth: Map<string, OtMonth>;
+  weeks: string[]; // newest first；每個 key＝該週週一 YYYY-MM-DD（mondayOf）
+  byWeek: Map<string, OtMonth>; // 與 byMonth 同結構，只是以週（週一）分桶
   counted: number; // 已通过且有時數
   excludedStatus: number; // 未通过（審批中／已撤回／已拒絕…）
   excludedBy: { status: string; count: number }[]; // 被排除的筆數，依申請狀態分列（多到少）
@@ -80,6 +82,17 @@ export function monthOf(v: Cell): string {
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
   }
   return "（未填月份）";
+}
+
+const DAY_MS = 86400000;
+const TZ_MS = 8 * 3600000;
+// 該筆開始時間所在台北週的「週一」YYYY-MM-DD（與 lib/attendanceCore.weekDates 的週一算法一致）。
+// 非時間值（讀不到開始時間）歸「（未填週）」，與 monthOf 的「（未填月份）」對應。
+export function mondayOf(v: Cell): string {
+  if (typeof v !== "number") return "（未填週）";
+  const local = v + TZ_MS;
+  const idx = (new Date(local).getUTCDay() + 6) % 7; // 週一＝0
+  return new Date(Math.floor(local / DAY_MS) * DAY_MS - idx * DAY_MS).toISOString().slice(0, 10);
 }
 
 export const isWeekdayType = (t: string) => t === "平日";
@@ -146,9 +159,48 @@ export function teamSections(people: OtPerson[]): OtTeamSection[] {
   }));
 }
 
+// 計入的一筆（已通过且有時數）攤平後的資料：同時帶月份鍵與週鍵，之後各自分桶。
+interface OtEntry {
+  monthKey: string;
+  weekKey: string;
+  uid: string;
+  name: string;
+  group: string;
+  type: string;
+  h: number;
+  unmapped: boolean;
+}
+
+// 把攤平後的計入筆數依 keyOf 分桶，桶內口徑與原本「依月」完全相同：
+// 人員以 uid＋group 去重並累加平日／假日／待定義時數，組別總結與全部合計照 teamSummary。
+function bucketize(entries: OtEntry[], keyOf: (e: OtEntry) => string): Map<string, OtMonth> {
+  const acc = new Map<string, { people: Map<string, OtPerson>; unmapped: number }>();
+  for (const e of entries) {
+    const bk = keyOf(e);
+    const b = acc.get(bk) ?? { people: new Map<string, OtPerson>(), unmapped: 0 };
+    acc.set(bk, b);
+    if (e.unmapped) b.unmapped++;
+    const key = `${e.uid}\u0000${e.group}`;
+    const p = b.people.get(key) ?? { uid: e.uid, name: e.name, group: e.group, weekday: 0, holiday: 0, other: 0, total: 0, count: 0 };
+    b.people.set(key, p);
+    if (!e.type) p.other += e.h;
+    else if (isWeekdayType(e.type)) p.weekday += e.h;
+    else p.holiday += e.h;
+    p.total += e.h;
+    p.count++;
+  }
+  const out = new Map<string, OtMonth>();
+  for (const [bk, { people, unmapped }] of acc) {
+    const list = [...people.values()].sort((a, b) => b.total - a.total || byGroupName(a.name, b.name));
+    const { lines, all } = teamSummary(list);
+    out.set(bk, { people: list, teams: lines, all, total: all.total, unmapped });
+  }
+  return out;
+}
+
 // directory＝人員名單目錄；null＝沒讀到（組別一律「—」，不算未對應）。
 export function summarizeOvertime(records: OtRecord[], directory: PeopleDirectory | null): OtSummary {
-  const acc = new Map<string, { people: Map<string, OtPerson>; unmapped: number }>();
+  const entries: OtEntry[] = [];
   const excluded = new Map<string, number>();
   let counted = 0;
   let excludedStatus = 0;
@@ -170,39 +222,32 @@ export function summarizeOvertime(records: OtRecord[], directory: PeopleDirector
       continue;
     }
     counted++;
-    const month = monthOf(r.fields[OT_START]);
     const { who, fallback } = whoOf(r);
     if (fallback) fallbackToOvertimer++;
     if (who.length > 1) multiPerson++;
     const name = who.map((w) => w.name).filter(Boolean).join("、") || "—";
     const uid = who.length === 1 && who[0].id ? `id:${who[0].id}` : `name:${name}`;
     const group = directory ? (directory.groupFor(who) ?? UNMAPPED_GROUP) : NO_GROUP;
-    const type = text(r.fields[OT_TYPE]);
-    const mo = acc.get(month) ?? { people: new Map<string, OtPerson>(), unmapped: 0 };
-    acc.set(month, mo);
-    const people = mo.people;
-    if (group === UNMAPPED_GROUP) {
-      unmapped++;
-      mo.unmapped++;
-    }
-    const key = `${uid}\u0000${group}`;
-    const p = people.get(key) ?? { uid, name, group, weekday: 0, holiday: 0, other: 0, total: 0, count: 0 };
-    people.set(key, p);
-    if (!type) p.other += h;
-    else if (isWeekdayType(type)) p.weekday += h;
-    else p.holiday += h;
-    p.total += h;
-    p.count++;
+    const isUnmapped = group === UNMAPPED_GROUP;
+    if (isUnmapped) unmapped++;
+    entries.push({
+      monthKey: monthOf(r.fields[OT_START]),
+      weekKey: mondayOf(r.fields[OT_START]),
+      uid,
+      name,
+      group,
+      type: text(r.fields[OT_TYPE]),
+      h,
+      unmapped: isUnmapped,
+    });
   }
-  const byMonth = new Map<string, OtMonth>();
-  for (const [month, { people, unmapped: monthUnmapped }] of acc) {
-    const list = [...people.values()].sort((a, b) => b.total - a.total || byGroupName(a.name, b.name));
-    const { lines, all } = teamSummary(list);
-    byMonth.set(month, { people: list, teams: lines, all, total: all.total, unmapped: monthUnmapped });
-  }
+  const byMonth = bucketize(entries, (e) => e.monthKey);
+  const byWeek = bucketize(entries, (e) => e.weekKey);
   return {
     months: [...byMonth.keys()].sort().reverse(),
     byMonth,
+    weeks: [...byWeek.keys()].sort().reverse(),
+    byWeek,
     counted,
     excludedStatus,
     excludedBy: [...excluded].map(([status, count]) => ({ status, count })).sort((a, b) => b.count - a.count),

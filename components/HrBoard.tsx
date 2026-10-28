@@ -1,18 +1,31 @@
 "use client";
-import { CircleAlert, Clock, UserPlus } from "lucide-react";
+import { CircleAlert, Clock } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
-import { OT_APPLICANT, OT_HOURS, OT_HOURS_RAW, OT_START, OT_STATUS, OT_TYPE, summarizeOvertime, teamSections, type OtRecord, type OtTeamLine, type OtTeamSection } from "@/lib/overtime";
+import { OT_APPLICANT, OT_HOURS, OT_HOURS_RAW, OT_START, OT_STATUS, OT_TYPE, mondayOf, summarizeOvertime, teamSections, type OtRecord, type OtTeamLine, type OtTeamSection } from "@/lib/overtime";
 import { PEOPLE_GROUP, PEOPLE_NAME, buildPeopleDirectory, type PeopleRow } from "@/lib/people";
 import { weekName } from "@/lib/week";
 import { useShell } from "./AppShell";
 import AttendanceCards from "./AttendanceCards";
+import RecruitmentSection from "./RecruitmentSection";
 import { STATUS_TEXT, useSource, type SourceState } from "./useSource";
 
 const round1 = (n: number) => formatNumber(Math.round(n * 10) / 10);
 
 // 數字格：0 顯示「—」（平日／假日／類型待定義）；合計與卡片照實顯示。
 const h1 = (n: number) => (n ? round1(n) : "—");
+
+const OT_DAY = 86400000;
+// 週鍵（週一 YYYY-MM-DD）→ 可讀的週區間。full＝完整標題「2026-10-19 ～ 10-25（週）」；
+// 否則給按鈕用的短標「10-19～10-25」。非日期（未填週）原樣顯示。
+function weekRangeLabel(monday: string, full = false): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(monday)) return monday;
+  const start = Date.parse(`${monday}T00:00:00+08:00`);
+  const end = new Date(start + 6 * OT_DAY + 8 * 3600000);
+  const em = String(end.getUTCMonth() + 1).padStart(2, "0");
+  const ed = String(end.getUTCDate()).padStart(2, "0");
+  return full ? `${monday} ～ ${em}-${ed}（週）` : `${monday.slice(5)}～${em}-${ed}`;
+}
 
 // 組別總結（比照 R02 的 TeamSummary）：每組一列、最後全部合計；點組別列＝只看該組的人。
 function TeamTable({ teams, all, selected, hasOther, onPick }: { teams: OtTeamLine[]; all: OtTeamLine; selected: string | null; hasOther: boolean; onPick: (team: string | null) => void }) {
@@ -131,6 +144,13 @@ function PeopleTable({ sections, total, hasOther, team }: { sections: OtTeamSect
 
 function SalaryOvertime({ state, peopleState, weekStart }: { state: SourceState; peopleState: SourceState; weekStart: number }) {
   const [picked, setPicked] = useState<string | null>(null);
+  // 週會看上週／本週加班，所以預設「按週檢視」；一鍵切「按月檢視」。切換時清掉已選桶，
+  // 讓新模式回到預設對準（週＝上方週選擇器那一週、月＝那一週所在月份）。
+  const [viewMode, setViewMode] = useState<"week" | "month">("week");
+  const switchMode = (m: "week" | "month") => {
+    setViewMode(m);
+    setPicked(null);
+  };
   // 組別篩選（?otTeam=）放在網址上可分享；參數名避開 R02 的 ?team=。
   const [team, setTeam] = useState<string | null>(null);
   useEffect(() => setTeam(new URLSearchParams(window.location.search).get("otTeam")), []);
@@ -190,8 +210,17 @@ function SalaryOvertime({ state, peopleState, weekStart }: { state: SourceState;
   const { sum } = view;
   const d = new Date(weekStart + 8 * 3600000);
   const weekMonth = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-  const current = picked && sum.byMonth.has(picked) ? picked : sum.byMonth.has(weekMonth) ? weekMonth : sum.months[0];
-  const month = current ? sum.byMonth.get(current) : undefined;
+  const weekMonday = mondayOf(weekStart);
+  const byWeek = viewMode === "week";
+  const buckets = byWeek ? sum.byWeek : sum.byMonth;
+  const keys = byWeek ? sum.weeks : sum.months;
+  const preferred = byWeek ? weekMonday : weekMonth;
+  // 已選桶 → 上方週選擇器對準的桶 → 最近一個有已通過加班的桶（keys 由新到舊），
+  // 保證有資料時一打開就看得到真實數字。
+  const current = picked && buckets.has(picked) ? picked : buckets.has(preferred) ? preferred : keys[0];
+  const month = current ? buckets.get(current) : undefined;
+  const periodLabel = current ? (byWeek ? weekRangeLabel(current, true) : current) : "";
+  const chipLabel = (k: string) => (byWeek ? weekRangeLabel(k) : k);
   const hasOther = !!month?.all.other;
   // 選到的組別這個月沒有加班 → 當作沒篩（按鈕列只列有加班的組）。
   const activeTeam = month && sum.hasDirectory && team && month.teams.some((l) => l.group === team) ? team : null;
@@ -203,14 +232,22 @@ function SalaryOvertime({ state, peopleState, weekStart }: { state: SourceState;
       <div className="hr-src-head">
         詠翔加班
         <span className="muted small">
-          以月為單位（依開始時間）・只計申請狀態「已通过」・{month ? `${month.all.people} 人有加班` : "沒有已通过的加班"}
+          {byWeek ? "以週為單位（依開始時間）" : "以月為單位（依開始時間）"}・只計申請狀態「已通过」・{month ? `${periodLabel}・${month.all.people} 人有加班` : "沒有已通过的加班"}
         </span>
       </div>
-      {sum.months.length > 1 && (
-        <div className="cg-picker" role="group" aria-label="選擇月份">
-          {sum.months.slice(0, 12).map((m) => (
-            <button key={m} className={`cg-chip ${m === current ? "on" : ""}`} onClick={() => setPicked(m)} aria-pressed={m === current}>
-              {m}
+      <div className="cg-picker" role="group" aria-label="檢視方式">
+        <button className={`cg-chip ${byWeek ? "on" : ""}`} onClick={() => switchMode("week")} aria-pressed={byWeek}>
+          按週檢視
+        </button>
+        <button className={`cg-chip ${!byWeek ? "on" : ""}`} onClick={() => switchMode("month")} aria-pressed={!byWeek}>
+          按月檢視
+        </button>
+      </div>
+      {keys.length > 1 && (
+        <div className="cg-picker" role="group" aria-label={byWeek ? "選擇週" : "選擇月份"}>
+          {keys.slice(0, 12).map((k) => (
+            <button key={k} className={`cg-chip ${k === current ? "on" : ""}`} onClick={() => setPicked(k)} aria-pressed={k === current} title={byWeek ? weekRangeLabel(k, true) : k}>
+              {chipLabel(k)}
             </button>
           ))}
         </div>
@@ -223,10 +260,10 @@ function SalaryOvertime({ state, peopleState, weekStart }: { state: SourceState;
       {month && (
         <div className="kpis hr-kpis">
           <div className="kpi">
-            <div className="kpi-label">本月加班總時數</div>
+            <div className="kpi-label">{byWeek ? "本週加班總時數" : "本月加班總時數"}</div>
             <div className="kpi-value">{round1(month.all.total)}</div>
             <div className="kpi-sub">
-              {current}・平日 {round1(month.all.weekday)}・假日 {round1(month.all.holiday)}
+              {periodLabel}・平日 {round1(month.all.weekday)}・假日 {round1(month.all.holiday)}
             </div>
           </div>
           <div className="kpi">
@@ -267,23 +304,11 @@ function SalaryOvertime({ state, peopleState, weekStart }: { state: SourceState;
       </p>
       {sum.hasDirectory && (
         <p className="muted small">
-          人＝「發起人」（發起人空白才用「加班人」{sum.fallbackToOvertimer > 0 ? `，這樣的單 ${sum.fallbackToOvertimer} 張` : ""}）；組別依 V3 人員名單的所屬組別（公司組織架構）：先用發起人的 open_id 對人員名單的 Lark帳號，對不到時以姓名完全相同對。未對應組別 {month?.unmapped ?? 0} 張（{current ?? "本月"}；全部月份 {sum.unmapped} 張）：發起人不在人員名單、名單沒填所屬組別，或同名無法判斷。
+          人＝「發起人」（發起人空白才用「加班人」{sum.fallbackToOvertimer > 0 ? `，這樣的單 ${sum.fallbackToOvertimer} 張` : ""}）；組別依 V3 人員名單的所屬組別（公司組織架構）：先用發起人的 open_id 對人員名單的 Lark帳號，對不到時以姓名完全相同對。未對應組別 {month?.unmapped ?? 0} 張（{periodLabel || (byWeek ? "本週" : "本月")}；全部期間 {sum.unmapped} 張）：發起人不在人員名單、名單沒填所屬組別，或同名無法判斷。
           {sum.multiPerson > 0 ? `人填了多位的單 ${sum.multiPerson} 張，整張算一列、時數不拆分；這類單的人都同組才歸該組，否則歸未對應組別。` : ""}
         </p>
       )}
     </div>
-  );
-}
-
-function Pending({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
-  return (
-    <section className="hr-card">
-      <div className="hr-card-head">
-        {icon}
-        <h2>{title}</h2>
-      </div>
-      <div className="hr-pending">{children}</div>
-    </section>
   );
 }
 
@@ -294,9 +319,7 @@ export default function HrBoard() {
 
   return (
     <div className="hr">
-      <Pending icon={<UserPlus size={16} />} title="招聘">
-        <p>暫無。</p>
-      </Pending>
+      <RecruitmentSection />
 
       <AttendanceCards />
 
