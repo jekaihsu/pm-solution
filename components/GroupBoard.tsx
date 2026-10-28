@@ -6,10 +6,11 @@ import { buildDailyPersonRevenue, r02InspectionRows, COST_FIELDS, FIELD_COST_FIE
 import { inRange, resolveDateField } from "@/lib/metrics";
 import { sourceByKey, type DataVersion } from "@/lib/reports";
 import type { CellValue, TableData } from "@/lib/types";
-import { formatDate, weekName, weekdayCn } from "@/lib/week";
+import { formatDate, msToDateStr, weekName, weekdayCn } from "@/lib/week";
 import { useShell } from "./AppShell";
 import EmptyState from "./EmptyState";
 import { MOBILE, useMedia } from "./useMedia";
+import { leaveDaysByPerson, type LeaveDays } from "@/lib/attendanceCore";
 import OwnerProgress from "./OwnerProgress";
 import R02Sections from "./R02Sections";
 import { STATUS_TEXT, useSource } from "./useSource";
@@ -540,7 +541,7 @@ const num1 = (v: number | null, bad = false) => (v === null ? <span className="m
 // R02 組別總結：每個內業組別一列、圖報合計（圖報A＋圖報B）、最後全部合計。
 // 人數同一人跨組只算一次（圖報合計、全部合計去重）；張數、點數直接加總。永遠顯示全部組別，點一組＝只看該組的人。
 function DailyRevenue({ rows, wf, dateField, weekStart }: { rows: GroupRow[]; wf: WorkFields; dateField: string; weekStart: number }) {
-  const daily = buildDailyPersonRevenue(rows, wf, dateField, formatDate(weekStart));
+  const daily = buildDailyPersonRevenue(rows, wf, dateField, msToDateStr(weekStart));
   const line = (label: string, values: { days: number[]; weekTotal: number; totalQty: number }) => <tr className="cg-team"><td>{label}</td>{values.days.map((v, i) => <td key={i}>{num1(v)}</td>)}<td>{num1(values.weekTotal)}</td><td>{num1(values.totalQty)}</td></tr>;
   return <section className="cg"><h3>1. 內業每天／週各人營業額點數（週一～週日）</h3><div className="cg-sheet"><table><thead><tr><th>組別／人員</th>{["一", "二", "三", "四", "五", "六", "日"].map((d, i) => <th key={d}>週{d} ({formatDate(weekStart + i * 86400000).slice(5)})</th>)}<th>當週營業額合計</th><th>執行工作數量</th></tr></thead><tbody>{daily.teams.map((t) => <Fragment key={t.team}>{line(`${t.team}小計`, t)}{t.people.map((p) => <tr key={p.row.key ?? p.row.group}><td>{p.row.group}</td>{p.days.map((v, i) => <td key={i}>{num1(v)}</td>)}<td>{num1(p.weekTotal)}</td><td>{num1(p.totalQty)}</td></tr>)}</Fragment>)}{daily.reportTotal && line("圖報合計", daily.reportTotal)}</tbody><tfoot>{line("全部內業合計", { days: daily.grandDays, weekTotal: daily.grandTotal, totalQty: daily.totalQty })}</tfoot></table></div></section>;
 }
@@ -745,16 +746,15 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const work = useSource(cfg.workKey(version), { fields: WORK_FIELDS, links: true });
   // Hooks run unconditionally; boards without a cost sheet reuse the work key (cached).
   const cost = useSource(cfg.costKey ? cfg.costKey(version) : cfg.workKey(version), { fields: cfg.costKey ? COST_FIELDS : WORK_FIELDS, links: true });
-  const crew = useSource(cfg.crewKey ? cfg.crewKey(version) : cfg.workKey(version), { fields: cfg.crewKey ? FIELD_COST_FIELDS : WORK_FIELDS, links: true });
+  const crew = useSource(cfg.crewKey ? cfg.crewKey(version) : cfg.workKey(version), { fields: FIELD_COST_FIELDS, links: true, enabled: Boolean(cfg.crewKey) });
   const sched = useSource(cfg.scheduleKey(version), { fields: SCHEDULE_FIELDS, links: true });
-  const v3Cost = useSource("v3-internal-cost", { fields: COST_FIELDS, links: true });
   const rosterSource = useSource("v3-people", { fields: ["姓名", "所屬組別", "在職"], enabled: cfg.unit === "person" });
-  const [leaveDays, setLeaveDays] = useState<Record<string, {date:string;kind:string}[]>>({});
+  const [leaveDays, setLeaveDays] = useState<LeaveDays>({});
   useEffect(() => {
     if (cfg.unit !== "person") return;
     let cancelled = false;
     setLeaveDays({});
-    fetch(`/api/attendance/leave?start=${formatDate(week.start)}&end=${formatDate(week.end - 86400000)}`)
+    fetch(`/api/attendance/leave?start=${msToDateStr(week.start)}&end=${msToDateStr(week.end - 86400000)}`)
       .then(r => r.ok ? r.json() : null).then(j => { if (!cancelled) setLeaveDays(j?.status === "ok" ? j.days ?? {} : {}); })
       .catch(() => { if (!cancelled) setLeaveDays({}); });
     return () => { cancelled = true; };
@@ -873,8 +873,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   // R02 選了內業組別（或圖報合計）：下方人員表、每日出錯、失誤率明細都只看該組的人；組別總結仍列全部組別。
   const rows = byPerson ? filterByTeam(allRows, team) : allRows;
   const roster = (rosterSource.data?.records ?? []).filter(r => r.fields["在職"] === true).map(r => ({name: text(r.fields["姓名"]), team: text(r.fields["所屬組別"]), id:r.id})).filter(r => !team || r.team === team || (team === REPORT_MERGED && /^圖報[AB]$/.test(r.team)));
-  const leave: Record<string, Record<string,string>> = {};
-  for (const r of [...roster, ...allRows.map(r => ({name:r.group, team:r.team ?? "", id:r.personId ?? ""}))]) for (const d of leaveDays[r.id] ?? []) (leave[r.name] ??= {})[d.date] = d.kind;
+  const leave = leaveDaysByPerson(leaveDays);
   const totals = rows.reduce(
     (t, r) => ({ orders: t.orders + r.orders.length, revenue: t.revenue + r.revenue, pass: t.pass + r.pass, fail: t.fail + r.fail, anomaly: t.anomaly + r.anomalyCount }),
     { orders: 0, revenue: 0, pass: 0, fail: 0, anomaly: 0 },
@@ -1186,7 +1185,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
       )}
 
       {!focus && byPerson && <DailyRevenue rows={rows} wf={wf} dateField={dateField} weekStart={week.start} />}
-      {!focus && byPerson && <R02Sections rows={rows} wf={wf} dateField={dateField} sched={sched.data} cost={cost.data} v3Cost={version === "v4" ? v3Cost.data : undefined} sf={sf} start={week.start} end={week.end} leave={leave} roster={roster} />}
+      {!focus && byPerson && <R02Sections rows={rows} wf={wf} dateField={dateField} sched={sched.data} cost={cost.data} sf={sf} start={week.start} end={week.end} leave={leave} roster={roster} projectProgress={cfg.ownerProgress ? <OwnerProgress data={view.data} wf={wf} dateField={view.dateField} weekStart={week.start} weekEnd={week.end} /> : null} />}
       {!focus && byPerson && allRows.length > 0 && <TeamSummary lines={summary} selected={team} planOn={planOn} wf={wf} ff={ff} hasCheck={hasCheck} hasFix={hasFix} onPick={(t) => pickTeam(t)} />}
 
       {!focus && rows.length > 0 && layout === "sheet" && <SheetTable rows={rows} planOn={planOn} wf={wf} ff={ff} hasCheck={hasCheck} hasFix={hasFix} onPick={(g) => pick(g)} />}
@@ -1217,7 +1216,6 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
         {view.records.length > 0 && ` 資料至 ${formatDate(Math.max(...view.records.map((r) => (r.fields[view.dateField] as number) ?? 0)))}。`}
       </p>
 
-      {byPerson && cfg.ownerProgress && !focus && <OwnerProgress data={view.data} wf={wf} dateField={view.dateField} weekStart={week.start} weekEnd={week.end} />}
     </section>
   );
 }

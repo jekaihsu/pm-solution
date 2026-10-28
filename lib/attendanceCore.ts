@@ -425,6 +425,27 @@ export interface AttendanceView {
   recordCounts: { trips: number; outs: number };
   notes: AttendanceNotes;
 }
+// R02 receives only leave dates, keyed by the same names used by its work rows.
+export type LeaveDays = Record<string, { date: string; kind: "full" | "half" }[]>;
+
+export function attendanceLeaveDays(view: Pick<AttendanceView, "people" | "days">): { status: "ok"; days: LeaveDays } {
+  const days: LeaveDays = Object.create(null);
+  for (const person of view.people) {
+    person.days.forEach((code, index) => {
+      const date = view.days[index]?.date;
+      if (!date || (code !== "leave" && !code.startsWith("leave-half"))) return;
+      (days[person.name] ??= []).push({ date, kind: code === "leave" ? "full" : "half" });
+    });
+  }
+  return { status: "ok", days };
+}
+
+export function leaveDaysByPerson(days: LeaveDays): Record<string, Record<string, "full" | "half">> {
+  return Object.fromEntries(Object.entries(days).map(([name, entries]) => [
+    name, Object.fromEntries(entries.map(({ date, kind }) => [date, kind])),
+  ]));
+}
+
 export type AttendanceResponse =
   | AttendanceView
   | { status: "needs-permission"; missing: string[]; hint: string }

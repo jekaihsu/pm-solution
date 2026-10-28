@@ -266,7 +266,7 @@ export const REPORTS: ReportDef[] = [
     slug: "r02",
     name: "內業檢查",
     purpose: "檢查內業實際數量、工項及產值差異，另向業主呈現進度。",
-    sources: ["v3-internal-work", "v3-internal-cost", "v4-internal-work", "v4-internal-cost"],
+    sources: ["v3-internal-work", "v3-internal-cost", "v4-internal-work", "v4-internal-cost", "v4-cases", "v4-contract-items", "v4-report-items"],
     mustHave: ["每組營業額", "失誤率", "異常", "工作項目／編號／數量", "預排差異", "SOP", "業主進度（百分比／天數）"],
     pending: ["內業工項換算（D-02）", "失誤率分母（D-04）", "業主進度百分比分母與剩餘天數算法"],
   },

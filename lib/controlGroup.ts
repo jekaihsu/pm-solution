@@ -677,7 +677,7 @@ export const SCHEDULE_FIELDS = [
 
 // R02 daily points use the same work-date and revenue fields as the existing person rows.
 export function buildDailyPersonRevenue(rows: GroupRow[], wf: WorkFields, dateField: string | null, weekStart: string) {
-  const start = Date.parse(`${weekStart}T00:00:00+08:00`);
+  const start = Date.parse(`${weekStart.replaceAll("/", "-")}T00:00:00+08:00`);
   const days = () => [0, 0, 0, 0, 0, 0, 0] as [number, number, number, number, number, number, number];
   const people = rows.map((row) => {
     const daily = days(); let totalQty = 0;
@@ -733,7 +733,7 @@ const extractCaseCode = (raw: string) => {
   const s = raw.trim(); const match = s.match(/([A-Z]\d{6}|\b1\d{5}\b)/i);
   return match ? (match[1].toUpperCase() === "C000000" ? "" : match[1].toUpperCase()) : s;
 };
-const isoOffset = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY).toISOString().slice(0,10);
+const isoOffset = (day: string, n: number) => { const ms = Date.parse(`${day.replaceAll("/", "-")}T00:00:00Z`); return Number.isFinite(ms) ? new Date(ms + n * DAY).toISOString().slice(0,10) : ""; };
 const dateIso = (v: CellValue | undefined) => {
   if (typeof v === "string" && /^\d{4}[-/]\d{2}[-/]\d{2}/.test(v)) return v.slice(0,10).replaceAll("/","-");
   const t = typeof v === "number" ? (v < 1e11 ? v * 1000 : v) : Date.parse(text(v));
@@ -762,13 +762,14 @@ export function buildInternalScheduleExecution(scheduleRecords: TableData["recor
   const plannedCases=[...map.values()].map(p=>({...p,executed:p.actualOrders>0})), executedPlannedCaseCount=plannedCases.filter(p=>p.executed).length;
   return {plannedCases,plannedCaseCount:plannedCases.length,executedPlannedCaseCount,executionRate:plannedCases.length ? executedPlannedCaseCount/plannedCases.length : null,extraWorkOrders,extraWorkOrderCount:extraWorkOrders.length,extraRevenue:extraWorkOrders.reduce((s,o)=>s+o.revenue,0),extraQty:extraWorkOrders.reduce((s,o)=>s+o.qty,0)};
 }
-export function buildPersonAttendanceAndBackfill(rows: GroupRow[], costRecordsInWeek: TableData["records"], wf: WorkFields, dateField: string | null, weekStartIso: string, todayIso: string, leaveByPerson: Record<string,Record<string,string>> = {}, rosterStaff: Array<{name:string;team:string}> = []) {
-  void wf; const workdays=[0,1,2,3,4].map(i=>isoOffset(weekStartIso,i)).filter(d=>d<=todayIso), end=isoOffset(weekStartIso,6);
+export function buildPersonAttendanceAndBackfill(rows: GroupRow[], costRecordsInWeek: TableData["records"], wf: WorkFields, dateField: string | null, weekStartIsoRaw: string, todayIsoRaw: string, leaveByPerson: Record<string,Record<string,string>> = {}, rosterStaff: Array<{name:string;team:string}> = []) {
+  void wf; const weekStartIso=weekStartIsoRaw.replaceAll("/","-"), todayIso=todayIsoRaw.replaceAll("/","-"); const workdays=[0,1,2,3,4].map(i=>isoOffset(weekStartIso,i)).filter(d=>d && d<=todayIso), end=isoOffset(weekStartIso,6);
   const combined=[...rows]; for(const p of rosterStaff) if (isInternalTeamName(p.team) && !combined.some(r=>r.group===p.name)) combined.push({...blankRow(p.name),team:p.team});
   const costById=new Map(costRecordsInWeek.map(r=>[r.id,r]));
   const people=combined.filter(row=>isInternalTeamName(row.team ?? "")).map(row=>{ const costs=costRecordsInWeek.filter(r=>names(r.fields["填報人"]).includes(row.group)); const dates=new Set<string>(); const add=(v:CellValue|undefined)=>{const d=dateIso(v); if(d>=weekStartIso && d<=end) dates.add(d);};
     row.orders.forEach(r=>add((dateField ? r.fields[dateField] : null) ?? r.fields[JOINED_DATE] ?? r.fields["日期"])); costs.forEach(r=>add(r.fields["工作日期"] ?? r.fields["日期"]));
     let before1030Count=0,after1030Count=0; const linked=new Set<string>();
+    // V4 cost sheets bulk-cloned on 2026-08-11 give work before 2026-08-10 a clone timestamp, not a submission time (#105/#140).
     const count=(r:TableData["records"][number],cost?:TableData["records"][number])=>{const d=dateIso((dateField ? r.fields[dateField] : null) ?? r.fields[JOINED_DATE] ?? r.fields["日期"] ?? cost?.fields["工作日期"]); if(!d || d<weekStartIso || d>end) return; const dayStart=Date.parse(`${d}T00:00:00+08:00`); const valid=(t:number)=>Number.isFinite(t) && t>=dayStart; const workTime=submittedTime(r.fields["填報時間"]), costTime=submittedTime(cost?.fields["填報時間"]); const cloned=(t:number)=>d<"2026-08-10" && dateIso(t)==="2026-08-11"; const isCost=costById.has(r.id); const t=!isCost && valid(workTime) ? workTime : isCost && valid(workTime) && !cloned(workTime) ? workTime : valid(costTime) && !cloned(costTime) ? costTime : NaN; const e=Date.parse(`${d}T23:59:59.999+08:00`), cutoff=Date.parse(`${isoOffset(d,1)}T10:30:00.000+08:00`); if(t>cutoff) after1030Count++; else if(t>e || (!Number.isFinite(t) && text(r.fields["⚠補填"] ?? cost?.fields["⚠補填"]))) before1030Count++;};
     for(const r of row.orders){const id=r.links?.["所屬成本單"]?.[0]; if(id) linked.add(id); count(r,id ? costById.get(id) : undefined);} for(const c of costs) if(!linked.has(c.id) && !row.orders.some(r=>dateIso((dateField ? r.fields[dateField] : null) ?? r.fields[JOINED_DATE])===dateIso(c.fields["工作日期"]))) count(c);
     const actualWorkDays=dates.size, dailyAvgRevenue=actualWorkDays ? row.revenue/actualWorkDays : null, missingDates=EXEMPT_DAILY_REPORT_NAMES.has(row.group)?[]:workdays.filter(d=>!dates.has(d) && !leaveByPerson[row.group]?.[d]);
