@@ -64,9 +64,8 @@ test('出勤 API 姓名格式串接 R02：全日與各種半日假排除未填�
 // and throwing RangeError after the first successful source response.
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import R02SectionsModule from '../components/R02Sections.tsx';
-// tsx exposes CommonJS TSX default exports through a namespace in this Node environment.
-const R02Sections = R02SectionsModule.default ?? R02SectionsModule;
+import sectionsModule from '../components/R02Sections.tsx';
+const R02Sections = sectionsModule.default ?? sectionsModule;
 globalThis.React = React;
 test('R02 loaded component renders ISO dates without the page-wide Invalid time value crash', () => {
   const html = renderToStaticMarkup(React.createElement(R02Sections, {

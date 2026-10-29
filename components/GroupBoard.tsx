@@ -1,8 +1,10 @@
 "use client";
+import { currentRosterRows } from "@/lib/r02People";
+import R02ReturnedInspection from "./R02ReturnedInspection";
 import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, CircleAlert, CircleCheck, Minus } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { formatNumber } from "@/lib/aggregate";
-import { buildDailyPersonRevenue, r02InspectionRows, COST_FIELDS, FIELD_COST_FIELDS, JOINED_DATE, keepFieldSchedule, keepInternalSchedule, planDiffTotals, personRows, plannedByPerson, resolvePersonScheduleFields, splitCrews, sumRows, teamSections, teamSummary, filterByTeam, REPORT_MERGED, REPORT_MERGED_LABEL, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, dayOfWeek, errorRate, fixDiffs, groupRows, orderNotes, violatesSop, joinInternal, plannedPoints, resolveFixFields, resolveScheduleFields, resolveWorkFields, type FixFields, type GroupRow, type ScheduleFields, type TeamSummaryLine, type WorkFields } from "@/lib/controlGroup";
+import { buildDailyPersonRevenue, COST_FIELDS, FIELD_COST_FIELDS, JOINED_DATE, keepFieldSchedule, keepInternalSchedule, planDiffTotals, personRows, plannedByPerson, resolvePersonScheduleFields, splitCrews, sumRows, teamSections, teamSummary, filterByTeam, REPORT_MERGED, REPORT_MERGED_LABEL, SCHEDULE_FIELDS, WORK_FIELDS, anomalies, classifyCheck, dayOfWeek, errorRate, fixDiffs, groupRows, orderNotes, violatesSop, joinInternal, plannedPoints, resolveFixFields, resolveScheduleFields, resolveWorkFields, type FixFields, type GroupRow, type ScheduleFields, type TeamSummaryLine, type WorkFields } from "@/lib/controlGroup";
 import { inRange, resolveDateField } from "@/lib/metrics";
 import { sourceByKey, type DataVersion } from "@/lib/reports";
 import type { CellValue, TableData } from "@/lib/types";
@@ -748,7 +750,8 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const cost = useSource(cfg.costKey ? cfg.costKey(version) : cfg.workKey(version), { fields: cfg.costKey ? COST_FIELDS : WORK_FIELDS, links: true });
   const crew = useSource(cfg.crewKey ? cfg.crewKey(version) : cfg.workKey(version), { fields: FIELD_COST_FIELDS, links: true, enabled: Boolean(cfg.crewKey) });
   const sched = useSource(cfg.scheduleKey(version), { fields: SCHEDULE_FIELDS, links: true });
-  const rosterSource = useSource("v3-people", { fields: ["姓名", "所屬組別", "在職"], enabled: cfg.unit === "person" });
+  const casesSource = useSource(`${version}-cases`, { fields: ["案件編號", "案件名稱", "工程編號", "工程名稱"], links: true, enabled: cfg.unit === "person" });
+  const rosterSource = useSource("v3-people", { fields: ["姓名", "Lark帳號", "所屬組別", "在職"], people: true, enabled: cfg.unit === "person" });
   const [leaveDays, setLeaveDays] = useState<LeaveDays>({});
   useEffect(() => {
     if (cfg.unit !== "person") return;
@@ -872,6 +875,8 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const byPerson = cfg.unit === "person";
   // R02 選了內業組別（或圖報合計）：下方人員表、每日出錯、失誤率明細都只看該組的人；組別總結仍列全部組別。
   const rows = byPerson ? filterByTeam(allRows, team) : allRows;
+  const currentPeople = currentRosterRows(allRows, rosterSource.data?.records ?? []);
+  const dailyRows = filterByTeam(currentPeople.rows, team);
   const roster = (rosterSource.data?.records ?? []).filter(r => r.fields["在職"] === true).map(r => ({name: text(r.fields["姓名"]), team: text(r.fields["所屬組別"]), id:r.id})).filter(r => !team || r.team === team || (team === REPORT_MERGED && /^圖報[AB]$/.test(r.team)));
   const leave = leaveDaysByPerson(leaveDays);
   const totals = rows.reduce(
@@ -1184,8 +1189,8 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
         </div>
       )}
 
-      {!focus && byPerson && <DailyRevenue rows={rows} wf={wf} dateField={dateField} weekStart={week.start} />}
-      {!focus && byPerson && <R02Sections rows={rows} wf={wf} dateField={dateField} sched={sched.data} cost={cost.data} sf={sf} start={week.start} end={week.end} leave={leave} roster={roster} projectProgress={cfg.ownerProgress ? <OwnerProgress data={view.data} wf={wf} dateField={view.dateField} weekStart={week.start} weekEnd={week.end} /> : null} />}
+      {!focus && byPerson && (rosterSource.status === "ok" ? <><DailyRevenue rows={dailyRows} wf={wf} dateField={dateField} weekStart={week.start} />{currentPeople.excluded > 0 && <p className="muted small">人員名單未能確認在職身分的 {currentPeople.excluded} 張工作單未列於第 1 項。</p>}</> : <p className="muted small">人員名單讀取中或無法讀取，第 1 項暫不顯示。</p>)}
+      {!focus && byPerson && <R02Sections rows={rows} wf={wf} dateField={dateField} sched={sched.data} cost={cost.data} cases={casesSource.data} sf={sf} start={week.start} end={week.end} leave={leave} roster={roster} projectProgress={cfg.ownerProgress ? <OwnerProgress data={view.data} wf={wf} dateField={view.dateField} weekStart={week.start} weekEnd={week.end} /> : null} />}
       {!focus && byPerson && allRows.length > 0 && <TeamSummary lines={summary} selected={team} planOn={planOn} wf={wf} ff={ff} hasCheck={hasCheck} hasFix={hasFix} onPick={(t) => pickTeam(t)} />}
 
       {!focus && rows.length > 0 && layout === "sheet" && <SheetTable rows={rows} planOn={planOn} wf={wf} ff={ff} hasCheck={hasCheck} hasFix={hasFix} onPick={(g) => pick(g)} />}
@@ -1198,17 +1203,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
 
       {!focus && rows.length > 0 && hasFix && <DayGrid rows={rows} ff={ff} dateField={dateField} weekStart={week.start} weekEnd={week.end} onPick={(g, d) => pick(g, d)} />}
 
-      {byPerson && !focus && (() => {
-        const inspection = r02InspectionRows(rows.flatMap((row) => row.orders), wf, dateField);
-        const value = (n: number | null) => n === null ? "—" : formatNumber(n);
-        return <section className="cg">
-          <div className="cg-head"><div><h2>6. 雅雯檢核表｜內業工作單執行數量與檢核退回狀態</h2>
-          <p className="muted small">總工作單數 {inspection.length}・已通過 {inspection.filter((r) => r.reviewStatus === "已通過").length}・已退回 {inspection.filter((r) => r.isReturned).length}・待檢核 {inspection.filter((r) => r.reviewStatus === "待檢核").length}・執行工作總數量 {formatNumber(inspection.reduce((s, r) => s + (r.executedQty ?? 0), 0))}</p></div></div>
-          <div className="cg-table"><table><thead><tr>{["工作單號", "工作日期", "填報人", "組別", "案件編號", "內業工項", "執行工作數量", "計價數量", "修改後數量", "營業額點數", "修改後營業額", "檢核狀態", "退回原因 / 修正欄位"].map((h) => <th key={h}>{h}</th>)}</tr></thead><tbody>
-          {inspection.map((r) => <tr key={r.id}><td>{r.workOrderNo || "—"}</td><td>{r.date || "—"}</td><td>{r.people || "—"}</td><td>{r.group || "—"}</td><td>{r.caseCode || "—"}</td><td>{r.workItem || "—"}</td><td>{value(r.executedQty)}</td><td>{value(r.pricingQty)}</td><td>{value(r.modifiedQty)}</td><td>{value(r.revenuePoints)}</td><td>{value(r.modifiedRevenue)}</td><td><span className="tag">{r.reviewStatus}</span></td><td>{[r.returnReason, r.modifiedQty !== null ? "修改後數量" : "", r.modifiedRevenue !== null ? "修改後營業額" : ""].filter(Boolean).join("、") || "—"}</td></tr>)}
-          </tbody></table></div>
-        </section>;
-      })()}
+      {byPerson && !focus && <R02ReturnedInspection orders={rows.flatMap(row => row.orders)} wf={wf} dateField={dateField} />}
 
       <p className="cg-foot">
         失誤率＝{cfg.checkLabel}「不通過」÷ 已檢核（未檢核不計）。{byPerson ? `一列一個人（內業成本單的填報人），依成本單的內業組別分段，每組一列小計；同一人在不同內業組別填單時，每組各一列。預排點數＝預排表${cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}依「人員＋日期」比對（組別不參與，預排「人員」欄多人逐人展開，休假條不算），有填「預估營業額點數」就分攤到每天，未填以每人每天 1 點計（同人同日多條只算一次，標 *）；預排日期認欄位 id，不看欄名。` : `預排點數＝預排表${cfg.scheduleTradeLabel ? `（${cfg.scheduleTradeLabel}）` : ""}點數欄，未填以每組每天 1 點計（標 *）。`}差異＝營業額點數（原值）− 預排點數。
