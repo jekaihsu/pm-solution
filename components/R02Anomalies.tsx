@@ -1,59 +1,38 @@
-import React from "react";
-import { anomalies, classifyCheck, violatesSop, type GroupRow, type WorkFields, type buildInternalScheduleExecution, type buildPersonAttendanceAndBackfill } from "@/lib/controlGroup";
+"use client";
+import React, { useState } from "react";
+import { buildR02Anomalies, visibleTags, errorSummary, type AnomalyInput, type AnomalyPerson, type AnomalyTag } from "@/lib/r02AnomalyRules";
 
-type Props = {
-  rows?: GroupRow[];
-  wf?: WorkFields;
-  comparison?: ReturnType<typeof buildInternalScheduleExecution>;
-  attendance?: ReturnType<typeof buildPersonAttendanceAndBackfill>;
-  notes?: string[];
-  comparisonReady?: boolean;
-  attendanceReady?: boolean;
-};
-
-// Reuse the same order flags, schedule comparison and attendance results as the numbered sections.
-export default function R02Anomalies({ rows = [], wf, comparison, attendance, notes = [], comparisonReady = notes.length === 0, attendanceReady = notes.length === 0 }: Props) {
-  const groups = new Map<string, string[]>();
-  const group = (team: string) => {
-    const name = team || "（未填組別）";
-    if (!groups.has(name)) groups.set(name, []);
-    return groups.get(name)!;
-  };
-  const extraIds = new Set(comparison?.extraWorkOrders.map(order => order.id));
-  for (const row of rows) {
-    const issues = group(row.team ?? row.group);
-    for (const order of row.orders) {
-      if (!wf) continue;
-      const labels = anomalies(order, wf);
-      const status = String(order.fields[wf.status?.name ?? "檢核狀態"] ?? "").trim();
-      if (status === "已退回") labels.push(`已退回：${order.fields["退回原因"] || "未填退回原因"}`);
-      else if (classifyCheck(order, wf) === "fail") labels.push("檢核不通過");
-      if (violatesSop(order, wf)) labels.push("違反 SOP");
-      if (extraIds.has(order.id) && comparisonReady) labels.push("多增加的工作單");
-      if (labels.length) issues.push(`${row.group}・${order.fields[wf.orderNo?.name ?? "工作單號"] || order.id}：${labels.join("、")}`);
-    }
-  }
-  for (const person of attendance?.people ?? []) {
-    const issues = group(person.team);
-    // An incomplete source must not be presented as a confirmed missing report.
-    if (attendanceReady && person.missingReportDays) issues.push(`${person.person}：未填日報 ${person.missingReportDays} 天（${person.missingDates.join("、")}）`);
-    if (attendanceReady && person.after1030Count) issues.push(`${person.person}：超過次日 10:30 逾時補填 ${person.after1030Count} 件`);
-  }
-  const abnormal = [...groups].filter(([, issues]) => issues.length);
-  const normal = [...groups].filter(([, issues]) => !issues.length);
-  return <section className="cg" aria-label="異常／需人工確認" style={{ border: "1px solid #fca5a5", background: "#fff7f7" }}>
-    <h2 style={{ color: "#991b1b" }}>異常／需人工確認</h2>
-    {notes.map(note => <p key={note} role="status">{note}</p>)}
-    {!abnormal.length && <p>{notes.length ? "資料未齊，異常狀態待確認。" : "目前範圍內無異常。"}</p>}
-    {abnormal.map(([team, issues]) => <div key={team} data-anomaly-group={team} style={{ color: "#991b1b" }}>
-      <h3>{team}・需人工確認 {issues.length} 項</h3>
-      <ul>{issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>
-    </div>)}
-    <details key={normal.map(([team]) => team).join("|")} data-normal-groups>
-      <summary>{notes.length ? "待確認組別" : "無異常的組別"}（{normal.length} 組）</summary>
-      {normal.map(([team]) => <p key={team}>{team}：{notes.length ? "資料未齊，待確認" : "無異常"}</p>)}
-      {!normal.length && <p>目前沒有{notes.length ? "待確認" : "無異常的"}組別。</p>}
-    </details>
-    <p className="muted small">依工作單異常欄位、檢核狀態、SOP、預排案件比對及第 5 項未填／逾時補填統計彙整；多增加工作單列為需人工確認。</p>
+type Props = AnomalyInput & { notes?: string[]; onInspectPerson?: (name:string)=>void };
+function Tag({tag}:{tag:AnomalyTag}) {
+  return <span data-rule={tag.rule} data-severity={tag.severity}>{tag.text.split(/(\d+(?:\.\d+)?)/g).map((part,i)=>i%2 ? <strong key={i} style={{color:tag.severity ? '#b91c1c' : 'inherit',fontWeight:600}}>{part}</strong> : part)}</span>;
+}
+function PersonLine({person,onInspect}:{person:AnomalyPerson;onInspect?:()=>void}) {
+  const [expanded,setExpanded]=useState(false);
+  const tags:AnomalyTag[]=[...person.tags];
+  if (person.dataRepair) tags.push({rule:'repair',severity:0,text:'資料待修'});
+  const vis=visibleTags(tags);
+  const severe=person.tags.some(t=>t.severity===2), warning=person.tags.some(t=>t.severity===1);
+  return <li className="r02-anomaly-line" data-anomaly-person={person.name}>
+    <span aria-label={severe?'嚴重':warning?'提醒':'資訊'}>{severe?'●':warning?'○':'·'}</span>
+    <strong className="r02-anomaly-name">{person.name}</strong>
+    <div className="r02-anomaly-sentence">{(expanded?[...vis.shown,...tags.filter(t=>!vis.shown.includes(t))]:vis.shown).map((tag,i)=><React.Fragment key={`${tag.rule}-${i}`}>{i>0 && <span className="r02-anomaly-separator"> ｜ </span>}<span style={tag.rule==='repair'?{color:'#64748b',background:'#f1f5f9',padding:'3px 8px',borderRadius:4}:undefined}><Tag tag={tag}/></span></React.Fragment>)}{vis.hidden>0 && <button type="button" aria-label={expanded?'收合標籤':`${person.name} 還有 ${vis.hidden} 個標籤`} aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?'收合':'…'}</button>}</div>
+    {onInspect && <button className="r02-anomaly-action" type="button" onClick={onInspect}>看工作單</button>}
+  </li>;
+}
+export default function R02Anomalies({onInspectPerson,notes=[],comparisonReady=notes.length===0,attendanceReady=notes.length===0,...props}:Props) {
+  const [expanded,setExpanded]=useState(false);
+  const result=buildR02Anomalies({...props,comparisonReady,attendanceReady});
+  const empty=!result.people.length&&!result.shared.length;
+  return <section className="cg r02-anomalies" aria-label="異常／需人工確認">
+    {empty&&!notes.length ? <p>本週 {result.totalPeople} 人全部正常</p> : <>
+      <h2>本週需要你看的（{result.people.filter(p=>p.tags.length).length} 人）</h2>
+      <p className="r02-anomaly-legend">● 嚴重　○ 提醒　· 資訊</p>
+      {notes.map(note=><p key={note} role="status">{note}</p>)}
+      {empty&&notes.length>0&&<p>資料未齊，異常狀態待確認。</p>}
+      <ul className="r02-anomaly-list">{(expanded?result.people:result.people.slice(0,10)).map(p=><PersonLine key={p.name} person={p} onInspect={onInspectPerson && props.rows?.some(r=>r.group===p.name && r.orders.length) ? ()=>onInspectPerson(p.name) : undefined}/>)}</ul>
+      {result.people.length>10&&<button type="button" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?'收合人員':`還有 ${result.people.length-10} 人`}</button>}
+      {result.shared.length>0&&<details className="r02-anomaly-shared" open><summary>整體／案件提醒（{result.shared.length} 項；未指定個人）</summary><ul className="r02-anomaly-list">{result.shared.map((p,i)=><PersonLine key={i} person={p}/>)}</ul></details>}
+    </>}
+    {result.errorCount>0&&<details className="r02-anomaly-errors"><summary>{errorSummary(result)} — 工程處理</summary><p>同一張工作單可能同時有多項錯誤。資料待修者的效率與營業額需一併確認。</p></details>}
   </section>;
 }

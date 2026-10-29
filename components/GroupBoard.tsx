@@ -751,6 +751,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const cost = useSource(cfg.costKey ? cfg.costKey(version) : cfg.workKey(version), { fields: cfg.costKey ? COST_FIELDS : WORK_FIELDS, links: true });
   const crew = useSource(cfg.crewKey ? cfg.crewKey(version) : cfg.workKey(version), { fields: FIELD_COST_FIELDS, links: true, enabled: Boolean(cfg.crewKey) });
   const sched = useSource(cfg.scheduleKey(version), { fields: SCHEDULE_FIELDS, links: true });
+  const anomalyDueCases = useSource("v4-cases", { fields: ["工程編號", "所屬案件", "工編淨", "工程確認單編號", "契約迄日"], links: true, enabled: cfg.unit === "person" });
   const casesSource = useSource(`${version}-cases`, { fields: ["案件編號", "案件名稱", "工程編號", "工程名稱"], links: true, enabled: cfg.unit === "person" });
   const rosterSource = useSource("v3-people", { fields: ["姓名", "Lark帳號", "所屬組別", "在職"], people: true, enabled: cfg.unit === "person" });
   const [leaveReady, setLeaveReady] = useState(false);
@@ -1075,8 +1076,12 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
 
   return (
     <section className="cg">
-      {byPerson && <R02Sections anomaliesOnly comparisonReady={!schedNote && !joinNote && casesSource.status === "ok"} attendanceReady={!joinNote && rosterSource.status === "ok" && leaveReady} rows={focus ? rows.filter(r => rk(r) === focus) : rows} wf={wf} dateField={dateField} sched={sched.data} cost={cost.data} cases={casesSource.data} sf={sf} start={week.start} end={week.end} leave={leave} roster={focus ? roster.filter(p => rows.some(r => rk(r) === focus && r.group === p.name)) : roster} anomalyNotes={[
+      {byPerson && <R02Sections anomaliesOnly onInspectPerson={name => {
+        const row = rows.find(r => r.group === name);
+        if (row) { pick(rk(row)); setTimeout(() => { const el = document.getElementById("r02-person-focus"); el?.scrollIntoView({behavior:"smooth",block:"start"}); el?.animate([{backgroundColor:"#fef3c7"},{backgroundColor:"transparent"}],{duration:2500}); }, 250); }
+      }} dueCases={anomalyDueCases.data} comparisonReady={!schedNote && cost.status === "ok" && Boolean(join?.costLink) && casesSource.status === "ok"} attendanceReady={cost.status === "ok" && Boolean(join?.costLink) && rosterSource.status === "ok" && leaveReady} rows={focus ? rows.filter(r => rk(r) === focus) : rows} wf={wf} dateField={dateField} sched={sched.data} cost={cost.data} cases={casesSource.data} sf={sf} start={week.start} end={week.end} leave={leave} roster={focus ? roster.filter(p => rows.some(r => rk(r) === focus && r.group === p.name)) : roster} anomalyNotes={[
         schedNote, joinNote,
+        anomalyDueCases.status !== "ok" ? "契約日期尚未就緒，到期提醒待確認。" : null,
         !leaveReady ? "請假資料尚未就緒，未填日報待確認。" : null,
         rosterSource.status !== "ok" ? "人員名單尚未就緒，未填日報待確認。" : null,
         casesSource.status !== "ok" ? "案件表尚未就緒，預排案件比對待確認。" : null,
@@ -1181,7 +1186,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
       )}
 
       {focus ? (
-        <GroupFocus row={allRows.find((r) => rk(r) === focus)} group={focus} wf={wf} cfg={cfg} hasCheck={hasCheck} hasFlags={hasFlags} ff={ff} hasFix={hasFix} dateField={dateField} weekStart={week.start} weekEnd={week.end} day={day} setDay={setDay} />
+        <div id="r02-person-focus"><GroupFocus row={allRows.find((r) => rk(r) === focus)} group={focus} wf={wf} cfg={cfg} hasCheck={hasCheck} hasFlags={hasFlags} ff={ff} hasFix={hasFix} dateField={dateField} weekStart={week.start} weekEnd={week.end} day={day} setDay={setDay} /></div>
       ) : rows.length === 0 ? (
         <EmptyState kind="empty" title={`${weekName(week.offset)}${byPerson && team ? `「${team}」` : ""}沒有${cfg.workLabel}`} />
       ) : null}

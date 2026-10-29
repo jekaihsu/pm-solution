@@ -763,3 +763,18 @@ input[type="checkbox"] { min-height: 0; accent-color: var(--primary); width: 14p
 .cg-sheet .att-name { text-align: left; font-weight: 600; background: var(--surface-2); }
 .cg-sheet th small { display: block; font-weight: 400; color: var(--text-2); }
 .att-reason { white-space: normal !important; min-width: 160px; max-width: 280px; }
+
+.r02-anomalies { color: #111827; background: #fff; border: 1px solid #cbd5e1; padding: 24px; font-size: 16px; line-height: 1.8; }
+.r02-anomalies h2 { color: #111827; font-size: 21px; margin: 0 0 4px; }
+.r02-anomaly-legend { color: #64748b; margin: 0 0 12px; }
+.r02-anomaly-list { list-style: none; padding: 0; margin: 0; }
+.r02-anomaly-line { display: flex; align-items: baseline; gap: 14px; padding: 14px 4px; border-bottom: 1px solid #e2e8f0; }
+.r02-anomaly-name { min-width: 80px; flex-shrink: 0; }
+.r02-anomaly-sentence { min-width: 0; overflow-wrap: anywhere; }
+.r02-anomaly-separator { color: #94a3b8; }
+.r02-anomalies button { color: #334155; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 12px; margin: 8px; font-size: 16px; cursor: pointer; }
+.r02-anomaly-errors { color: #64748b; padding-top: 18px; }
+.r02-anomaly-shared { margin-top: 18px; }
+.r02-anomalies summary { cursor: pointer; }
+@media (max-width: 600px) { .r02-anomalies { padding: 16px; } .r02-anomaly-line { gap: 8px; flex-wrap: wrap; } .r02-anomaly-sentence { width: 100%; padding-left: 22px; } }
+.r02-anomalies .r02-anomaly-action { margin: 0 0 0 auto; flex-shrink: 0; font-size: 14px; }

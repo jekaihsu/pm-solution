@@ -11,28 +11,14 @@ const Sections = sectionsModule.default ?? sectionsModule;
 const render = (Component, props) => renderToStaticMarkup(React.createElement(Component, props));
 const wf = resolveWorkFields(['工作單號', '檢核狀態', '⚠異常'].map(name => ({id:name,name,kind:'text'})), ['雅雯檢核']);
 
-test('異常組紅色展開在正常組之前，正常組預設收合，沿用工作單與出勤結果', () => {
-  const rows = [
-    {...blankRow('正常人員'), team:'正常組'},
-    {...blankRow('異常人員'), team:'異常組', orders:[{id:'o1',fields:{工作單號:'WO1',檢核狀態:'已退回 ',退回原因:'數量確認'}}]},
-  ];
-  const html = render(Anomalies, {rows,wf,comparison:{extraWorkOrders:[{id:'o1'}]}, attendance:{people:[{team:'缺填組',person:'缺填人員',missingReportDays:1,missingDates:['2026-10-20'],after1030Count:0}]}});
-  assert.match(html, /#991b1b/);
-  assert.match(html, /已退回：數量確認/);
-  assert.match(html, /多增加的工作單/);
-  assert.match(html, /未填日報 1 天/);
-  assert.ok(html.indexOf('data-anomaly-group') < html.indexOf('data-normal-groups'));
-  assert.match(html, /<details[^>]*data-normal-groups[^>]*><summary>無異常的組別（1 組）/);
-  assert.doesNotMatch(html, /<details[^>]*\bopen/);
-});
-
-test('零異常與零資料仍保留區塊；資料不完整不能斷言無異常或缺填', () => {
-  const empty = render(Anomalies, {});
-  assert.match(empty, /異常／需人工確認/);
-  assert.match(empty, /目前範圍內無異常/);
-  const pending = render(Anomalies, {notes:['請假資料尚未就緒'],attendance:{people:[{team:'控制',person:'測試',missingReportDays:5,missingDates:[],after1030Count:0}]}});
-  assert.match(pending, /異常狀態待確認/);
-  assert.doesNotMatch(pending, /目前範圍內無異常|未填日報 5 天/);
+test('人員列、正常狀態與資料未齊提示', () => {
+ const rows=[{...blankRow('人員'),orders:[{id:'o1',fields:{檢核狀態:'已退回 '}}]}];
+ const html=render(Anomalies,{rows,wf});
+ assert.match(html,/data-anomaly-person="人員"/);
+ assert.match(html,/工作單被退回/);
+ assert.doesNotMatch(html,/data-normal-groups/);
+ assert.match(render(Anomalies,{}),/本週 0 人全部正常/);
+ assert.match(render(Anomalies,{notes:['請假資料尚未就緒']}),/異常狀態待確認/);
 });
 
 test('第 2 項為出工效率、第 3 項為預排執行率，第 4、5 項保持後續順序', () => {
@@ -42,4 +28,20 @@ test('第 2 項為出工效率、第 3 項為預排執行率，第 4、5 項保�
   assert.match(headings[1], /^3\. 預排案件/);
   assert.match(headings[2], /^4\./);
   assert.match(headings[3], /^5\./);
+});
+
+test('最多十人、每人三標籤，灰色資料待修保持可見且姓名不染紅', () => {
+ const flags=resolveWorkFields(['檢核狀態','⚠案件不符'].map(name=>({id:name,name,kind:'text'})),[]);
+ const rows=Array.from({length:12},(_,i)=>({...blankRow(`人員${i}`),orders:[{id:String(i),fields:{檢核狀態:'已退回','⚠案件不符':true}}]}));
+ const attendance={people:rows.map(r=>({person:r.group,team:'控制',workDates:['2026-10-26','2026-10-27'],missingDates:['2026-10-28'],revenue:0,after1030Count:4}))};
+ const html=render(Anomalies,{rows,wf:flags,attendance});
+ assert.equal((html.match(/data-anomaly-person=/g)||[]).length,10);
+ // 140.6：每人 4 個嚴重標籤全部顯示，資料待修排最後被收進「…」
+ assert.equal((html.match(/data-rule=/g)||[]).length,40);
+ assert.equal((html.match(/data-rule="repair"/g)||[]).length,0);
+ assert.equal((html.match(/還有 2 個標籤/g)||[]).length,10);
+ assert.match(html,/還有 2 人/);
+ assert.match(html,/aria-expanded="false"/);
+ assert.match(html,/<strong class="r02-anomaly-name">人員/);
+ assert.doesNotMatch(html,/<details class="r02-anomaly-errors" open/);
 });
