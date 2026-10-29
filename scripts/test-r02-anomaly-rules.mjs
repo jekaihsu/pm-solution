@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildR02Anomalies,visibleTags,errorSummary} from '../lib/r02AnomalyRules.ts';
+import {buildR02Anomalies,visibleTags,errorSummary,caseLabel,anomalyCount} from '../lib/r02AnomalyRules.ts';
 import {blankRow,resolveWorkFields} from '../lib/controlGroup.ts';
 const person=(over={})=>({person:'甲',team:'控制',workDates:['2026-10-26','2026-10-27'],missingDates:[],actualWorkDays:2,missingReportDays:0,after1030Count:0,before1030Count:0,revenue:2,qty:1,...over});
 const run=(p,extra={})=>buildR02Anomalies({attendance:{people:[person(p)]},...extra});
@@ -64,4 +64,20 @@ test('severe tags always shown, repair last, people sorted by severe count',()=>
  assert.equal(visibleTags([t(0,'repair'),t(0,'i')]).shown.at(-1).rule,'repair');
  const r=buildR02Anomalies({attendance:{people:[person({person:'乙',after1030Count:2}),person({person:'丙',revenue:0,missingDates:['2026-10-28']})]}});
  assert.equal(r.people[0].name,'丙');
+});
+test('141: zero revenue ≤1 point with ≥2 days is severe',()=>{
+ for(const [rev,s] of [[1,2],[0.5,2],[0,2],[1.01,undefined]]) assert.equal(tags(run({revenue:rev})).find(t=>t.rule==='zeroRevenue')?.severity,s);
+ assert.equal(tags(run({revenue:1,workDates:['2026-10-26']})).find(t=>t.rule==='zeroRevenue'),undefined);
+ assert.match(tags(run({revenue:1})).find(t=>t.rule==='zeroRevenue').text,/有出工 2 天，營業額 1 點（≤1 點）/);
+});
+test('141: case tags show truncated project name with full title; C115016 uses parent case',()=>{
+ const r=buildR02Anomalies({comparison:comparison({plannedCases:[{caseCode:'C115264',caseName:'一二三四五六七八九十甲乙丙丁戊己',people:[],plannedPoints:10,actualRevenue:0}]})});
+ const t=r.shared[0].tags[0];
+ assert.match(t.text,/^案件 C115264（一二三四五六七八九十甲乙丙丁…）實際 0 點/); assert.equal(t.title,'C115264 一二三四五六七八九十甲乙丙丁戊己');
+ assert.match(caseLabel('C115016-9','支號名').title,/PCDL-25-0376（2026~2027年高鐵里程TK-4\+400至TK343\+103 3D導線結構測量服務）/);
+ assert.equal(caseLabel('C999999','').text,'案件 C999999');
+});
+test('141: per-person anomaly count',()=>{
+ const r=run({missingDates:['2026-10-28'],revenue:0,after1030Count:4});
+ assert.equal(anomalyCount(r.people[0]),r.people[0].tags.length); assert.ok(anomalyCount(r.people[0])>=4);
 });

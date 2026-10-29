@@ -2,7 +2,17 @@ import { anomalies, type GroupRow, type WorkFields, type buildInternalScheduleEx
 import { projectDueDates, isDueSoon, taipeiDate } from './r02ProjectDates';
 import type { TableData } from './types';
 
-export type AnomalyTag = { rule: string; severity: number; text: string };
+export type AnomalyTag = { rule: string; severity: number; text: string; title?: string };
+// 雅雯 2026-10-29：C115016 是母案 PCDL-25-0376，各支號對到不同工作單，一律顯示母案名稱。
+export const PARENT_CASE_NAMES: Record<string,string> = { C115016: 'PCDL-25-0376（2026~2027年高鐵里程TK-4+400至TK343+103 3D導線結構測量服務）' };
+export const CASE_NAME_MAX = 14;
+export function caseLabel(code:string,name?:string):{text:string;title?:string}{
+  const full=(PARENT_CASE_NAMES[code.slice(0,7).toUpperCase()] ?? name ?? '').trim();
+  if(!full) return {text:`案件 ${code}`};
+  const short=[...full].length>CASE_NAME_MAX?[...full].slice(0,CASE_NAME_MAX).join('')+'…':full;
+  return {text:`案件 ${code}（${short}）`,title:`${code} ${full}`};
+}
+export const anomalyCount=(p:AnomalyPerson)=>p.tags.length;
 export type AnomalyPerson = { name: string; tags: AnomalyTag[]; dataRepair: boolean };
 export type AnomalyInput = {
   rows?: GroupRow[]; wf?: WorkFields;
@@ -46,7 +56,7 @@ export function buildR02Anomalies({rows = [], wf, comparison, attendance, compar
     if (missing.size>=1) add(p,'missing',2,`未填日報 ${missing.size} 天`);
     if (late>=2) add(p,'late',late>=4?2:1,`逾時補填 ${late} 次`);
     if (efficiency!==null && efficiency<0.8) add(p,'efficiency',efficiency<0.6?2:1,`效率達標率 ${percent(efficiency)}%`);
-    if (days>=2 && revenue===0) add(p,'zeroRevenue',2,`有出工 ${days} 天，營業額 0 點`);
+    if (days>=2 && revenue<=1+1e-10) add(p,'zeroRevenue',2,`有出工 ${days} 天，營業額 ${Number(revenue.toFixed(2))} 點（≤1 點）`);
   }
   for (const [name,ids] of returned) add(person(name),'returned',1,`工作單被退回 ${ids.size} 件`);
   for (const [name,ids] of extras) if(ids.size>=3) add(person(name),'extra',0,`未預排加做工作單 ${ids.size} 件`);
@@ -58,7 +68,8 @@ export function buildR02Anomalies({rows = [], wf, comparison, attendance, compar
       if (!(c.plannedPoints>0)) continue;
       const diff=(c.actualRevenue-c.plannedPoints)/c.plannedPoints;
       if (Math.abs(diff)<=0.4+1e-10) continue;
-      const tag={rule:'deviation',severity:diff < -0.6-1e-10?2:1,text:`案件 ${c.caseCode} 實際 ${Number(c.actualRevenue.toFixed(2))} 點，較預排${diff<0?'少':'多'} ${percent(Math.abs(diff))}%`};
+      const label=caseLabel(c.caseCode,c.caseName);
+      const tag:AnomalyTag={rule:'deviation',severity:diff < -0.6-1e-10?2:1,title:label.title,text:`${label.text}${label.title?"":" "}實際 ${Number(c.actualRevenue.toFixed(2))} 點，較預排${diff<0?'少':'多'} ${percent(Math.abs(diff))}%`};
       if(c.people.length===1 && people.has(c.people[0])) person(c.people[0]).tags.push(tag);
       else shared.push({name:`案件 ${c.caseCode}`,dataRepair:false,tags:[tag]});
     }

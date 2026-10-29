@@ -1,10 +1,10 @@
 "use client";
 import React, { useState } from "react";
-import { buildR02Anomalies, visibleTags, errorSummary, type AnomalyInput, type AnomalyPerson, type AnomalyTag } from "@/lib/r02AnomalyRules";
+import { buildR02Anomalies, visibleTags, anomalyCount, errorSummary, type AnomalyInput, type AnomalyPerson, type AnomalyTag } from "@/lib/r02AnomalyRules";
 
 type Props = AnomalyInput & { notes?: string[]; onInspectPerson?: (name:string)=>void };
 function Tag({tag}:{tag:AnomalyTag}) {
-  return <span data-rule={tag.rule} data-severity={tag.severity}>{tag.text.split(/(\d+(?:\.\d+)?)/g).map((part,i)=>i%2 ? <strong key={i} style={{color:tag.severity ? '#b91c1c' : 'inherit',fontWeight:600}}>{part}</strong> : part)}</span>;
+  return <span data-rule={tag.rule} data-severity={tag.severity} title={tag.title}>{tag.text.split(/(\d+(?:\.\d+)?)/g).map((part,i)=>i%2 ? <strong key={i} style={{color:tag.severity ? '#b91c1c' : 'inherit',fontWeight:600}}>{part}</strong> : part)}</span>;
 }
 function PersonLine({person,onInspect}:{person:AnomalyPerson;onInspect?:()=>void}) {
   const [expanded,setExpanded]=useState(false);
@@ -15,6 +15,7 @@ function PersonLine({person,onInspect}:{person:AnomalyPerson;onInspect?:()=>void
   return <li className="r02-anomaly-line" data-anomaly-person={person.name}>
     <span aria-label={severe?'嚴重':warning?'提醒':'資訊'}>{severe?'●':warning?'○':'·'}</span>
     <strong className="r02-anomaly-name">{person.name}</strong>
+    <span className="r02-anomaly-count" data-anomaly-count={anomalyCount(person)} style={{color:'#475569',flexShrink:0,whiteSpace:'nowrap'}}>共 {anomalyCount(person)} 項</span>
     <div className="r02-anomaly-sentence">{(expanded?[...vis.shown,...tags.filter(t=>!vis.shown.includes(t))]:vis.shown).map((tag,i)=><React.Fragment key={`${tag.rule}-${i}`}>{i>0 && <span className="r02-anomaly-separator"> ｜ </span>}<span style={tag.rule==='repair'?{color:'#64748b',background:'#f1f5f9',padding:'3px 8px',borderRadius:4}:undefined}><Tag tag={tag}/></span></React.Fragment>)}{vis.hidden>0 && <button type="button" aria-label={expanded?'收合標籤':`${person.name} 還有 ${vis.hidden} 個標籤`} aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?'收合':'…'}</button>}</div>
     {onInspect && <button className="r02-anomaly-action" type="button" onClick={onInspect}>看工作單</button>}
   </li>;
