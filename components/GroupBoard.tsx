@@ -15,6 +15,7 @@ import { MOBILE, useMedia } from "./useMedia";
 import { leaveDaysByPerson, type LeaveDays } from "@/lib/attendanceCore";
 import OwnerProgress from "./OwnerProgress";
 import R02Sections from "./R02Sections";
+import R02Anomalies from "./R02Anomalies";
 import { STATUS_TEXT, useSource } from "./useSource";
 
 export interface BoardConfig {
@@ -752,13 +753,15 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const sched = useSource(cfg.scheduleKey(version), { fields: SCHEDULE_FIELDS, links: true });
   const casesSource = useSource(`${version}-cases`, { fields: ["案件編號", "案件名稱", "工程編號", "工程名稱"], links: true, enabled: cfg.unit === "person" });
   const rosterSource = useSource("v3-people", { fields: ["姓名", "Lark帳號", "所屬組別", "在職"], people: true, enabled: cfg.unit === "person" });
+  const [leaveReady, setLeaveReady] = useState(false);
   const [leaveDays, setLeaveDays] = useState<LeaveDays>({});
   useEffect(() => {
     if (cfg.unit !== "person") return;
     let cancelled = false;
+    setLeaveReady(false);
     setLeaveDays({});
     fetch(`/api/attendance/leave?start=${msToDateStr(week.start)}&end=${msToDateStr(week.end - 86400000)}`)
-      .then(r => r.ok ? r.json() : null).then(j => { if (!cancelled) setLeaveDays(j?.status === "ok" ? j.days ?? {} : {}); })
+      .then(r => r.ok ? r.json() : null).then(j => { if (!cancelled) { setLeaveDays(j?.status === "ok" ? j.days ?? {} : {}); setLeaveReady(j?.status === "ok"); } })
       .catch(() => { if (!cancelled) setLeaveDays({}); });
     return () => { cancelled = true; };
   }, [cfg.unit, week.start, week.end]);
@@ -855,6 +858,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   if (work.status !== "ok" || !work.data) {
     return (
       <section className="cg">
+        {cfg.unit === "person" && <R02Anomalies notes={["工作單資料尚未就緒，異常狀態待確認。"]} />}
         {header}
         <EmptyState kind={work.status} title={`${cfg.workLabel}（${version.toUpperCase()}）：${STATUS_TEXT[work.status]}`}>
           {work.error && <div className="mono">{work.error}</div>}
@@ -865,6 +869,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   if (!view || "error" in view) {
     return (
       <section className="cg">
+        {cfg.unit === "person" && <R02Anomalies notes={["工作單資料尚未就緒，異常狀態待確認。"]} />}
         {header}
         <EmptyState kind="empty" title={view && "error" in view ? (view.error as string) : "載入中"} />
       </section>
@@ -1070,6 +1075,12 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
 
   return (
     <section className="cg">
+      {byPerson && <R02Sections anomaliesOnly comparisonReady={!schedNote && !joinNote && casesSource.status === "ok"} attendanceReady={!joinNote && rosterSource.status === "ok" && leaveReady} rows={focus ? rows.filter(r => rk(r) === focus) : rows} wf={wf} dateField={dateField} sched={sched.data} cost={cost.data} cases={casesSource.data} sf={sf} start={week.start} end={week.end} leave={leave} roster={focus ? roster.filter(p => rows.some(r => rk(r) === focus && r.group === p.name)) : roster} anomalyNotes={[
+        schedNote, joinNote,
+        !leaveReady ? "請假資料尚未就緒，未填日報待確認。" : null,
+        rosterSource.status !== "ok" ? "人員名單尚未就緒，未填日報待確認。" : null,
+        casesSource.status !== "ok" ? "案件表尚未就緒，預排案件比對待確認。" : null,
+      ].filter((note): note is string => Boolean(note))} />}
       {header}
 
       {!focus && (
