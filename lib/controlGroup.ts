@@ -762,7 +762,28 @@ export function buildInternalScheduleExecution(scheduleRecords: TableData["recor
   const plannedCases=[...map.values()].map(p=>({...p,executed:p.actualOrders>0})), executedPlannedCaseCount=plannedCases.filter(p=>p.executed).length;
   return {plannedCases,plannedCaseCount:plannedCases.length,executedPlannedCaseCount,executionRate:plannedCases.length ? executedPlannedCaseCount/plannedCases.length : null,extraWorkOrders,extraWorkOrderCount:extraWorkOrders.length,extraRevenue:extraWorkOrders.reduce((s,o)=>s+o.revenue,0),extraQty:extraWorkOrders.reduce((s,o)=>s+o.qty,0)};
 }
-export function buildPersonAttendanceAndBackfill(rows: GroupRow[], costRecordsInWeek: TableData["records"], wf: WorkFields, dateField: string | null, weekStartIsoRaw: string, todayIsoRaw: string, leaveByPerson: Record<string,Record<string,string>> = {}, rosterStaff: Array<{name:string;team:string}> = []) {
+// 放在 controlGroup.ts（不另開檔）：node --test 直接載入 .ts 時不能解析無副檔名的值匯入。
+/**
+ * #144 R5 備援假日表：只在該人的 Lark 出勤讀不到時使用（主來源是 Lark 出勤 off）。
+ * 複製自 /workspace/cs_repo/app/src/data/holidays.ts（115年度報價管理總表「2026例假日」試算表版，依政府公告為準，待確認）。
+ */
+export const HOLIDAYS_2026: string[] = [
+  '2026-01-01',                                                   // 元旦
+  '2026-02-14', '2026-02-15', '2026-02-16', '2026-02-17',         // 春節連假 2/14–2/22
+  '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22',
+  '2026-02-27', '2026-02-28', '2026-03-01',                       // 和平紀念日（2/28 為週六 → 2/27 補假；試算表版）
+  '2026-04-03', '2026-04-04', '2026-04-05', '2026-04-06',         // 兒童節／清明連假
+  '2026-05-01', '2026-05-02', '2026-05-03',                       // 勞動節
+  '2026-06-19', '2026-06-20', '2026-06-21',                       // 端午
+  '2026-09-25', '2026-09-26', '2026-09-27', '2026-09-28',         // 中秋（9/25）＋教師節（9/28）；試算表版
+  '2026-10-09', '2026-10-10', '2026-10-11',                       // 國慶
+  '2026-10-24', '2026-10-25', '2026-10-26',                       // 光復節（10/25 為週日 → 10/26 補假；試算表版）
+  '2026-12-25', '2026-12-26', '2026-12-27',                       // 行憲紀念日
+]
+
+export const R02_FALLBACK_HOLIDAYS: ReadonlySet<string> = new Set(HOLIDAYS_2026);
+
+export function buildPersonAttendanceAndBackfill(rows: GroupRow[], costRecordsInWeek: TableData["records"], wf: WorkFields, dateField: string | null, weekStartIsoRaw: string, todayIsoRaw: string, leaveByPerson: Record<string,Record<string,string>> = {}, rosterStaff: Array<{name:string;team:string}> = [], attendancePeople?: ReadonlySet<string>, fallbackHolidays: ReadonlySet<string> = R02_FALLBACK_HOLIDAYS) {
   void wf; const weekStartIso=weekStartIsoRaw.replaceAll("/","-"), todayIso=todayIsoRaw.replaceAll("/","-"); const workdays=[0,1,2,3,4].map(i=>isoOffset(weekStartIso,i)).filter(d=>d && d<=todayIso), end=isoOffset(weekStartIso,6);
   const combined=[...rows]; for(const p of rosterStaff) if (isInternalTeamName(p.team) && !combined.some(r=>r.group===p.name)) combined.push({...blankRow(p.name),team:p.team});
   const costById=new Map(costRecordsInWeek.map(r=>[r.id,r]));
@@ -772,7 +793,7 @@ export function buildPersonAttendanceAndBackfill(rows: GroupRow[], costRecordsIn
     // V4 cost sheets bulk-cloned on 2026-08-11 give work before 2026-08-10 a clone timestamp, not a submission time (#105/#140).
     const count=(r:TableData["records"][number],cost?:TableData["records"][number])=>{const d=dateIso((dateField ? r.fields[dateField] : null) ?? r.fields[JOINED_DATE] ?? r.fields["日期"] ?? cost?.fields["工作日期"]); if(!d || d<weekStartIso || d>end) return; const dayStart=Date.parse(`${d}T00:00:00+08:00`); const valid=(t:number)=>Number.isFinite(t) && t>=dayStart; const workTime=submittedTime(r.fields["填報時間"]), costTime=submittedTime(cost?.fields["填報時間"]); const cloned=(t:number)=>d<"2026-08-10" && dateIso(t)==="2026-08-11"; const isCost=costById.has(r.id); const t=!isCost && valid(workTime) ? workTime : isCost && valid(workTime) && !cloned(workTime) ? workTime : valid(costTime) && !cloned(costTime) ? costTime : NaN; const e=Date.parse(`${d}T23:59:59.999+08:00`), cutoff=Date.parse(`${isoOffset(d,1)}T10:30:00.000+08:00`); if(t>cutoff) after1030Count++; else if(t>e || (!Number.isFinite(t) && text(r.fields["⚠補填"] ?? cost?.fields["⚠補填"]))) before1030Count++;};
     for(const r of row.orders){const id=r.links?.["所屬成本單"]?.[0]; if(id) linked.add(id); count(r,id ? costById.get(id) : undefined);} for(const c of costs) if(!linked.has(c.id) && !row.orders.some(r=>dateIso((dateField ? r.fields[dateField] : null) ?? r.fields[JOINED_DATE])===dateIso(c.fields["工作日期"]))) count(c);
-    const actualWorkDays=dates.size, dailyAvgRevenue=actualWorkDays ? row.revenue/actualWorkDays : null, missingDates=EXEMPT_DAILY_REPORT_NAMES.has(row.group)?[]:workdays.filter(d=>!dates.has(d) && !leaveByPerson[row.group]?.[d]);
+    const actualWorkDays=dates.size, dailyAvgRevenue=actualWorkDays ? row.revenue/actualWorkDays : null, missingDates=EXEMPT_DAILY_REPORT_NAMES.has(row.group)?[]:workdays.filter(d=>!dates.has(d) && !leaveByPerson[row.group]?.[d] && !(!attendancePeople?.has(row.group) && fallbackHolidays.has(d)));
     return {person:row.group,team:row.team ?? "",actualWorkDays,workDates:[...dates].sort(),missingDates,missingReportDays:missingDates.length,before1030Count,after1030Count,revenue:row.revenue,qty:row.qty,dailyAvgRevenue,efficiencyRate:dailyAvgRevenue}; });
   const total=(f:(p:typeof people[number])=>number)=>people.reduce((s,p)=>s+f(p),0), actualWorkDays=total(p=>p.actualWorkDays), totalRevenue=total(p=>p.revenue), dailyAvgRevenue=actualWorkDays ? totalRevenue/actualWorkDays : null;
   return {people,totals:{actualWorkDays,missingReportDays:total(p=>p.missingReportDays),before1030Count:total(p=>p.before1030Count),after1030Count:total(p=>p.after1030Count),totalRevenue,totalQty:total(p=>p.qty),dailyAvgRevenue,efficiencyRate:dailyAvgRevenue}};

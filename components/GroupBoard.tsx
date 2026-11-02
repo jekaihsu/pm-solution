@@ -12,7 +12,7 @@ import { formatDate, msToDateStr, weekName, weekdayCn } from "@/lib/week";
 import { useShell } from "./AppShell";
 import EmptyState from "./EmptyState";
 import { MOBILE, useMedia } from "./useMedia";
-import { leaveDaysByPerson, type LeaveDays } from "@/lib/attendanceCore";
+import { excusedDaysByPerson, type LeaveDays } from "@/lib/attendanceCore";
 import OwnerProgress from "./OwnerProgress";
 import R02Sections from "./R02Sections";
 import R02Anomalies from "./R02Anomalies";
@@ -756,13 +756,17 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const rosterSource = useSource("v3-people", { fields: ["姓名", "Lark帳號", "所屬組別", "在職"], people: true, enabled: cfg.unit === "person" });
   const [leaveReady, setLeaveReady] = useState(false);
   const [leaveDays, setLeaveDays] = useState<LeaveDays>({});
+  const [offDays, setOffDays] = useState<Record<string, string[]>>({});
+  const [attendancePeople, setAttendancePeople] = useState<Set<string> | undefined>(undefined);
   useEffect(() => {
     if (cfg.unit !== "person") return;
     let cancelled = false;
     setLeaveReady(false);
     setLeaveDays({});
+    setOffDays({});
+    setAttendancePeople(undefined);
     fetch(`/api/attendance/leave?start=${msToDateStr(week.start)}&end=${msToDateStr(week.end - 86400000)}`)
-      .then(r => r.ok ? r.json() : null).then(j => { if (!cancelled) { setLeaveDays(j?.status === "ok" ? j.days ?? {} : {}); setLeaveReady(j?.status === "ok"); } })
+      .then(r => r.ok ? r.json() : null).then(j => { if (!cancelled) { const ok = j?.status === "ok"; setLeaveDays(ok ? j.days ?? {} : {}); setOffDays(ok ? j.offDays ?? {} : {}); setAttendancePeople(ok && Array.isArray(j.people) ? new Set<string>(j.people) : undefined); setLeaveReady(j?.status === "ok"); } })
       .catch(() => { if (!cancelled) setLeaveDays({}); });
     return () => { cancelled = true; };
   }, [cfg.unit, week.start, week.end]);
@@ -884,7 +888,8 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
   const currentPeople = currentRosterRows(allRows, rosterSource.data?.records ?? []);
   const dailyRows = filterByTeam(currentPeople.rows, team);
   const roster = (rosterSource.data?.records ?? []).filter(r => r.fields["在職"] === true).map(r => ({name: text(r.fields["姓名"]), team: text(r.fields["所屬組別"]), id:r.id})).filter(r => !team || r.team === team || (team === REPORT_MERGED && /^圖報[AB]$/.test(r.team)));
-  const leave = leaveDaysByPerson(leaveDays);
+  // #144 R5：Lark 出勤 off（國定假日等）與請假日都不算缺日報；出勤讀不到的人退回 R02_FALLBACK_HOLIDAYS（controlGroup.ts）。
+  const leave = excusedDaysByPerson(leaveDays, offDays);
   const totals = rows.reduce(
     (t, r) => ({ orders: t.orders + r.orders.length, revenue: t.revenue + r.revenue, pass: t.pass + r.pass, fail: t.fail + r.fail, anomaly: t.anomaly + r.anomalyCount }),
     { orders: 0, revenue: 0, pass: 0, fail: 0, anomaly: 0 },
@@ -1076,13 +1081,13 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
 
   return (
     <section className="cg">
-      {byPerson && <R02Sections anomaliesOnly onInspectPerson={name => {
+      {byPerson && <R02Sections anomaliesOnly attendancePeople={attendancePeople} onInspectPerson={name => {
         const row = rows.find(r => r.group === name);
         if (row) { pick(rk(row)); setTimeout(() => { const el = document.getElementById("r02-person-focus"); el?.scrollIntoView({behavior:"smooth",block:"start"}); el?.animate([{backgroundColor:"#fef3c7"},{backgroundColor:"transparent"}],{duration:2500}); }, 250); }
       }} dueCases={anomalyDueCases.data} comparisonReady={!schedNote && cost.status === "ok" && Boolean(join?.costLink) && casesSource.status === "ok"} attendanceReady={cost.status === "ok" && Boolean(join?.costLink) && rosterSource.status === "ok" && leaveReady} rows={focus ? rows.filter(r => rk(r) === focus) : rows} wf={wf} dateField={dateField} sched={sched.data} cost={cost.data} cases={casesSource.data} sf={sf} start={week.start} end={week.end} leave={leave} roster={focus ? roster.filter(p => rows.some(r => rk(r) === focus && r.group === p.name)) : roster} anomalyNotes={[
         schedNote, joinNote,
         anomalyDueCases.status !== "ok" ? "契約日期尚未就緒，到期提醒待確認。" : null,
-        !leaveReady ? "請假資料尚未就緒，未填日報待確認。" : null,
+        !leaveReady ? "出勤／請假資料尚未就緒，未填日報待確認。" : null,
         rosterSource.status !== "ok" ? "人員名單尚未就緒，未填日報待確認。" : null,
         casesSource.status !== "ok" ? "案件表尚未就緒，預排案件比對待確認。" : null,
       ].filter((note): note is string => Boolean(note))} />}
@@ -1206,7 +1211,7 @@ export default function GroupBoard({ cfg }: { cfg: BoardConfig }) {
       )}
 
       {!focus && byPerson && (rosterSource.status === "ok" ? <><DailyRevenue rows={dailyRows} wf={wf} dateField={dateField} weekStart={week.start} />{currentPeople.excluded > 0 && <p className="muted small">人員名單未能確認在職身分的 {currentPeople.excluded} 張工作單未列於第 1 項。</p>}</> : <p className="muted small">人員名單讀取中或無法讀取，第 1 項暫不顯示。</p>)}
-      {!focus && byPerson && <R02Sections rows={rows} wf={wf} dateField={dateField} sched={sched.data} cost={cost.data} cases={casesSource.data} sf={sf} start={week.start} end={week.end} leave={leave} roster={roster} projectProgress={cfg.ownerProgress ? <OwnerProgress data={view.data} wf={wf} dateField={view.dateField} weekStart={week.start} weekEnd={week.end} /> : null} />}
+      {!focus && byPerson && <R02Sections rows={rows} wf={wf} dateField={dateField} sched={sched.data} cost={cost.data} cases={casesSource.data} sf={sf} start={week.start} end={week.end} leave={leave} attendancePeople={attendancePeople} roster={roster} projectProgress={cfg.ownerProgress ? <OwnerProgress data={view.data} wf={wf} dateField={view.dateField} weekStart={week.start} weekEnd={week.end} /> : null} />}
       {!focus && byPerson && allRows.length > 0 && <TeamSummary lines={summary} selected={team} planOn={planOn} wf={wf} ff={ff} hasCheck={hasCheck} hasFix={hasFix} onPick={(t) => pickTeam(t)} />}
 
       {!focus && rows.length > 0 && layout === "sheet" && <SheetTable rows={rows} planOn={planOn} wf={wf} ff={ff} hasCheck={hasCheck} hasFix={hasFix} onPick={(g) => pick(g)} />}

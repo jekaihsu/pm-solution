@@ -428,16 +428,26 @@ export interface AttendanceView {
 // R02 receives only leave dates, keyed by the same names used by its work rows.
 export type LeaveDays = Record<string, { date: string; kind: "full" | "half" }[]>;
 
-export function attendanceLeaveDays(view: Pick<AttendanceView, "people" | "days">): { status: "ok"; days: LeaveDays } {
+/** #144 R5：offDays＝Lark 出勤判定免打卡（off，例如國定假日）的日期；people＝出勤有讀到的人。 */
+export function attendanceLeaveDays(view: Pick<AttendanceView, "people" | "days">): { status: "ok"; days: LeaveDays; offDays: Record<string, string[]>; people: string[] } {
   const days: LeaveDays = Object.create(null);
+  const offDays: Record<string, string[]> = Object.create(null);
   for (const person of view.people) {
     person.days.forEach((code, index) => {
       const date = view.days[index]?.date;
+      if (date && code === "off") (offDays[person.name] ??= []).push(date);
       if (!date || (code !== "leave" && !code.startsWith("leave-half"))) return;
       (days[person.name] ??= []).push({ date, kind: code === "leave" ? "full" : "half" });
     });
   }
-  return { status: "ok", days };
+  return { status: "ok", days, offDays, people: view.people.map(p => p.name) };
+}
+
+/** 合併請假與出勤 off：off 不覆蓋請假種類。 */
+export function excusedDaysByPerson(days: LeaveDays, offDays: Record<string, string[]> = {}): Record<string, Record<string, "full" | "half" | "off">> {
+  const out: Record<string, Record<string, "full" | "half" | "off">> = leaveDaysByPerson(days);
+  for (const [name, dates] of Object.entries(offDays)) for (const d of dates) (out[name] ??= {})[d] ??= "off";
+  return out;
 }
 
 export function leaveDaysByPerson(days: LeaveDays): Record<string, Record<string, "full" | "half">> {

@@ -46,9 +46,10 @@ test('出勤 API 姓名格式串接 R02：全日與各種半日假排除未填�
     };
     // JSON round trip is the exact route payload consumed by GroupBoard.
     const response = JSON.parse(JSON.stringify(attendanceLeaveDays(view)));
-    assert.deepEqual(response, { status: 'ok', days: { 小明: [
+    assert.equal(response.status, 'ok');
+    assert.deepEqual(response.days, { 小明: [
       { date: '2026-10-19', kind: 'full' }, { date: '2026-10-20', kind: 'half' },
-    ] } });
+    ] });
     const rows = [{ ...row, personId: 'rec-not-the-name', orders: [], revenue: 0, qty: 0 }];
     const baseline = buildPersonAttendanceAndBackfill(rows, [], wf, '工作日期', '2026-10-19', '2026-10-23');
     assert.equal(baseline.people[0].missingReportDays, 5);
