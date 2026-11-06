@@ -14,6 +14,7 @@ import {
   fieldCostWarning,
   parseFieldCost,
   fieldCostError,
+  overrideLackWithField,
   leaveCoverage,
   attendanceErrorText,
   FIELD_ALL_EMPTY_BASELINE,
@@ -341,12 +342,66 @@ test("外業：未來日照舊 future；週末有成本單也算出勤", () => {
   assert.equal(person(w, "丁").days[5], "field");
 });
 
-test("考勤組成員不受成本單影響（仍照打卡）", () => {
+test("overrideLackWithField：只有缺卡會被成本單改成外業出勤", () => {
+  assert.equal(overrideLackWithField("lack", true), "field");
+  assert.equal(overrideLackWithField("lack", false), "lack");
+  for (const code of ["ok", "late", "early", "leave", "trip", "out", "none", "off", "field"])
+    assert.equal(overrideLackWithField(code, true), code, code);
+});
+
+test("考勤組成員缺卡但當天成本單有他＝外業出勤；沒成本單的人仍照打卡", () => {
   const v = buildAttendanceView(base2({ tasks: [task("emp_A", 20261005, [rec("Lack", "Normal")])], fieldCost: fc([{ date: "2026-10-05", leaderIds: ["recA"], crewIds: ["recB"] }]) }));
-  assert.equal(person(v, "甲").days[0], "lack");
-  assert.equal(person(v, "乙").days[0], "none");
-  assert.equal(v.summary.field, 0);
+  assert.equal(person(v, "甲").days[0], "field");
+  assert.equal(person(v, "乙").days[0], "none"); // 乙在成本單但沒有缺卡紀錄（none），不改
+  assert.equal(v.summary.field, 1);
+  assert.equal(v.summary.lack, 0);
+  assert.equal(v.summary.present, 1);
+  assert.equal(v.notes.fieldPeople, 0); // 外業人員人數仍只計「不在考勤組」的人
+});
+
+test("考勤組成員已打卡或請假：即使成本單有他也不改狀態", () => {
+  const ok = buildAttendanceView(base2({ tasks: [task("emp_A", 20261005, [rec()])], fieldCost: fc([{ date: "2026-10-05", leaderIds: ["recA"], crewIds: [] }]) }));
+  assert.equal(person(ok, "甲").days[0], "ok");
+  const late = buildAttendanceView(base2({ tasks: [task("emp_A", 20261005, [rec("Late", "Normal")])], fieldCost: fc([{ date: "2026-10-05", leaderIds: ["recA"], crewIds: [] }]) }));
+  assert.equal(person(late, "甲").days[0], "late");
+  const left = buildAttendanceView(base2({
+    tasks: [task("emp_A", 20261005, [rec("NoNeedCheck", "NoNeedCheck", "Leave", "Leave")])],
+    approvals: [lv("emp_A", leave("Lfull", "2026-10-05 00:00:00", "2026-10-06 00:00:00", 86400))],
+    fieldCost: fc([{ date: "2026-10-05", leaderIds: ["recA"], crewIds: [] }]),
+  }));
+  assert.equal(person(left, "甲").days[0], "leave");
+});
+
+test("考勤組成員半天假另半天缺卡、當天有成本單＝半天假＋外業出勤", () => {
+  const v = buildAttendanceView(base2({
+    tasks: [task("emp_A", 20261006, [rec("Normal", "Lack")])],
+    approvals: [lv("emp_A", leave("L1", "2026-10-06 08:00:00", "2026-10-06 12:00:00", 14400, 2))],
+    fieldCost: fc([{ date: "2026-10-06", leaderIds: ["recA"], crewIds: [] }]),
+  }));
+  assert.equal(person(v, "甲").days[1], "leave-half");
+  assert.deepEqual([v.summary.leave, v.summary.expected, v.summary.present, v.summary.lack, v.summary.field], [0.5, 0.5, 0.5, 0, 0.5]);
+});
+
+test("需打卡的人缺卡但成本單有他＝外業出勤；沒有成本單的日子仍缺卡（11/2–11/5 案例形狀）", () => {
+  const week = Date.UTC(2026, 10, 1, 16, 0); // 台北 2026-11-02 週一
+  const now = Date.UTC(2026, 10, 6, 4, 0); // 台北 2026-11-06 12:00
+  const v = buildAttendanceView(base({
+    weekStart: week,
+    now,
+    roster: [{ name: "庚", group: "ROV", openId: "ou_g", recordId: "recG" }],
+    employeeIds: new Map([["ou_g", "emp_G"]]),
+    members: new Set(["emp_G"]),
+    tasks: [20261102, 20261103, 20261104, 20261105].map((day) => task("emp_G", day, [rec("Lack", "Lack")])),
+    fieldCost: fc([
+      { date: "2026-11-03", leaderIds: [], crewIds: ["recG"] },
+      { date: "2026-11-04", leaderIds: [], crewIds: ["recG"] },
+      { date: "2026-11-05", leaderIds: [], crewIds: ["recG"] },
+    ]),
+  }));
+  assert.deepEqual(person(v, "庚").days.slice(0, 4), ["lack", "field", "field", "field"]);
+  assert.deepEqual([v.summary.lack, v.summary.field, v.summary.present, v.summary.expected], [1, 3, 3, 4]);
   assert.equal(v.notes.fieldPeople, 0);
+  assertNoLeak(v, ["emp_G", "ou_g", "recG"]);
 });
 
 test("成本單讀不到：出勤照舊算考勤組成員，顯示原因", () => {

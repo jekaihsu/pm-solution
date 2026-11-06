@@ -8,6 +8,8 @@
 // leave-half-late／-early／-late-early＝半天假且另半天遲到／早退；leave-half-lack＝半天假且另半天缺卡；
 // leave-half-nofield＝外業半天假、當天沒有成本單（只計請假 0.5）；
 // field＝外業有填日報（算出勤）；nofield＝外業沒填日報也沒審批（不入分母）。
+// 考勤組成員（需打卡）若當天出現在外業成本單（組長或實際出工人）且打卡為缺卡，改為 field（外業出勤）；
+// 請假／出差／外出／已打卡（正常、遲到、早退）不變。工作單出工的人寫在所屬成本單，不以工作單「參與人員」比對（該欄常為空）。
 export type DayCode = "ok" | "late" | "early" | "late-early" | "lack" | "leave" | "leave-half" | "leave-half-late" | "leave-half-early" | "leave-half-late-early" | "leave-half-lack" | "leave-half-nofield" | "leave-half-open" | "trip" | "out" | "off" | "none" | "future" | "field" | "nofield";
 export type ApprovalKind = "leave" | "trip" | "out";
 
@@ -130,6 +132,12 @@ export function classifyDay(records: LarkTaskRecord[] | undefined, ctx: { approv
 export function halfLeaveDueDay(recs: LarkTaskRecord[] | undefined, weekday: boolean): boolean {
   if (!recs?.length) return weekday;
   return recs.some((r) => r.check_in_result_supplement === "Leave" || r.check_out_result_supplement === "Leave" || !(r.check_in_result === "NoNeedCheck" && r.check_out_result === "NoNeedCheck"));
+}
+
+
+/** 需打卡的人當天若在外業成本單裡，缺卡改顯示外業出勤。其他狀態不改。 */
+export function overrideLackWithField(code: DayCode, onField: boolean): DayCode {
+  return onField && code === "lack" ? "field" : code;
 }
 
 /** 打卡紀錄上的出差／外出標記（Travel／GoOut）；沒有就回 null。 */
@@ -669,7 +677,8 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
       records.push({ kind: "trip", name: person.name, group: person.group, start, end, startAt: `${start} ${hm(a.startRaw)?.[2] ?? "00:00"}`, timeText: start === end ? md(start) : `${md(start)}–${md(end)}`, duration: days, unit: "天", reason: truncateText(a.reason, 40) });
     }
     const isMember = !!eid && inp.members.has(eid);
-    const myField = !isMember && person.recordId ? fieldDays.get(person.recordId) : undefined;
+    const fieldSet = person.recordId ? fieldDays.get(person.recordId) : undefined;
+    const myField = !isMember ? fieldSet : undefined;
     if (!isMember && !myField) continue; // 不在考勤組、本週也沒外業成本單＝不列
     if (myField) {
       fieldPeople++;
@@ -698,8 +707,8 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
             codes.push(kind);
             continue;
           }
-          // 半天假：請假 0.5；另半天看打卡（忽略請假那半邊的打卡）
-          const base = classifyDay(recs, { approval: other, leaveHalf: halfSide(part!), open: d === today });
+          // 半天假：請假 0.5；另半天看打卡（忽略請假那半邊的打卡）；當天有成本單則缺卡改外業出勤
+          const base = overrideLackWithField(classifyDay(recs, { approval: other, leaveHalf: halfSide(part!), open: d === today }), !!fieldSet?.has(d));
           if (WORKED.has(base)) {
             add("leave", 0.5);
             add(base, 0.5);
@@ -719,6 +728,8 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
         let code = classifyDay(recs, { approval: lw >= 1 ? "leave" : other, open: d === today });
         // 整天假、出差、外出落在應打卡日但沒有可用打卡紀錄（平日沒 task 紀錄、或兩側標 Leave）：與半天假、外業一致，照計 1、不入應到；純免打卡日（週末）不計
         if ((lw >= 1 || other) && (code === "none" || code === "off") && halfLeaveDueDay(recs, i < 5)) code = lw >= 1 ? "leave" : other!;
+        // 需打卡但當天有外業成本單：缺卡改外業出勤（工作單出工的人在成本單的組長／實際出工人）
+        code = overrideLackWithField(code, !!fieldSet?.has(d));
         add(code, 1);
         codes.push(code);
         continue;
