@@ -19,6 +19,7 @@ import {
   FIELD_ALL_EMPTY_BASELINE,
   FIELD_ALL_EMPTY_LIMIT,
   excludedFromAttendanceBreakdown,
+  ATTENDANCE_BREAKDOWN_EXCLUDE_NAMES,
 } from "../lib/attendanceCore.ts";
 import { PEOPLE_NAME, PEOPLE_ACCOUNT, PEOPLE_GROUP, PEOPLE_ACTIVE } from "../lib/people.ts";
 import * as core from "../lib/attendanceCore.ts";
@@ -1206,13 +1207,16 @@ test("R5-3 規則一致：平日沒紀錄、整天假＋出差同日→請假優
 
 // ---- 拆勤排除：老闆／非需打卡（現有所屬組別；不寫死人名）----
 
-test("拆勤排除規則：所屬組別＝老闆才排除；IT／副總／一般組別不排除", () => {
+test("拆勤排除規則：所屬組別＝老闆，或姓名在 ATTENDANCE_BREAKDOWN_EXCLUDE_NAMES", () => {
   assert.equal(excludedFromAttendanceBreakdown("老闆"), true);
   assert.equal(excludedFromAttendanceBreakdown("老闆、顧問"), true);
   assert.equal(excludedFromAttendanceBreakdown("IT"), false);
   assert.equal(excludedFromAttendanceBreakdown("副總"), false);
   assert.equal(excludedFromAttendanceBreakdown("圖報A"), false);
   assert.equal(excludedFromAttendanceBreakdown(""), false);
+  assert.equal(excludedFromAttendanceBreakdown("IT", "謝佾均"), true);
+  assert.equal(excludedFromAttendanceBreakdown("IT", "甲"), false);
+  assert.ok(ATTENDANCE_BREAKDOWN_EXCLUDE_NAMES.has("謝佾均"));
 });
 
 test("拆勤：考勤組內老闆組別不列入 people，不計入摘要；一般成員仍列", () => {
@@ -1236,7 +1240,7 @@ test("拆勤：考勤組內老闆組別不列入 people，不計入摘要；一�
   assert.equal(v.summary.present, 1);
 });
 
-test("拆勤：謝佾均若僅為 IT／組員（現有欄位）仍會列出——證明尚未靠寫死人名涵蓋", () => {
+test("拆勤：謝佾均（JK 2026-11-06 核准）即使為 IT／考勤組成員也不列入；一般成員仍列", () => {
   const v = buildAttendanceView(base({
     roster: [
       { name: "甲", group: "圖報A", openId: "ou_a" },
@@ -1244,10 +1248,17 @@ test("拆勤：謝佾均若僅為 IT／組員（現有欄位）仍會列出—�
     ],
     employeeIds: new Map([["ou_a", "emp_A"], ["ou_xie", "emp_XIE"]]),
     members: new Set(["emp_A", "emp_XIE"]),
-    tasks: [task("emp_A", 20261005, [rec()]), task("emp_XIE", 20261005, [rec()])],
+    tasks: [
+      task("emp_A", 20261005, [rec()]),
+      task("emp_XIE", 20261005, [rec("Lack", "Lack")]),
+    ],
   }));
-  assert.ok(v.people.some((p) => p.name === "謝佾均"));
-  assert.equal(v.notes.excludedBreakdown ?? 0, 0);
+  assert.ok(!v.people.some((p) => p.name === "謝佾均"));
+  assert.ok(v.people.some((p) => p.name === "甲"));
+  assert.equal(v.notes.excludedBreakdown, 1);
+  // 謝佾均缺卡不入摘要
+  assert.equal(v.summary.lack, 0);
+  assert.equal(v.summary.present, 1);
 });
 
 test("拆勤：老闆組別即使本週有外業成本單也不列入 people", () => {
@@ -1265,5 +1276,5 @@ test("拆勤：老闆組別即使本週有外業成本單也不列入 people", (
 test("拆勤排除接線：UI 註腳有 excludedBreakdown", () => {
   const ui = readFileSync(new URL("../components/AttendanceCards.tsx", import.meta.url), "utf8");
   assert.match(ui, /excludedBreakdown/);
-  assert.match(ui, /所屬組別為「老闆」/);
+  assert.match(ui, /所屬組別為「老闆」或名單排除者/);
 });

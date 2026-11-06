@@ -193,7 +193,7 @@ export default function AttendanceCards() {
               {reminder && <li>{reminder}。</li>}
               {!!ok.notes.rosterShared && <li>人員名單有 {ok.notes.rosterShared} 列和別列共用同一 Lark帳號但名字不同（在職的已併為同一人、離職舊列不併入），請檢查名單。</li>}
               {!!ok.notes.excludedBreakdown && (
-                <li>所屬組別為「老闆」者 {ok.notes.excludedBreakdown} 人不列入拆勤（出差／外出紀錄仍顯示）。</li>
+                <li>所屬組別為「老闆」或名單排除者 {ok.notes.excludedBreakdown} 人不列入拆勤（出差／外出紀錄仍顯示）。</li>
               )}
               <li>
                 在職 {ok.notes.rosterInService} 人：{ok.notes.noAccount} 人沒有 Lark帳號、{ok.notes.unmapped} 人尚未綁定假勤員工編號（以上除非是有成本單的外業人員，否則不列入）、考勤組另有 {ok.notes.outsideRoster} 人不在人員名單，不列入。

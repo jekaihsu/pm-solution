@@ -566,8 +566,17 @@ export function fieldCostWarning(v: Pick<AttendanceView, "days" | "notes">): str
 }
 
 
-/** 拆勤不列：依人員名單「所屬組別」判斷（現有欄位，不寫死人名）。組別為「老闆」或拆開後含「老闆」者排除。 */
-export function excludedFromAttendanceBreakdown(group: string): boolean {
+/**
+ * 拆勤姓名排除清單（暫時常數）。
+ * 依 JK 2026-11-06 16:06 原話核准：謝佾均（淋浴寬）不必出現在拆勤。
+ * 日後可改為人員名單布林欄（如「拆勤排除」／「需打卡」）後移除此名單。
+ */
+export const ATTENDANCE_BREAKDOWN_EXCLUDE_NAMES = new Set(["謝佾均"]);
+
+/** 拆勤不列：所屬組別為「老闆」，或姓名在 ATTENDANCE_BREAKDOWN_EXCLUDE_NAMES。 */
+export function excludedFromAttendanceBreakdown(group: string, name = ""): boolean {
+  const n = String(name ?? "").trim();
+  if (n && ATTENDANCE_BREAKDOWN_EXCLUDE_NAMES.has(n)) return true;
   const raw = String(group ?? "").trim();
   if (!raw) return false;
   if (raw === "老闆") return true;
@@ -682,7 +691,7 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
     const myField = !isMember && person.recordId ? fieldDays.get(person.recordId) : undefined;
     if (!isMember && !myField) continue; // 不在考勤組、本週也沒外業成本單＝不列
     // 老闆等不必出現在拆勤：用所屬組別判斷（出差／外出紀錄仍保留）
-    if (excludedFromAttendanceBreakdown(person.group)) {
+    if (excludedFromAttendanceBreakdown(person.group, person.name)) {
       excludedBreakdown++;
       continue;
     }
