@@ -568,10 +568,10 @@ export function fieldCostWarning(v: Pick<AttendanceView, "days" | "notes">): str
 
 /**
  * 拆勤姓名排除清單（暫時常數）。
- * 依 JK 2026-11-06 16:06 原話核准：謝佾均（淋浴寬）不必出現在拆勤。
+ * 依 JK 2026-11-06：還有淋浴寬也不用出現阿（語音；16:25 確認＝林育寬）。
  * 日後可改為人員名單布林欄（如「拆勤排除」／「需打卡」）後移除此名單。
  */
-export const ATTENDANCE_BREAKDOWN_EXCLUDE_NAMES = new Set(["謝佾均"]);
+export const ATTENDANCE_BREAKDOWN_EXCLUDE_NAMES = new Set(["林育寬"]);
 
 /** 拆勤不列：所屬組別為「老闆」，或姓名在 ATTENDANCE_BREAKDOWN_EXCLUDE_NAMES。 */
 export function excludedFromAttendanceBreakdown(group: string, name = ""): boolean {

@@ -1214,9 +1214,10 @@ test("拆勤排除規則：所屬組別＝老闆，或姓名在 ATTENDANCE_BREAK
   assert.equal(excludedFromAttendanceBreakdown("副總"), false);
   assert.equal(excludedFromAttendanceBreakdown("圖報A"), false);
   assert.equal(excludedFromAttendanceBreakdown(""), false);
-  assert.equal(excludedFromAttendanceBreakdown("IT", "謝佾均"), true);
+  assert.equal(excludedFromAttendanceBreakdown("IT", "林育寬"), true);
   assert.equal(excludedFromAttendanceBreakdown("IT", "甲"), false);
-  assert.ok(ATTENDANCE_BREAKDOWN_EXCLUDE_NAMES.has("謝佾均"));
+  assert.ok(ATTENDANCE_BREAKDOWN_EXCLUDE_NAMES.has("林育寬"));
+  assert.ok(!ATTENDANCE_BREAKDOWN_EXCLUDE_NAMES.has("謝佾均"));
 });
 
 test("拆勤：考勤組內老闆組別不列入 people，不計入摘要；一般成員仍列", () => {
@@ -1240,25 +1241,28 @@ test("拆勤：考勤組內老闆組別不列入 people，不計入摘要；一�
   assert.equal(v.summary.present, 1);
 });
 
-test("拆勤：謝佾均（JK 2026-11-06 核准）即使為 IT／考勤組成員也不列入；一般成員仍列", () => {
+test("拆勤：林育寬（JK 語音「淋浴寬」、16:25 確認）即使為考勤組成員也不列入；一般成員仍列；謝佾均不在排除名單", () => {
   const v = buildAttendanceView(base({
     roster: [
       { name: "甲", group: "圖報A", openId: "ou_a" },
+      { name: "林育寬", group: "IT", openId: "ou_lin", recordId: "recLin" },
       { name: "謝佾均", group: "IT", openId: "ou_xie", recordId: "recXie" },
     ],
-    employeeIds: new Map([["ou_a", "emp_A"], ["ou_xie", "emp_XIE"]]),
-    members: new Set(["emp_A", "emp_XIE"]),
+    employeeIds: new Map([["ou_a", "emp_A"], ["ou_lin", "emp_LIN"], ["ou_xie", "emp_XIE"]]),
+    members: new Set(["emp_A", "emp_LIN", "emp_XIE"]),
     tasks: [
       task("emp_A", 20261005, [rec()]),
-      task("emp_XIE", 20261005, [rec("Lack", "Lack")]),
+      task("emp_LIN", 20261005, [rec("Lack", "Lack")]),
+      task("emp_XIE", 20261005, [rec()]),
     ],
   }));
-  assert.ok(!v.people.some((p) => p.name === "謝佾均"));
+  assert.ok(!v.people.some((p) => p.name === "林育寬"));
   assert.ok(v.people.some((p) => p.name === "甲"));
+  assert.ok(v.people.some((p) => p.name === "謝佾均")); // 誤認已更正，不再排除
   assert.equal(v.notes.excludedBreakdown, 1);
-  // 謝佾均缺卡不入摘要
+  // 林育寬缺卡不入摘要；甲與謝佾均到班
   assert.equal(v.summary.lack, 0);
-  assert.equal(v.summary.present, 1);
+  assert.equal(v.summary.present, 2);
 });
 
 test("拆勤：老闆組別即使本週有外業成本單也不列入 people", () => {
