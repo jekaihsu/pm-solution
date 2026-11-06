@@ -1,4 +1,4 @@
 export const APP_VERSION = {
-  version: "2026-10-29.141",
-  label: "r02-anomaly-case-names",
+  version: "2026-11-06.1",
+  label: "r04-member-fieldwork-overrides-lack",
 };
