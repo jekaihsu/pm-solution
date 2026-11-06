@@ -685,9 +685,10 @@ export function r02EffectiveRevenue(fields: TableData["records"][number]["fields
 }
 
 // R02 daily points use the same work-date and revenue fields as the existing person rows.
-// #183 R3：days/weekTotal＝修改後口徑（r02EffectiveRevenue）；origDays/origWeekTotal＝原值（營業額點數＝最終營業額點數）並列顯示。
-export function r02OriginalRevenue(fields: TableData["records"][number]["fields"], wf: WorkFields): number | null {
-  return wf.revenue ? num(fields[wf.revenue.name]) : null;
+// #183 R4：days/weekTotal＝修改後口徑（r02EffectiveRevenue；修改後空白時退回最終營業額點數，不在本輪改）；origDays/origWeekTotal＝Base 欄「營業額點數」（不是最終營業額點數）。
+export const R02_ORIGINAL_REVENUE = "營業額點數";
+export function r02OriginalRevenue(fields: TableData["records"][number]["fields"]): number | null {
+  return num(fields[R02_ORIGINAL_REVENUE]);
 }
 export function buildDailyPersonRevenue(rows: GroupRow[], wf: WorkFields, dateField: string | null, weekStart: string) {
   const start = Date.parse(`${weekStart.replaceAll("/", "-")}T00:00:00+08:00`);
@@ -700,7 +701,7 @@ export function buildDailyPersonRevenue(rows: GroupRow[], wf: WorkFields, dateFi
       const day = dayIndex(t) - dayIndex(start);
       if (day < 0 || day > 6 || !Number.isFinite(day)) continue;
       daily[day] += r02EffectiveRevenue(order.fields, wf) ?? 0;
-      orig[day] += r02OriginalRevenue(order.fields, wf) ?? 0;
+      orig[day] += r02OriginalRevenue(order.fields) ?? 0;
       totalQty += wf.qty ? num(order.fields[wf.qty.name]) ?? 0 : 0;
     }
     return { row, days: daily, weekTotal: daily.reduce((a, b) => a + b, 0), origDays: orig, origWeekTotal: orig.reduce((a, b) => a + b, 0), totalQty };
