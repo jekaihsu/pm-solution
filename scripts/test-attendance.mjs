@@ -18,6 +18,7 @@ import {
   attendanceErrorText,
   FIELD_ALL_EMPTY_BASELINE,
   FIELD_ALL_EMPTY_LIMIT,
+  excludedFromAttendanceBreakdown,
 } from "../lib/attendanceCore.ts";
 import { PEOPLE_NAME, PEOPLE_ACCOUNT, PEOPLE_GROUP, PEOPLE_ACTIVE } from "../lib/people.ts";
 import * as core from "../lib/attendanceCore.ts";
@@ -1201,4 +1202,68 @@ test("R5-3 規則一致：平日沒紀錄、整天假＋出差同日→請假優
   const outOnly = buildAttendanceView(base2({ now: NOW_SUN, tasks: [task("emp_A", 20261006, [rec("Normal", "Normal", "None", "Travel")])], approvals: [outAppr, lv("emp_A", am("2026-10-06"))] }));
   assert.equal(person(outOnly, "甲").days[1], "trip");
   assert.deepEqual(sumOf(outOnly, "trip", "out"), [1, 0]);
+});
+
+// ---- 拆勤排除：老闆／非需打卡（現有所屬組別；不寫死人名）----
+
+test("拆勤排除規則：所屬組別＝老闆才排除；IT／副總／一般組別不排除", () => {
+  assert.equal(excludedFromAttendanceBreakdown("老闆"), true);
+  assert.equal(excludedFromAttendanceBreakdown("老闆、顧問"), true);
+  assert.equal(excludedFromAttendanceBreakdown("IT"), false);
+  assert.equal(excludedFromAttendanceBreakdown("副總"), false);
+  assert.equal(excludedFromAttendanceBreakdown("圖報A"), false);
+  assert.equal(excludedFromAttendanceBreakdown(""), false);
+});
+
+test("拆勤：考勤組內老闆組別不列入 people，不計入摘要；一般成員仍列", () => {
+  const v = buildAttendanceView(base({
+    roster: [
+      { name: "甲", group: "圖報A", openId: "ou_a" },
+      { name: "老闆甲", group: "老闆", openId: "ou_boss", recordId: "recBoss" },
+    ],
+    employeeIds: new Map([["ou_a", "emp_A"], ["ou_boss", "emp_BOSS"]]),
+    members: new Set(["emp_A", "emp_BOSS"]),
+    tasks: [
+      task("emp_A", 20261005, [rec()]),
+      task("emp_BOSS", 20261005, [rec("Lack", "Lack")]),
+    ],
+  }));
+  assert.ok(!v.people.some((p) => p.group === "老闆"));
+  assert.ok(v.people.some((p) => p.name === "甲"));
+  assert.equal(v.notes.excludedBreakdown, 1);
+  // 老闆缺卡不應進入摘要
+  assert.equal(v.summary.lack, 0);
+  assert.equal(v.summary.present, 1);
+});
+
+test("拆勤：謝佾均若僅為 IT／組員（現有欄位）仍會列出——證明尚未靠寫死人名涵蓋", () => {
+  const v = buildAttendanceView(base({
+    roster: [
+      { name: "甲", group: "圖報A", openId: "ou_a" },
+      { name: "謝佾均", group: "IT", openId: "ou_xie", recordId: "recXie" },
+    ],
+    employeeIds: new Map([["ou_a", "emp_A"], ["ou_xie", "emp_XIE"]]),
+    members: new Set(["emp_A", "emp_XIE"]),
+    tasks: [task("emp_A", 20261005, [rec()]), task("emp_XIE", 20261005, [rec()])],
+  }));
+  assert.ok(v.people.some((p) => p.name === "謝佾均"));
+  assert.equal(v.notes.excludedBreakdown ?? 0, 0);
+});
+
+test("拆勤：老闆組別即使本週有外業成本單也不列入 people", () => {
+  const v = buildAttendanceView(base({
+    roster: [{ name: "老闆甲", group: "老闆", openId: "ou_boss", recordId: "recBoss" }],
+    employeeIds: new Map([["ou_boss", "emp_BOSS"]]),
+    members: new Set(),
+    fieldCost: fc([{ date: "2026-10-05", leaderIds: ["recBoss"], crewIds: [] }]),
+  }));
+  assert.equal(v.people.length, 0);
+  assert.equal(v.notes.excludedBreakdown, 1);
+  assert.equal(v.notes.fieldPeople, 0);
+});
+
+test("拆勤排除接線：UI 註腳有 excludedBreakdown", () => {
+  const ui = readFileSync(new URL("../components/AttendanceCards.tsx", import.meta.url), "utf8");
+  assert.match(ui, /excludedBreakdown/);
+  assert.match(ui, /所屬組別為「老闆」/);
 });

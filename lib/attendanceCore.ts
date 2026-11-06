@@ -409,6 +409,7 @@ export interface AttendanceNotes {
   fieldMatched?: number; // 所選週成本單裡對到名冊的不重複人數（含考勤組成員）
   fieldIncomplete?: true; // 成本單分頁沒讀完（complete=false 或筆數少於來源總數）
   fieldError?: string; // 固定文案＋錯誤碼，例「讀不到外業成本單（1254302）」
+  excludedBreakdown?: number; // 所屬組別為「老闆」等、拆勤不列的人數（只放數字）
 }
 export interface AttendanceView {
   status: "ok";
@@ -564,6 +565,15 @@ export function fieldCostWarning(v: Pick<AttendanceView, "days" | "notes">): str
   return parts.length ? `外業成本單可能沒讀完整：${parts.join("；")}` : null;
 }
 
+
+/** 拆勤不列：依人員名單「所屬組別」判斷（現有欄位，不寫死人名）。組別為「老闆」或拆開後含「老闆」者排除。 */
+export function excludedFromAttendanceBreakdown(group: string): boolean {
+  const raw = String(group ?? "").trim();
+  if (!raw) return false;
+  if (raw === "老闆") return true;
+  return raw.split(/[、,，\/|]/).map((s) => s.trim()).includes("老闆");
+}
+
 // 算進應到／到班的日子（外業 field 也算）
 const WORKED = new Set<DayCode>(["ok", "late", "early", "late-early", "lack", "field"]);
 
@@ -628,7 +638,7 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
       fieldDays.set(rid, (fieldDays.get(rid) ?? new Set()).add(r.date));
     }
   }
-  let fieldPeople = 0, fieldNoApproval = 0;
+  let fieldPeople = 0, fieldNoApproval = 0, excludedBreakdown = 0;
   const people: AttendanceView["people"] = [];
   const trips: TripRow[] = [];
   const outs: OutRow[] = [];
@@ -671,6 +681,11 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
     const isMember = !!eid && inp.members.has(eid);
     const myField = !isMember && person.recordId ? fieldDays.get(person.recordId) : undefined;
     if (!isMember && !myField) continue; // 不在考勤組、本週也沒外業成本單＝不列
+    // 老闆等不必出現在拆勤：用所屬組別判斷（出差／外出紀錄仍保留）
+    if (excludedFromAttendanceBreakdown(person.group)) {
+      excludedBreakdown++;
+      continue;
+    }
     if (myField) {
       fieldPeople++;
       if (!eid) fieldNoApproval++;
@@ -762,6 +777,7 @@ export function buildAttendanceView(inp: AttendanceInput): AttendanceView {
       fieldPeople,
       fieldUnmatched: unmatched.size,
       fieldNoApproval,
+      ...(excludedBreakdown ? { excludedBreakdown } : {}),
       ...(inp.fieldCost ? { fieldSheets: sheets, fieldEmptyLinks: emptyLinks, fieldNoDate: noDate, fieldAllEmpty: allEmpty, fieldMatched: matched.size, ...(inp.fieldCost.incomplete ? { fieldIncomplete: true as const } : {}), ...(inp.fieldCost.error ? { fieldError: inp.fieldCost.error } : {}) } : {}),
     },
   };
