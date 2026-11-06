@@ -56,3 +56,35 @@ test('R01 groupRows 數字不受 #183 影響', () => {
   const g = groupRows(orders.map(o => ({ ...o, fields: { ...o.fields, 組別: 'G1' } })), resolveWorkFields([field('組別'), field('最終營業額點數', 'number'), field('修改後營業額', 'number'), field('執行工作數量', 'number')]), new Map());
   assert.equal(g.length, 1); assert.equal(g[0].revenue, 3); assert.equal(g[0].revenueBlank, 0); assert.equal(g[0].qty, 4);
 });
+
+// #183 R3：第 1 區並列兩值（原值＝最終營業額點數；修改後＝採用值）
+test('R3 第 1 區兩值：原值與修改後同時正確（含 0、空白退回）', () => {
+  const r = buildDailyPersonRevenue([{ ...blankRow('P1'), team: '控制', orders }], wf, '工作日期', '2026-11-02');
+  const p = r.people[0];
+  assert.deepEqual(p.origDays, [0, 2, 1, 0, 0, 0, 0]); // differ 1 + zero 1；blank 0.75 + blankstr 0.25
+  assert.deepEqual(p.days, [0, 0.5, 1, 0, 0, 0, 0]);   // 0.5 + 0（修改後＝0 不退回）；空白退回 0.75 + 0.25
+  assert.equal(p.origWeekTotal, 3); assert.equal(p.weekTotal, 1.5);
+  assert.deepEqual(r.grandOrigDays, [0, 2, 1, 0, 0, 0, 0]); assert.equal(r.grandOrigTotal, 3); assert.equal(r.grandTotal, 1.5);
+  assert.equal(r.teams[0].origWeekTotal, 3); assert.equal(r.teams[0].weekTotal, 1.5);
+});
+test('R3 第 1 區兩值：字串型', () => {
+  const r = buildDailyPersonRevenue([{ ...blankRow('P2'), team: '控制', orders: strOrders }], wf, '工作日期', '2026-11-02');
+  assert.deepEqual(r.grandOrigDays, [0, 2, 0.75, 0, 0, 0, 0]);
+  assert.deepEqual(r.grandDays, [0, 0.5, 1, 0, 0, 0, 0]);
+  assert.equal(r.grandOrigTotal, 2.75); assert.equal(r.grandTotal, 1.5);
+});
+test('R3 修改後＝0：原值仍顯示原點數、修改後顯示 0', () => {
+  const r = buildDailyPersonRevenue([{ ...blankRow('P3'), team: '控制', orders: [rec('z', { 工作日期: D, 最終營業額點數: 0.8125, 修改後營業額: 0 })] }], wf, '工作日期', '2026-11-02');
+  assert.equal(r.grandOrigTotal, 0.8125); assert.equal(r.grandTotal, 0);
+});
+test('R3 修改後全空白：兩值相同', () => {
+  const r = buildDailyPersonRevenue([{ ...blankRow('P4'), team: '控制', orders: [rec('b', { 工作日期: D, 最終營業額點數: '1.25', 修改後營業額: null }), rec('b2', { 工作日期: D, 最終營業額點數: 0.5 })] }], wf, '工作日期', '2026-11-02');
+  assert.equal(r.grandOrigTotal, 1.75); assert.equal(r.grandTotal, 1.75);
+});
+test('R3 第 2 區效率仍用修改後口徑，等於第 1 區「修」', () => {
+  const d = buildDailyPersonRevenue([{ ...blankRow('P1'), team: '控制', orders }], wf, '工作日期', '2026-11-02');
+  const row = { ...groupRows(orders, wf, new Map())[0], group: 'P1', team: '控制' };
+  const a = buildPersonAttendanceAndBackfill([row], [], wf, '工作日期', '2026-11-02', '2026-11-06');
+  assert.equal(a.people[0].revenue, d.grandTotal); assert.notEqual(a.people[0].revenue, d.grandOrigTotal);
+  assert.equal(a.people[0].efficiencyRate, 0.75);
+});

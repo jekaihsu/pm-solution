@@ -685,26 +685,32 @@ export function r02EffectiveRevenue(fields: TableData["records"][number]["fields
 }
 
 // R02 daily points use the same work-date and revenue fields as the existing person rows.
+// #183 R3：days/weekTotal＝修改後口徑（r02EffectiveRevenue）；origDays/origWeekTotal＝原值（營業額點數＝最終營業額點數）並列顯示。
+export function r02OriginalRevenue(fields: TableData["records"][number]["fields"], wf: WorkFields): number | null {
+  return wf.revenue ? num(fields[wf.revenue.name]) : null;
+}
 export function buildDailyPersonRevenue(rows: GroupRow[], wf: WorkFields, dateField: string | null, weekStart: string) {
   const start = Date.parse(`${weekStart.replaceAll("/", "-")}T00:00:00+08:00`);
   const days = () => [0, 0, 0, 0, 0, 0, 0] as [number, number, number, number, number, number, number];
   const people = rows.map((row) => {
-    const daily = days(); let totalQty = 0;
+    const daily = days(), orig = days(); let totalQty = 0;
     for (const order of row.orders) {
       const raw = dateField ? order.fields[dateField] : null;
       const t = typeof raw === "number" ? raw : typeof raw === "string" ? Date.parse(raw) : NaN;
       const day = dayIndex(t) - dayIndex(start);
       if (day < 0 || day > 6 || !Number.isFinite(day)) continue;
       daily[day] += r02EffectiveRevenue(order.fields, wf) ?? 0;
+      orig[day] += r02OriginalRevenue(order.fields, wf) ?? 0;
       totalQty += wf.qty ? num(order.fields[wf.qty.name]) ?? 0 : 0;
     }
-    return { row, days: daily, weekTotal: daily.reduce((a, b) => a + b, 0), totalQty };
+    return { row, days: daily, weekTotal: daily.reduce((a, b) => a + b, 0), origDays: orig, origWeekTotal: orig.reduce((a, b) => a + b, 0), totalQty };
   });
-  const aggregate = (list: typeof people) => ({ days: list.reduce((a, p) => { p.days.forEach((v, i) => { a[i] += v; }); return a; }, days()), weekTotal: list.reduce((a, p) => a + p.weekTotal, 0), totalQty: list.reduce((a, p) => a + p.totalQty, 0) });
+  const sumDays = (list: typeof people, k: "days" | "origDays") => list.reduce((a, p) => { p[k].forEach((v, i) => { a[i] += v; }); return a; }, days());
+  const aggregate = (list: typeof people) => ({ days: sumDays(list, "days"), weekTotal: list.reduce((a, p) => a + p.weekTotal, 0), origDays: sumDays(list, "origDays"), origWeekTotal: list.reduce((a, p) => a + p.origWeekTotal, 0), totalQty: list.reduce((a, p) => a + p.totalQty, 0) });
   const teams = teamSections(rows).map((section) => ({ team: section.team, people: people.filter((p) => section.rows.includes(p.row)), ...aggregate(people.filter((p) => section.rows.includes(p.row))) }));
   const reports = people.filter((p) => /^圖報/.test(p.row.team ?? ""));
   const grand = aggregate(people);
-  return { people, teams, reportTotal: reports.length ? aggregate(reports) : null, grandDays: grand.days, grandTotal: grand.weekTotal, totalQty: grand.totalQty };
+  return { people, teams, reportTotal: reports.length ? aggregate(reports) : null, grandDays: grand.days, grandTotal: grand.weekTotal, grandOrigDays: grand.origDays, grandOrigTotal: grand.origWeekTotal, totalQty: grand.totalQty };
 }
 
 export interface R02InspectionRow {
